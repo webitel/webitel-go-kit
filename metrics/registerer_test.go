@@ -6,7 +6,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
-	"github.com/webitel/webitel-wfm/internal/tests"
+	"github.com/webitel/webitel-go-kit/internal"
 )
 
 func TestGathererPrefixWrapper_Gather(t *testing.T) {
@@ -15,9 +15,9 @@ func TestGathererPrefixWrapper_Gather(t *testing.T) {
 
 	t.Run("metrics with webitel and go prefix are not modified", func(t *testing.T) {
 		originalMF := []*dto.MetricFamily{
-			{Name: tests.ValueToPTR[string]("webitel_metric1")},
-			{Name: tests.ValueToPTR[string]("metric2")},
-			{Name: tests.ValueToPTR[string]("go_metric1")},
+			{Name: internal.ValueToPTR[string]("webitel_metric1")},
+			{Name: internal.ValueToPTR[string]("metric2")},
+			{Name: internal.ValueToPTR[string]("go_metric1")},
 		}
 
 		orig.GatherFunc = func() ([]*dto.MetricFamily, error) {
@@ -25,9 +25,9 @@ func TestGathererPrefixWrapper_Gather(t *testing.T) {
 		}
 
 		expectedMF := []*dto.MetricFamily{
-			{Name: tests.ValueToPTR[string]("webitel_metric1")},
-			{Name: tests.ValueToPTR[string]("webitel_metric2")},
-			{Name: tests.ValueToPTR[string]("go_metric1")},
+			{Name: internal.ValueToPTR[string]("webitel_metric1")},
+			{Name: internal.ValueToPTR[string]("webitel_metric2")},
+			{Name: internal.ValueToPTR[string]("go_metric1")},
 		}
 
 		mf, err := g.Gather()
@@ -37,8 +37,8 @@ func TestGathererPrefixWrapper_Gather(t *testing.T) {
 
 	t.Run("duplicate metrics result in an error", func(t *testing.T) {
 		originalMF := []*dto.MetricFamily{
-			{Name: tests.ValueToPTR[string]("webitel_metric1")},
-			{Name: tests.ValueToPTR[string]("metric1")},
+			{Name: internal.ValueToPTR[string]("webitel_metric1")},
+			{Name: internal.ValueToPTR[string]("metric1")},
 		}
 
 		orig.GatherFunc = func() ([]*dto.MetricFamily, error) {
