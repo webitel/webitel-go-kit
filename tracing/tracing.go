@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/webitel/wlog"
 	jaegerpropagator "go.opentelemetry.io/contrib/propagators/jaeger"
@@ -35,6 +36,9 @@ const (
 )
 
 type config struct {
+	serviceName    string
+	serviceVersion string
+
 	enabled       string
 	address       string
 	propagation   string
@@ -44,8 +48,11 @@ type config struct {
 	samplerParam     float64
 	samplerRemoteURL string
 
-	serviceName    string
-	serviceVersion string
+	batcherMaxQueueSize       int
+	batcherWithBlocking       bool
+	batcherBatchTimeout       time.Duration
+	batcherExportTimeout      time.Duration
+	batcherMaxExportBatchSize int
 
 	profilingIntegration bool
 }
@@ -80,8 +87,16 @@ type Tracer interface {
 	Inject(context.Context, trace.Span)
 }
 
-func New(log *wlog.Logger, opts ...Option) (*Tracing, error) {
-	var cfg config
+func New(log *wlog.Logger, service string, opts ...Option) (*Tracing, error) {
+	cfg := config{
+		serviceName:               service,
+		serviceVersion:            "0.0.0",
+		batcherBatchTimeout:       5 * time.Second,
+		batcherMaxQueueSize:       2048,
+		batcherExportTimeout:      30 * time.Second,
+		batcherMaxExportBatchSize: 512,
+	}
+
 	for _, opt := range opts {
 		opt.apply(&cfg)
 	}
@@ -155,7 +170,11 @@ func (t *Tracing) initPropagators() {
 
 func (t *Tracing) initSampler() (tracesdk.Sampler, error) {
 	switch t.cfg.sampler {
-	case constSampler, "":
+	case "":
+		t.log.Warn("default sampler samples every trace: a new trace will be started and exported for every request")
+
+		return tracesdk.AlwaysSample(), nil
+	case constSampler:
 		if t.cfg.samplerParam >= 1 {
 			return tracesdk.AlwaysSample(), nil
 		} else if t.cfg.samplerParam <= 0 {
@@ -189,16 +208,27 @@ func (t *Tracing) initTracerProvider(exp tracesdk.SpanExporter) (*tracesdk.Trace
 			semconv.ServiceVersionKey.String(t.cfg.serviceVersion),
 		),
 		resource.WithAttributes(t.cfg.customAttribs...),
-		resource.WithFromEnv(),
 		resource.WithProcessRuntimeDescription(),
 		resource.WithTelemetrySDK(),
+		resource.WithHost(),
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	var bo []tracesdk.BatchSpanProcessorOption
+	bo = append(bo, tracesdk.WithMaxQueueSize(t.cfg.batcherMaxQueueSize),
+		tracesdk.WithBatchTimeout(t.cfg.batcherBatchTimeout),
+		tracesdk.WithExportTimeout(t.cfg.batcherExportTimeout),
+		tracesdk.WithMaxExportBatchSize(t.cfg.batcherMaxExportBatchSize),
+	)
+
+	if t.cfg.batcherWithBlocking {
+		bo = append(bo, tracesdk.WithBlocking())
+	}
+
 	tp := tracesdk.NewTracerProvider(
-		tracesdk.WithBatcher(exp),
+		tracesdk.WithBatcher(exp, bo...),
 		tracesdk.WithSampler(tracesdk.ParentBased(sampler)),
 		tracesdk.WithResource(res),
 	)
