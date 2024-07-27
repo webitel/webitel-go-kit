@@ -1,0 +1,8 @@
+version: v1
+
+plugins:
+
+  # Base types for Go. Generates message and enum types.
+  - plugin: buf.build/protocolbuffers/go:v1.30.0
+    out: gen/go
+    opt: paths=source_relative
