@@ -95,11 +95,12 @@ func New(log *wlog.Logger, opts ...Option) (*Tracing, error) {
 	var err error
 	switch t.cfg.enabled {
 	case stdoutExporter:
-		if exp, err = t.initStdoutSpanExporter(); err != nil {
+		if exp, err = stdout.New(); err != nil {
 			return nil, err
 		}
 	case otlpExporter, jaegerExporter:
-		if exp, err = t.initOTLPSpanExporter(); err != nil {
+		client := otlptracegrpc.NewClient(otlptracegrpc.WithEndpoint(t.cfg.address), otlptracegrpc.WithInsecure())
+		if exp, err = otlptrace.New(context.Background(), client); err != nil {
 			return nil, err
 		}
 	default:
@@ -123,6 +124,11 @@ func New(log *wlog.Logger, opts ...Option) (*Tracing, error) {
 	t.Tracer = otel.GetTracerProvider().Tracer("component-main")
 
 	return t, nil
+}
+
+func (t *Tracing) Inject(ctx context.Context, span trace.Span) {
+	// TODO implement me
+	panic("implement me")
 }
 
 func (t *Tracing) Shutdown(ctx context.Context) error {
@@ -200,25 +206,6 @@ func (t *Tracing) initTracerProvider(exp tracesdk.SpanExporter) (*tracesdk.Trace
 	return tp, nil
 }
 
-func (t *Tracing) initStdoutSpanExporter() (tracesdk.SpanExporter, error) {
-	exp, err := stdout.New()
-	if err != nil {
-		return nil, err
-	}
-
-	return exp, nil
-}
-
-func (t *Tracing) initOTLPSpanExporter() (tracesdk.SpanExporter, error) {
-	client := otlptracegrpc.NewClient(otlptracegrpc.WithEndpoint(t.cfg.address), otlptracegrpc.WithInsecure())
-	exp, err := otlptrace.New(context.Background(), client)
-	if err != nil {
-		return nil, err
-	}
-
-	return exp, nil
-}
-
 func TraceIDFromContext(ctx context.Context, requireSampled bool) string {
 	spanCtx := trace.SpanContextFromContext(ctx)
 	if !spanCtx.HasTraceID() || !spanCtx.IsValid() || (requireSampled && !spanCtx.IsSampled()) {
@@ -243,3 +230,5 @@ func splitCustomAttribs(s string) ([]attribute.KeyValue, error) {
 
 	return res, nil
 }
+
+var _ Tracer = &Tracing{}
