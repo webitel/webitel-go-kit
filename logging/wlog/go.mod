@@ -1,4 +1,4 @@
-module wlog
+module github.com/webitel/webitel-go-kit/logging/wlog
 
 go 1.22.5
 
