@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/webitel/wlog"
 	jaegerpropagator "go.opentelemetry.io/contrib/propagators/jaeger"
 	"go.opentelemetry.io/contrib/samplers/jaegerremote"
 	"go.opentelemetry.io/otel"
@@ -19,6 +18,9 @@ import (
 	tracesdk "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/embedded"
+
+	"github.com/webitel/webitel-go-kit/logging/wlog"
 )
 
 const (
@@ -58,33 +60,17 @@ type config struct {
 }
 
 type Tracing struct {
-	trace.Tracer
+	embedded.TracerProvider
+
+	tracerProvider TracerProvider
 
 	log *wlog.Logger
 	cfg *config
-
-	tracerProvider tracerProvider
 }
 
-type tracerProvider interface {
-	trace.TracerProvider
-
+type TracerProvider interface {
+	Tracer(name string, options ...trace.TracerOption) trace.Tracer
 	Shutdown(ctx context.Context) error
-}
-
-// Tracer defines the service used to create new spans.
-type Tracer interface {
-	trace.Tracer
-
-	// Inject adds identifying information for the span to the
-	// metadata defined in map.
-	//
-	// Implementation quirk: Where OpenTelemetry is used, the [Span] is
-	// picked up from [context.Context] and for OpenTracing the
-	// information passed as [Span] is preferred.
-	// Both the context and span must be derived from the same call to
-	// [Tracer.Start].
-	Inject(context.Context, trace.Span)
 }
 
 func New(log *wlog.Logger, service string, opts ...Option) (*Tracing, error) {
@@ -132,18 +118,16 @@ func New(log *wlog.Logger, service string, opts ...Option) (*Tracing, error) {
 	// instrumentation in the future will default to using it
 	// only if tracing is enabled
 	if t.cfg.enabled != "" {
-		otel.SetTracerProvider(t.tracerProvider)
+		otel.SetTracerProvider(t)
 	}
 
 	t.initPropagators()
-	t.Tracer = otel.GetTracerProvider().Tracer("component-main")
 
 	return t, nil
 }
 
-func (t *Tracing) Inject(ctx context.Context, span trace.Span) {
-	// TODO implement me
-	panic("implement me")
+func (t *Tracing) Tracer(name string, options ...trace.TracerOption) trace.Tracer {
+	return t.tracerProvider.Tracer(name, options...)
 }
 
 func (t *Tracing) Shutdown(ctx context.Context) error {
@@ -261,4 +245,4 @@ func splitCustomAttribs(s string) ([]attribute.KeyValue, error) {
 	return res, nil
 }
 
-var _ Tracer = &Tracing{}
+var _ trace.TracerProvider = &Tracing{}
