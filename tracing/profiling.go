@@ -10,13 +10,13 @@ import (
 type profilingTracerProvider struct {
 	trace.TracerProvider
 
-	wrappedTp tracerProvider
+	wrappedTp TracerProvider
 }
 
 // NewProfilingTracerProvider creates a new tracer provider that annotates pprof
 // samples with span_id label. This allows to establish a relationship
 // between pprof profiles and reported tracing spans.
-func NewProfilingTracerProvider(tp tracerProvider) tracerProvider {
+func NewProfilingTracerProvider(tp TracerProvider) TracerProvider {
 	return &profilingTracerProvider{
 		TracerProvider: otelpyroscope.NewTracerProvider(tp),
 		wrappedTp:      tp,
