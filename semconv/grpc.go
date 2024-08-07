@@ -39,15 +39,4 @@ var (
 	// RPCMessageTypeSent Semantic conventions for RPC message types.
 	RPCMessageTypeSent     = RPCMessageTypeKey.String("SENT")
 	RPCMessageTypeReceived = RPCMessageTypeKey.String("RECEIVED")
-
-	NetworkPeerAddressKey = semconv.NetworkPeerAddressKey
-	NetworkPeerPortKey    = semconv.NetworkPeerPortKey
 )
-
-func NetworkPeerAddress(val string) attribute.KeyValue {
-	return NetworkPeerAddressKey.String(val)
-}
-
-func NetworkPeerPort(val int) attribute.KeyValue {
-	return NetworkPeerPortKey.Int(val)
-}
