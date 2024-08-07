@@ -69,6 +69,8 @@ type Tracing struct {
 }
 
 type TracerProvider interface {
+	embedded.TracerProvider
+
 	Tracer(name string, options ...trace.TracerOption) trace.Tracer
 	Shutdown(ctx context.Context) error
 }
