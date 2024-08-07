@@ -3,6 +3,8 @@ package tracing
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -45,6 +47,7 @@ type config struct {
 	address       string
 	propagation   string
 	customAttribs []attribute.KeyValue
+	writer        io.Writer
 
 	sampler          string
 	samplerParam     float64
@@ -79,6 +82,7 @@ func New(log *wlog.Logger, service string, opts ...Option) (*Tracing, error) {
 	cfg := config{
 		serviceName:               service,
 		serviceVersion:            "0.0.0",
+		writer:                    os.Stdout,
 		batcherBatchTimeout:       5 * time.Second,
 		batcherMaxQueueSize:       2048,
 		batcherExportTimeout:      30 * time.Second,
@@ -98,7 +102,7 @@ func New(log *wlog.Logger, service string, opts ...Option) (*Tracing, error) {
 	var err error
 	switch t.cfg.enabled {
 	case stdoutExporter:
-		if exp, err = stdout.New(); err != nil {
+		if exp, err = stdout.New(stdout.WithWriter(t.cfg.writer)); err != nil {
 			return nil, err
 		}
 	case otlpExporter, jaegerExporter:

@@ -1,6 +1,7 @@
 package tracing
 
 import (
+	"io"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -45,6 +46,13 @@ func WithAddress(address string) Option {
 func WithAttributes(attrs ...attribute.KeyValue) Option {
 	return optionFunc(func(c *config) {
 		c.customAttribs = append(c.customAttribs, attrs...)
+	})
+}
+
+// WithWriter sets the export stream destination.
+func WithWriter(w io.Writer) Option {
+	return optionFunc(func(c *config) {
+		c.writer = w
 	})
 }
 
