@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -15,12 +14,11 @@ import (
 
 	"github.com/webitel/webitel-go-kit/internal"
 	"github.com/webitel/webitel-go-kit/semconv"
+	tracinginternal "github.com/webitel/webitel-go-kit/tracing/internal"
 )
 
 const (
 	scopeName = "github.com/webitel/webitel-go-kit/tracing/pgx"
-
-	sqlOperationUnknown = "UNKNOWN"
 )
 
 // Tracer is a wrapper around the pgx tracer interfaces which instrument
@@ -86,27 +84,6 @@ func recordError(span trace.Span, err error) {
 	}
 }
 
-// sqlOperationName attempts to get the first 'word' from a given SQL query, which usually
-// is the operation name (e.g. 'SELECT').
-func (t *Tracer) sqlOperationName(stmt string) string {
-	// If a custom function is provided, use that. Otherwise, fall back to the
-	// default implementation. This allows users to override the default
-	// behavior without having to reimplement it.
-	if t.spanNameFunc != nil {
-		return t.spanNameFunc(stmt)
-	}
-
-	parts := strings.Fields(stmt)
-	if len(parts) == 0 {
-		// Fall back to a fixed value to prevent creating lots of tracing operations
-		// differing only by the amount of whitespace in them (in case we'd fall back
-		// to the full query or a cut-off version).
-		return sqlOperationUnknown
-	}
-
-	return strings.ToUpper(parts[0])
-}
-
 // connectionAttributesFromConfig returns a slice of SpanStartOptions that contain
 // attributes from the given connection config.
 func connectionAttributesFromConfig(config *pgx.ConnConfig) []trace.SpanStartOption {
@@ -148,11 +125,11 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	spanName := data.SQL
 	if t.trimQuerySpanName {
-		spanName = t.sqlOperationName(data.SQL)
+		spanName = tracinginternal.SQLOperationName(data.SQL)
 	}
 
 	if t.prefixQuerySpanName {
-		spanName = "query." + spanName
+		spanName = "db.Query." + spanName
 	}
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
@@ -190,7 +167,7 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 		opts = append(opts, connectionAttributesFromConfig(conn.Config())...)
 	}
 
-	ctx, _ = t.tracer.Start(ctx, "copyFrom."+data.TableName.Sanitize(), opts...)
+	ctx, _ = t.tracer.Start(ctx, "db.CopyFrom."+data.TableName.Sanitize(), opts...)
 
 	return ctx
 }
@@ -230,7 +207,7 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 		opts = append(opts, connectionAttributesFromConfig(conn.Config())...)
 	}
 
-	ctx, _ = t.tracer.Start(ctx, "batchStart.", opts...)
+	ctx, _ = t.tracer.Start(ctx, "db.BatchStart.", opts...)
 
 	return ctx
 }
@@ -259,14 +236,14 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	var spanName string
 	if t.trimQuerySpanName {
-		spanName = t.sqlOperationName(data.SQL)
+		spanName = tracinginternal.SQLOperationName(data.SQL)
 		if t.prefixQuerySpanName {
-			spanName = "query." + spanName
+			spanName = "db.Query." + spanName
 		}
 	} else {
 		spanName = data.SQL
 		if t.prefixQuerySpanName {
-			spanName = "batchQuery." + spanName
+			spanName = "db.BatchQuery." + spanName
 		}
 	}
 
@@ -301,7 +278,7 @@ func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectSta
 		opts = append(opts, connectionAttributesFromConfig(data.ConnConfig)...)
 	}
 
-	ctx, _ = t.tracer.Start(ctx, "connect", opts...)
+	ctx, _ = t.tracer.Start(ctx, "db.Connect", opts...)
 
 	return ctx
 }
@@ -340,11 +317,11 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 
 	spanName := data.SQL
 	if t.trimQuerySpanName {
-		spanName = t.sqlOperationName(data.SQL)
+		spanName = tracinginternal.SQLOperationName(data.SQL)
 	}
 
 	if t.prefixQuerySpanName {
-		spanName = "prepare." + spanName
+		spanName = "db.Prepare." + spanName
 	}
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
