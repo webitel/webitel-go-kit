@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel"
 	otelog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/global"
+	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -191,6 +192,17 @@ func Setup(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 			resource.Environment(),
 		)
 	}
+
+	// --------------------------------------- //
+	//              propagation                //
+	// --------------------------------------- //
+
+	// TODO: make as default with Option(-al) changes
+	prop := propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	)
+	otel.SetTextMapPropagator(prop)
 
 	// --------------------------------------- //
 	//                  logs                   //
