@@ -31,7 +31,7 @@ func extractServiceObjClassOption(p *descriptorpb.ServiceDescriptorProto) (strin
 }
 
 func extractServiceAdditionalLicenseOption(p *descriptorpb.ServiceDescriptorProto) ([]string, error) {
-	ext, err := extractOption(p.Options, pb.E_Objclass)
+	ext, err := extractOption(p.Options, pb.E_AdditionalLicense)
 	if err != nil {
 		return nil, err
 	}

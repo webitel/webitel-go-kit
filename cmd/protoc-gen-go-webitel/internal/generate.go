@@ -2,7 +2,6 @@ package internal
 
 import (
 	"fmt"
-	"log"
 	"regexp"
 
 	"google.golang.org/protobuf/compiler/protogen"
@@ -31,59 +30,40 @@ func generateFileContent(gen *protogen.Plugin, files []*protogen.File, g *protog
 	g.P("var WebitelAPI = WebitelServicesInfo{")
 	for _, f := range files {
 		for _, s := range f.Proto.GetService() {
-			objclass, err := extractServiceObjClassOption(s)
-			if err != nil {
-				log.Printf("extract service %s objclass: %s", s.GetName(), err)
-
-				continue
-			}
-
-			licenses, err := extractServiceAdditionalLicenseOption(s)
-			if err != nil {
-				log.Printf("extract service %s additional license: %s", s.GetName(), err)
-
-				continue
-			}
-
 			g.P(`"`, s.GetName(), `": WebitelServices{`)
-			g.P("ObjClass: ", `"`, objclass, `"`, ",")
+			if objclass, err := extractServiceObjClassOption(s); err == nil {
+				g.P("ObjClass: ", `"`, objclass, `"`, ",")
+			}
+
 			g.P("AdditionalLicenses: []string{")
-			for _, license := range licenses {
-				g.P(`"`, license, `"`, ",")
+			if licenses, err := extractServiceAdditionalLicenseOption(s); err == nil {
+				for _, license := range licenses {
+					g.P(`"`, license, `"`, ",")
+				}
 			}
 
 			g.P("},")
 			g.P("WebitelMethods: map[string]WebitelMethod{")
 			for _, m := range s.GetMethod() {
-				acc, err := extractMethodAccessOption(m)
-				if err != nil {
-					log.Printf("extract service %s method %s access: %s", s.GetName(), m.GetName(), err)
-
-					continue
-				}
-
-				ht, err := extractMethodHttpOption(m)
-				if err != nil {
-					log.Printf("extract service %s method %s http: %s", s.GetName(), m.GetName(), err)
-
-					continue
-				}
-
 				g.P(`"`, m.GetName(), `": WebitelMethod{`)
-				g.P("Access: ", acc, ",")
+				if acc, err := extractMethodAccessOption(m); err != nil {
+					g.P("Access: ", acc, ",")
+				}
+
 				g.P("Input: ", `"`, reg.ReplaceAllString(m.GetInputType(), ""), `",`)
 				g.P("Output: ", `"`, reg.ReplaceAllString(m.GetOutputType(), ""), `",`)
 				g.P("HttpBindings: []*HttpBinding{")
-				for _, h := range ht {
-					g.P("{")
-					g.P("Path: ", `"`, h.Path, `",`)
-					g.P("Method: ", `"`, h.Method, `",`)
-					g.P("},")
+				if ht, err := extractMethodHttpOption(m); err == nil {
+					for _, h := range ht {
+						g.P("{")
+						g.P("Path: ", `"`, h.Path, `",`)
+						g.P("Method: ", `"`, h.Method, `",`)
+						g.P("},")
+					}
 				}
 
 				g.P("},")
 				g.P("},")
-
 			}
 
 			g.P("},")
