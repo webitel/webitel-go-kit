@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"log"
 	"regexp"
 
 	"google.golang.org/protobuf/compiler/protogen"
@@ -29,16 +30,19 @@ func generateFileContent(gen *protogen.Plugin, files []*protogen.File, g *protog
 
 	g.P("var WebitelAPI = WebitelServicesInfo{")
 	for _, f := range files {
-
 		for _, s := range f.Proto.GetService() {
 			objclass, err := extractServiceObjClassOption(s)
 			if err != nil {
-				return
+				log.Printf("extract service %s objclass: %s", s.GetName(), err)
+
+				continue
 			}
 
 			licenses, err := extractServiceAdditionalLicenseOption(s)
 			if err != nil {
-				return
+				log.Printf("extract service %s additional license: %s", s.GetName(), err)
+
+				continue
 			}
 
 			g.P(`"`, s.GetName(), `": WebitelServices{`)
@@ -53,12 +57,16 @@ func generateFileContent(gen *protogen.Plugin, files []*protogen.File, g *protog
 			for _, m := range s.GetMethod() {
 				acc, err := extractMethodAccessOption(m)
 				if err != nil {
-					return
+					log.Printf("extract service %s method %s access: %s", s.GetName(), m.GetName(), err)
+
+					continue
 				}
 
 				ht, err := extractMethodHttpOption(m)
 				if err != nil {
-					return
+					log.Printf("extract service %s method %s http: %s", s.GetName(), m.GetName(), err)
+
+					continue
 				}
 
 				g.P(`"`, m.GetName(), `": WebitelMethod{`)
