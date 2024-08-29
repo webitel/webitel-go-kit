@@ -8,6 +8,7 @@ option go_package = "github.com/webitel/webitel-go-kit/protoc-gen-go-webitel/gen
 
 extend google.protobuf.ServiceOptions {
   string objclass = 50001;
+  repeated string additional_license = 50002;
 }
 
 extend google.protobuf.MethodOptions {

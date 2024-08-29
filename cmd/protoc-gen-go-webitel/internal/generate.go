@@ -36,8 +36,19 @@ func generateFileContent(gen *protogen.Plugin, files []*protogen.File, g *protog
 				return
 			}
 
+			licenses, err := extractServiceAdditionalLicenseOption(s)
+			if err != nil {
+				return
+			}
+
 			g.P(`"`, s.GetName(), `": WebitelServices{`)
 			g.P("ObjClass: ", `"`, objclass, `"`, ",")
+			g.P("AdditionalLicenses: []string{")
+			for _, license := range licenses {
+				g.P(`"`, license, `"`, ",")
+			}
+
+			g.P("},")
 			g.P("WebitelMethods: map[string]WebitelMethod{")
 			for _, m := range s.GetMethod() {
 				acc, err := extractMethodAccessOption(m)
@@ -81,8 +92,9 @@ func generateType(g *protogen.GeneratedFile) {
 	g.P("type WebitelServicesInfo map[string]WebitelServices")
 	g.P()
 	g.P("type WebitelServices struct {")
-	g.P("ObjClass       string")
-	g.P("WebitelMethods map[string]WebitelMethod")
+	g.P("ObjClass           string")
+	g.P("AdditionalLicenses []string")
+	g.P("WebitelMethods     map[string]WebitelMethod")
 	g.P("}")
 	g.P()
 	g.P("// WebitelMethod is the list of methods defined in this service.")

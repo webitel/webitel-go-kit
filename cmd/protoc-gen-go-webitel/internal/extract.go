@@ -30,6 +30,20 @@ func extractServiceObjClassOption(p *descriptorpb.ServiceDescriptorProto) (strin
 	return obj, nil
 }
 
+func extractServiceAdditionalLicenseOption(p *descriptorpb.ServiceDescriptorProto) ([]string, error) {
+	ext, err := extractOption(p.Options, pb.E_Objclass)
+	if err != nil {
+		return nil, err
+	}
+
+	obj, ok := ext.([]string)
+	if !ok {
+		return nil, fmt.Errorf("extension is %T; want []string", ext)
+	}
+
+	return obj, nil
+}
+
 func extractMethodHttpOption(p *descriptorpb.MethodDescriptorProto) ([]*HttpBinding, error) {
 	ext, err := extractOption(p.Options, annotations.E_Http)
 	if err != nil {
