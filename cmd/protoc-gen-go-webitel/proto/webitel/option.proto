@@ -4,7 +4,7 @@ package option;
 
 import "google/protobuf/descriptor.proto";
 
-option go_package = "github.com/webitel/webitel-go-kit/protoc-gen-go-webitel/gen/go/proto/webitel";
+option go_package = "github.com/webitel/webitel-go-kit/cmd/protoc-gen-go-webitel/gen/go/proto/webitel;webitel";
 
 extend google.protobuf.ServiceOptions {
   string objclass = 50001;
