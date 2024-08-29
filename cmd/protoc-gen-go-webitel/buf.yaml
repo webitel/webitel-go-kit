@@ -1,6 +1,8 @@
-version: v1
+version: v2
 
-name: buf.build/webitel/protoc-gen-go-webitel
+modules:
+  - path: .
+    name: buf.build/webitel/protoc-gen-go-webitel
 
 deps:
   - buf.build/googleapis/googleapis:a86849a25cc04f4dbe9b15ddddfbc488
