@@ -1,8 +1,13 @@
-version: v1
+version: v2
+
+managed:
+  enabled: true
+  disable:
+    # Don't modify any file option or field option for googleapis
+    - module: buf.build/googleapis/googleapis
 
 plugins:
-
   # Base types for Go. Generates message and enum types.
-  - plugin: buf.build/protocolbuffers/go:v1.30.0
+  - remote: buf.build/protocolbuffers/go:v1.30.0
     out: gen/go
     opt: paths=source_relative
