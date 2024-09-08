@@ -10,27 +10,29 @@ import (
 )
 
 func NewLogger(name string, opts ...Option) logr.Logger {
-	conf := newOptions(opts...)
-	return logr.New(&Handler{
-		opts:   conf,
-		logger: conf.logger(name),
-	})
+	return logr.New(NewHandler(name, opts...))
 }
 
 type Options struct {
 	Provider  log.LoggerProvider
 	Version   string
 	SchemaURL string
-
-	SeverityError int
+	// Severity map[logr.Verbosity]otel/log.Severity
+	Severity func(verbosity int) log.Severity
 }
 
 type Option func(c *Options)
 
+func WithSeverity(resolve func(verbosity int) log.Severity) Option {
+	return func(conf *Options) {
+		conf.Severity = resolve
+	}
+}
+
 func newOptions(opts ...Option) (conf Options) {
 	conf = Options{
-		Provider:      global.GetLoggerProvider(),
-		SeverityError: int(log.SeverityError),
+		Provider: global.GetLoggerProvider(),
+		Severity: OtelSeverity,
 	}
 	for _, opt := range opts {
 		opt(&conf)
@@ -58,31 +60,54 @@ type Handler struct {
 
 var _ logr.LogSink = (*Handler)(nil)
 
+func NewHandler(name string, opts ...Option) *Handler {
+	conf := newOptions(opts...)
+	return &Handler{
+		opts:   conf,
+		logger: conf.logger(name),
+	}
+}
+
 // Init receives optional information about the logr library for LogSink
 // implementations that need it.
 func (h *Handler) Init(info logr.RuntimeInfo) {}
 
+var noCtx = context.TODO()
+
+// converts given logr.Verbosity to otel/log.Severity
+func (h *Handler) severity(v int) log.Severity {
+	// default: direct
+	level := OtelSeverity(v)
+	// custom: resolve
+	if h.opts.Severity != nil {
+		level = h.opts.Severity(v)
+	}
+	return level
+}
+
 // Enabled tests whether this LogSink is enabled at the specified V-level.
 // For example, commandline flags might be used to set the logging
 // verbosity and disable some info logs.
-func (h *Handler) Enabled(level int) bool {
-	var emit log.Record
-	emit.SetSeverity(log.Severity(level))
-	return h.logger.Enabled(context.Background(), emit)
+func (h *Handler) Enabled(v int) bool {
+	level := h.severity(v)
+	if level <= log.SeverityUndefined {
+		return false // skip ; unknown
+	}
+
+	var test log.Record
+	test.SetSeverity(level)
+	return h.logger.Enabled(noCtx, test)
 }
 
-func (h *Handler) convertRecord(level int, msg string, keysAndValues []any) log.Record {
+func (h *Handler) convertRecord(level log.Severity, message string, keysAndValues []any) log.Record {
 	var (
 		record    log.Record
 		timestamp = time.Now()
 	)
 
+	record.SetSeverity(level)
 	record.SetTimestamp(timestamp)
-	record.SetBody(log.StringValue(msg))
-
-	// const sevOffset = slog.Level(log.SeverityDebug) - slog.LevelDebug
-	// record.SetSeverity(log.Severity(r.Level + sevOffset))
-	record.SetSeverity(log.Severity(level))
+	record.SetBody(log.StringValue(message))
 
 	if h.attrs.Len() > 0 {
 		record.AddAttributes(h.attrs.KeyValues()...)
@@ -133,45 +158,40 @@ func (h *Handler) convertRecord(level int, msg string, keysAndValues []any) log.
 // The level argument is provided for optional logging.
 // This method will only be called when Enabled(level) is true.
 // See [logr.Logger.Info] for more details.
-func (h *Handler) Info(level int, msg string, keysAndValues ...any) {
-	h.logger.Emit(context.Background(), h.convertRecord(
-		level, msg, keysAndValues,
+func (h *Handler) Info(level int, message string, keysAndValues ...any) {
+	h.logger.Emit(noCtx, h.convertRecord(
+		h.severity(level), message, keysAndValues,
 	))
 }
 
 // Error logs an error, with the given message
 // and key/value pairs as context.
 // See [logr.Logger.Error] for more details.
-func (h *Handler) Error(err error, msg string, keysAndValues ...any) {
-	h.logger.Emit(context.Background(), h.convertRecord(
-		h.opts.SeverityError, msg, append(keysAndValues, "error", err),
+func (h *Handler) Error(err error, message string, keysAndValues ...any) {
+	h.logger.Emit(noCtx, h.convertRecord(
+		(log.SeverityError), message, append(keysAndValues, "error", err),
 	))
 }
 
 // WithValues returns a new LogSink with additional key/value pairs.
 // See [logr.Logger.WithValues] for more details.
 func (h *Handler) WithValues(keysAndValues ...any) logr.LogSink {
-	h2 := *h
+	h2 := *h // shallowcopy
 	if h2.attrs != nil {
 		h2.attrs = h2.attrs.Clone()
-		h2.attrs.AddKeysAndValues(keysAndValues...)
-	} else {
-		if h2.attrs == nil {
-			n := len(keysAndValues)
-			n = (n / 2) + (n % 2)
-			h2.attrs = newKVBuffer(n)
-		} else {
-			h2.attrs = h2.attrs.Clone()
-		}
-		h2.attrs.AddKeysAndValues(keysAndValues...)
+	} else { // if h2.attrs == nil {
+		n := len(keysAndValues)
+		n = (n / 2) + (n % 2)
+		h2.attrs = newKVBuffer(n)
 	}
+	h2.attrs.AddKeysAndValues(keysAndValues...)
 	return &h2
 }
 
 // WithName returns a new LogSink with the specified name appended.
 // See [logr.Logger.WithName] for more details.
 func (h *Handler) WithName(name string) logr.LogSink {
-	h2 := *h
+	h2 := *h // shallowcopy
 	h2.logger = h.opts.logger(name)
 	return &h2
 }

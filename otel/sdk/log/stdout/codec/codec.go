@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -8,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/log"
 )
 
@@ -37,7 +39,8 @@ func WithTimestamps(layout string) Option {
 		// }
 		if layout != "" && !TimeStampIsValid(layout, time.Second) {
 			// invalid layout spec ; -or- time(s) difference with layout encoding is greater-or-equal 1 second
-			panic(errors.Errorf("otel/log/stdout/codec.Option( timestamp: %q ); invalid spec", layout))
+			otel.Handle(fmt.Errorf("otel/log/stdout/codec.Option( timestamp: %q ); invalid spec", layout))
+			return // err
 		}
 		conf.TimeStamp = layout
 	}
@@ -51,7 +54,8 @@ func WithPrittyPrint(indent string) Option {
 	return func(conf *Options) {
 		for _, c := range indent {
 			if !unicode.IsSpace(c) {
-				panic(errors.Errorf("otel/log/stdout/codec.Option( indent: %q ); accept whitespace(s)", indent))
+				otel.Handle(fmt.Errorf("indent: whitespace(s) expected only"))
+				return // err
 			}
 		}
 		conf.PrettyPrint = indent
@@ -103,7 +107,7 @@ func NewCodec(name string, out io.Writer, opts ...Option) Encoder {
 	codec := registry[name]
 	regedit.Unlock()
 	if codec == nil {
-		panic(errors.Errorf("otel/log/stdout/format.Codec( name: %q ); not registered", name))
+		panic(errors.Errorf("otel/log/stdout.Codec( name: %q ); not registered", name))
 	}
 	return codec(out, opts...)
 }

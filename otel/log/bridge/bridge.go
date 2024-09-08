@@ -144,6 +144,8 @@ func Value(v any, conv ...func(v any) log.Value) log.Value {
 	// func SliceValue(vs ...Value) Value
 	// func StringValue(v string) Value
 	switch v := v.(type) {
+	case log.Value:
+		return v
 	case bool:
 		return log.BoolValue(v)
 	case []byte:
@@ -168,5 +170,7 @@ func Value(v any, conv ...func(v any) log.Value) log.Value {
 		}
 		return log.MapValue(group...)
 	}
+	// reflect.ValueOf(v).Kind() == reflect.Slice
+	// log.SliceValue()
 	return log.StringValue(fmt.Sprintf("%+v", v))
 }

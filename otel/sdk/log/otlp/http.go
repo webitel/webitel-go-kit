@@ -9,7 +9,7 @@ import (
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
 
-func HttpOptions(ctx context.Context, dsn string) ([]log.Option, error) {
+func httpOptions(ctx context.Context, _ string) ([]log.Option, error) {
 	exporter, err := otlphttp.New(ctx)
 	// // options ...
 	// otlphttp.WithCompression(compression Compression),
@@ -31,10 +31,10 @@ func HttpOptions(ctx context.Context, dsn string) ([]log.Option, error) {
 			sdklog.NewBatchProcessor(
 				exporter,
 				// // options ...
-				// sdklog.WithExportInterval(time.Second),
-				// sdklog.WithExportMaxBatchSize(512),
-				// sdklog.WithExportTimeout(time.Second*30),
 				// sdklog.WithMaxQueueSize(2048),
+				// sdklog.WithExportMaxBatchSize(512),
+				// sdklog.WithExportInterval(time.Second),
+				// sdklog.WithExportTimeout(time.Second*30),
 			),
 		),
 	}, nil

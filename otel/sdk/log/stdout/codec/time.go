@@ -4,7 +4,7 @@ import "time"
 
 const (
 	// Default timestamp format
-	TimeStamp = time.RFC3339Nano
+	TimeStamp = "2006-01-02T15:04:05.999Z07:00" // time.RFC3339Nano
 )
 
 func TimeStampIsValid(layout string, skrew time.Duration) bool {

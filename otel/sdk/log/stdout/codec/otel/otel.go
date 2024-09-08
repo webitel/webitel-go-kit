@@ -111,38 +111,38 @@ type record struct {
 	DroppedAttributes int
 }
 
-func (enc *Encoder) record(rec sdk.Record) record {
-	res := rec.Resource()
-	row := record{
+func (enc *Encoder) record(src sdk.Record) record {
+	rsc := src.Resource()
+	out := record{
 
-		Timestamp:         enc.opts.Timestamp(rec.Timestamp()),
-		ObservedTimestamp: enc.opts.Timestamp(rec.ObservedTimestamp()),
+		Timestamp:         enc.opts.Timestamp(src.Timestamp()),
+		ObservedTimestamp: enc.opts.Timestamp(src.ObservedTimestamp()),
 
-		Severity:     rec.Severity(),
-		SeverityText: rec.SeverityText(),
-		Body:         newValue(rec.Body()),
+		Severity:     src.Severity(),
+		SeverityText: src.SeverityText(),
+		Body:         newValue(src.Body()),
 
-		TraceID:    rec.TraceID(),
-		SpanID:     rec.SpanID(),
-		TraceFlags: rec.TraceFlags(),
+		TraceID:    src.TraceID(),
+		SpanID:     src.SpanID(),
+		TraceFlags: src.TraceFlags(),
 
-		Attributes: make([]keyValue, 0, rec.AttributesLen()),
+		Attributes: make([]keyValue, 0, src.AttributesLen()),
 
-		Resource: &res,
-		Scope:    rec.InstrumentationScope(),
+		Resource: &rsc,
+		Scope:    src.InstrumentationScope(),
 
-		DroppedAttributes: rec.DroppedAttributes(),
+		DroppedAttributes: src.DroppedAttributes(),
 	}
 
-	rec.WalkAttributes(func(kv log.KeyValue) bool {
-		row.Attributes = append(row.Attributes, keyValue{
-			Key:   kv.Key,
-			Value: newValue(kv.Value),
+	src.WalkAttributes(func(att log.KeyValue) bool {
+		out.Attributes = append(out.Attributes, keyValue{
+			Key:   att.Key,
+			Value: newValue(att.Value),
 		})
 		return true
 	})
 
-	return row
+	return out
 }
 
 func (enc *Encoder) Encode(rec sdk.Record) error {

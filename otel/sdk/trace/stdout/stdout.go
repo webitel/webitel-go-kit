@@ -2,13 +2,13 @@ package stdout
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	sdk "go.opentelemetry.io/otel/sdk/trace"
 
@@ -17,23 +17,19 @@ import (
 )
 
 func Options(ctx context.Context, rawDSN string) ([]sdk.TracerProviderOption, error) {
-	// dsn, err := url.ParseRequestURI(rawDSN)
-	dsn, err := url.Parse(rawDSN)
-	if err != nil {
-		return nil, err
+
+	var scheme string
+	colon := strings.IndexByte(rawDSN, ':')
+	if colon < 0 {
+		scheme, rawDSN = rawDSN, ""
+	} else {
+		scheme, rawDSN = rawDSN[0:colon], rawDSN[colon+1:]
 	}
-	scheme := dsn.Scheme
-	if scheme == "" {
-		scheme = dsn.Path
-	}
-	// scheme, rawDSN, err := internal.GetScheme(rawDSN)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	scheme = strings.ToLower(scheme)
+
 	var (
 		output io.WriteCloser
 	)
-	scheme = strings.ToLower(scheme)
 	switch scheme {
 	case "stdout":
 		output = os.Stdout
@@ -41,10 +37,22 @@ func Options(ctx context.Context, rawDSN string) ([]sdk.TracerProviderOption, er
 		output = os.Stderr
 	case "file":
 		{
-			// file := rawDSN
-			file, err := url.PathUnescape(dsn.EscapedPath())
-			if err != nil || !filepath.IsAbs(file) {
-				return nil, errors.Errorf("absolute filepath required")
+			rawDSN, _ = strings.CutPrefix(rawDSN, "//")
+			file, err := url.PathUnescape(rawDSN)
+			// if err != nil || !filepath.IsAbs(filename) {
+			// 	return nil, fmt.Errorf("absolute filepath required")
+			// }
+			if err == nil {
+				switch filepath.Base(file) {
+				case ".", string(filepath.Separator):
+					err = fmt.Errorf("file:name expected")
+				}
+			}
+			if err == nil {
+				file, err = filepath.Abs(file)
+			}
+			if err != nil {
+				return nil, err
 			}
 			output = &internal.FileWriter{
 				Filename:   file,
@@ -56,6 +64,7 @@ func Options(ctx context.Context, rawDSN string) ([]sdk.TracerProviderOption, er
 			}
 		}
 	default:
+		return nil, fmt.Errorf("unknown %s: scheme", scheme)
 	}
 
 	exporter, err := stdouttrace.New(

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"path"
 	"sync"
 
+	logv "github.com/webitel/webitel-go-kit/otel/log"
 	"github.com/webitel/webitel-go-kit/otel/sdk/log/stdout/codec"
 	"go.opentelemetry.io/otel/log"
 	sdk "go.opentelemetry.io/otel/sdk/log"
@@ -41,13 +43,27 @@ func (enc *Encoder) Encode(rec sdk.Record) error {
 
 	level := rec.SeverityText()
 	if level == "" {
-		level = rec.Severity().String()
+		// level = rec.Severity().String()
+		level = logv.Severity(rec.Severity()).String()
 	}
-	body := rec.Body().String()
-	_, err := fmt.Fprintf(state, "[%s] %v", level, body)
+	scope := rec.InstrumentationScope()
+	name := path.Base(scope.Name)
+
+	_, err := fmt.Fprintf(
+		state, "%-7s %-6s ",
+		("[" + level + "]"), (name + ":"),
+	)
 	if err != nil {
 		return err
 	}
+
+	printValue(state, rec.Body())
+	// body := rec.Body().String()
+	// _, err := fmt.Fprintf(state, "[%s] %v", level, body)
+	// if err != nil {
+	// 	return err
+	// }
+
 	rec.WalkAttributes(func(att log.KeyValue) bool {
 		err := printAttr(state, att)
 		return err == nil

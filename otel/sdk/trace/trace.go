@@ -2,11 +2,14 @@ package trace
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 
-	"github.com/pkg/errors"
+	// "github.com/pkg/errors"
+
 	"github.com/webitel/webitel-go-kit/otel/internal"
+	"go.opentelemetry.io/otel"
 	sdk "go.opentelemetry.io/otel/sdk/trace"
 )
 
@@ -27,19 +30,19 @@ func Register(scheme string, ctor Options) {
 	scheme = strings.TrimSpace(scheme)
 	scheme = strings.ToLower(scheme)
 	if scheme != input {
-		panic(errors.Errorf("otel/sdk/trace.Register( scheme: %q ); invalid name", scheme))
+		otel.Handle(fmt.Errorf("otel/sdk/trace.Register( scheme: %q ); invalid name", scheme))
 	}
 	if scheme == "" {
-		panic(errors.Errorf("otel/sdk/trace.Register( scheme: ? ); name required"))
+		otel.Handle(fmt.Errorf("otel/sdk/trace.Register( scheme: ? ); name required"))
 	}
 	if ctor == nil {
-		panic(errors.Errorf("otel/sdk/trace.Register( scheme: %q ); not implemented", scheme))
+		otel.Handle(fmt.Errorf("otel/sdk/trace.Register( scheme: %q ); not implemented", scheme))
 	}
 
 	regedit.Lock()
 	defer regedit.Unlock()
 	if _, exists := registry[scheme]; exists {
-		panic(errors.Errorf("otel/sdk/trace.Register( scheme: %q ); duplicate name", scheme))
+		otel.Handle(fmt.Errorf("otel/sdk/trace.Register( scheme: %q ); duplicate name", scheme))
 	}
 	registry[scheme] = ctor
 }
@@ -54,7 +57,8 @@ func NewOptions(ctx context.Context, dsn string) ([]Option, error) {
 	driver := registry[scheme]
 	regedit.Unlock()
 	if driver == nil {
-		return nil, errors.Errorf("otel/sdk/trace.Options( scheme: %q ); not registered", scheme)
+		// return nil, fmt.Errorf("otel/sdk/trace.Options( scheme: %q ); not registered", scheme)
+		return nil, fmt.Errorf("scheme %s: unknown", scheme)
 	}
 	return driver(ctx, dsn)
 }

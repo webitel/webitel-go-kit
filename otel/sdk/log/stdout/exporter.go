@@ -11,7 +11,7 @@ import (
 	sdk "go.opentelemetry.io/otel/sdk/log"
 )
 
-var _ sdk.Exporter = &Exporter{}
+var _ sdk.Exporter = (*Exporter)(nil)
 
 // Exporter writes JSON-encoded log records to an [io.Writer] ([os.Stdout] by default).
 // Exporter must be created with [New].
@@ -32,6 +32,7 @@ func New(options ...Option) (*Exporter, error) {
 
 	codec := cfg.Codec
 	if codec == nil {
+		// default: "otel"
 		codec = otel.NewCodec(cfg.Output)
 	}
 

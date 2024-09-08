@@ -2,6 +2,7 @@ package internal
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -37,8 +38,24 @@ func (c *EnvReader) Apply(opts ...EnvOption) {
 
 func EnvString(key string, eval func(string)) EnvOption {
 	return func(e *EnvReader) {
-		if v, ok := e.GetEnvValue(key); ok {
-			eval(v)
+		if s, ok := e.GetEnvValue(key); ok {
+			// log.Printf("[%s] = [%s]", keyWithNamespace(e.Namespace, key), s)
+			if u, err := strconv.Unquote(s); err == nil {
+				s = u // unquoted(!)
+			}
+			// // unquote
+			// for n := len(s); n > 1; n = len(s) {
+			// 	switch quote := s[0]; quote {
+			// 	case '"', '\'', '`':
+			// 		if s[n-1] == quote {
+			// 			s = s[1 : n-1]
+			// 			continue
+			// 		}
+			// 	}
+			// 	break
+			// }
+			// log.Printf("[%s] = [%s]", keyWithNamespace(e.Namespace, key), s)
+			eval(s)
 		}
 	}
 }
@@ -46,6 +63,6 @@ func EnvString(key string, eval func(string)) EnvOption {
 var (
 	Environment = EnvReader{
 		GetEnv:    os.Getenv,
-		Namespace: "OTEL", // "WEBITEL",
+		Namespace: "OTEL",
 	}
 )
