@@ -46,7 +46,7 @@ func generateFileContent(gen *protogen.Plugin, files []*protogen.File, g *protog
 			g.P("WebitelMethods: map[string]WebitelMethod{")
 			for _, m := range s.GetMethod() {
 				g.P(`"`, m.GetName(), `": WebitelMethod{`)
-				if acc, err := extractMethodAccessOption(m); err != nil {
+				if acc, err := extractMethodAccessOption(m); err == nil {
 					g.P("Access: ", acc, ",")
 				}
 
