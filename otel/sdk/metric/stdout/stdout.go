@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
@@ -29,40 +27,20 @@ func Options(ctx context.Context, rawDSN string) ([]metric.Option, error) {
 	scheme = strings.ToLower(scheme)
 
 	var (
-		output io.WriteCloser
+		err error
+		out io.WriteCloser
 	)
 	scheme = strings.ToLower(scheme)
 	switch scheme {
 	case "stdout":
-		output = os.Stdout
+		out = os.Stdout
 	case "stderr":
-		output = os.Stderr
+		out = os.Stderr
 	case "file":
 		{
-			rawDSN, _ = strings.CutPrefix(rawDSN, "//")
-			file, err := url.PathUnescape(rawDSN)
-			// if err != nil || !filepath.IsAbs(filename) {
-			// 	return nil, fmt.Errorf("absolute filepath required")
-			// }
-			if err == nil {
-				switch filepath.Base(file) {
-				case ".", string(filepath.Separator):
-					err = fmt.Errorf("file:name expected")
-				}
-			}
-			if err == nil {
-				file, err = filepath.Abs(file)
-			}
+			out, err = internal.FileDSN(rawDSN)
 			if err != nil {
 				return nil, err
-			}
-			output = &internal.FileWriter{
-				Filename:   file,
-				MaxSize:    100,   // Mb.
-				MaxAge:     30,    // days
-				MaxBackups: 3,     // log files
-				LocalTime:  false, // UTC
-				Compress:   true,
 			}
 		}
 	default:
@@ -71,7 +49,7 @@ func Options(ctx context.Context, rawDSN string) ([]metric.Option, error) {
 
 	exporter, err := stdoutmetric.New(
 		// options ...
-		stdoutmetric.WithWriter(output),
+		stdoutmetric.WithWriter(out),
 		// stdoutmetric.WithPrettyPrint(),
 		// stdoutmetric.WithoutTimestamps(),
 	)

@@ -18,6 +18,8 @@ var (
 type config struct {
 	// Output is the destination.  If not set, os.Stdout is used.
 	Output io.Writer
+	// Do NOT colorize output text.
+	NoColor bool
 
 	// Formatter
 	Codec Encoder
@@ -60,6 +62,18 @@ type writerOption struct {
 
 func (o writerOption) apply(cfg config) config {
 	cfg.Output = o.W
+	return cfg
+}
+
+// WithNoColor disallow "text" codec output colors.
+func WithNoColor() Option {
+	return withNoColor{}
+}
+
+type withNoColor struct{}
+
+func (withNoColor) apply(cfg config) config {
+	cfg.NoColor = true
 	return cfg
 }
 

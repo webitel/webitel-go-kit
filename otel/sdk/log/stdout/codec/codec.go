@@ -5,7 +5,6 @@ import (
 	"io"
 	"strings"
 	"sync"
-	"time"
 	"unicode"
 
 	"github.com/pkg/errors"
@@ -28,20 +27,28 @@ type Options struct {
 	// PrettyPrint indent string
 	// To disable - leave it empty
 	PrettyPrint string
+	// Do NOT colorize output records.
+	NoColor bool
 }
 
 type Option func(*Options)
 
+func WithNoColor() Option {
+	return func(conf *Options) {
+		conf.NoColor = true
+	}
+}
+
 func WithTimestamps(layout string) Option {
 	return func(conf *Options) {
-		// if layout == "" {
-		// 	// disable. no output
+		// // if layout == "" {
+		// // 	// disable. no output
+		// // }
+		// if layout != "" && !TimeStampIsValid(layout, time.Second) {
+		// 	// invalid layout spec ; -or- time(s) difference with layout encoding is greater-or-equal 1 second
+		// 	otel.Handle(fmt.Errorf("otel/log/stdout/codec.Option( timestamp: %q ); invalid spec", layout))
+		// 	return // err
 		// }
-		if layout != "" && !TimeStampIsValid(layout, time.Second) {
-			// invalid layout spec ; -or- time(s) difference with layout encoding is greater-or-equal 1 second
-			otel.Handle(fmt.Errorf("otel/log/stdout/codec.Option( timestamp: %q ); invalid spec", layout))
-			return // err
-		}
 		conf.TimeStamp = layout
 	}
 }

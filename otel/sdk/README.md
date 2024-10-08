@@ -14,7 +14,7 @@
 |`OTEL_TRACES_SAMPLER`|Sampler to be used for traces|`parentbased_always_on`|See [Sampling](https://opentelemetry.io/docs/specs/otel/trace/sdk/#sampling).|
 |`OTEL_TRACES_SAMPLER_ARG`|String value to be used as the sampler argument||The specified value will only be used if `OTEL_TRACES_SAMPLER` is set. Each Sampler type defines its own expected input, if any. Invalid or unrecognized input MUST be logged and MUST be otherwise ignored, i.e. the implementation MUST behave as if `OTEL_TRACES_SAMPLER_ARG` is not set.|
 |||||
-|[Exporter Selection](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#exporter-selection)||||
+|[Exporter Selection](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#exporter-selection)|||`file:` exporter(s) use rotation mechanism.</br>See undelying [lumberjack.v2.Logger](https://pkg.go.dev/gopkg.in/natefinch/lumberjack.v2#Logger) for details.</br>Defaults: `;max-size=100` `;max-age=30` `;backups=3` `;localtime=true` `;compress=false`|
 |`OTEL_LOGS_EXPORTER`|Logs exporter to be used</br>`otlp`, `console`, `none`||`otlpgrpc`, `otlphttp`,</br>`stdout`, `stderr`, `file:/path/logs.otel`|
 |`OTEL_TRACES_EXPORTER`|Trace exporter to be used</br>`otlp`, `zipkin`, `console`, `none`||`otlpgrpc`, `otlphttp`,</br>`stdout`, `stderr`, `file:/path/traces.otel`|
 |`OTEL_METRICS_EXPORTER`|Metrics exporter to be used</br>`otlp`, `prometheus`, `console`, `none`||`otlpgrpc`, `otlphttp`,</br>`stdout`, `stderr`, `file:/path/metrics.otel`|
@@ -29,6 +29,7 @@
 |||||
 | Standard LogRecord Encoding. ||||
 |`OTEL_LOGRECORD_CODEC`|Codec to be used for standard output. Can be applied while `OTEL_LOGS_EXPORTER`=[`stdout`\|`stderr`\|`file:`].</br>Accept: `text`, `json`, `otel`|`otel`||
+|`OTEL_LOGRECORD_COLOR`|Colorize, depending on level, `OTEL_LOGRECORD_CODEC`=`text` records for console output.|`false`||
 |`OTEL_LOGRECORD_INDENT`|Use indentation, pretty print. Can be applied while `OTEL_LOGRECORD_CODEC`=[`json`\|`otel`].</br>Accept: boolean or whitespace(s) characters.</br>`true`,`'\t'`, `"  "`|`false`||
 |`OTEL_LOGRECORD_TIMESTAMP`|Timestamps layout. Can be applied for any standard codec.|`"2006-01-02T15:04:05.999Z07:00"`|See [Time.Format](https://pkg.go.dev/time#pkg-constants).|
 |||||

@@ -38,7 +38,8 @@ func (conf *Options) Timestamp(date time.Time) *Timestamp {
 	}
 	// Format
 	return &Timestamp{
-		Time:   date,
+		// strip monotonic to match Attr behavior
+		Time:   date.Round(0),
 		Format: layout,
 	}
 }

@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode"
@@ -35,41 +33,19 @@ func withOptions(ctx context.Context, rawDSN string) ([]log.Option, error) {
 	scheme = strings.ToLower(scheme)
 
 	var (
-		err    error
-		file   string // [/][path/to/]filename
-		output io.WriteCloser
+		err error
+		out io.WriteCloser
 	)
 	switch scheme {
 	case "stdout":
-		output = os.Stdout
+		out = os.Stdout
 	case "stderr":
-		output = os.Stderr
+		out = os.Stderr
 	case "file":
 		{
-			rawDSN, _ = strings.CutPrefix(rawDSN, "//")
-			file, err = url.PathUnescape(rawDSN)
-			// if err != nil || !filepath.IsAbs(filename) {
-			// 	return nil, fmt.Errorf("absolute filepath required")
-			// }
-			if err == nil {
-				switch filepath.Base(file) {
-				case ".", string(filepath.Separator):
-					err = fmt.Errorf("file:name expected")
-				}
-			}
-			if err == nil {
-				file, err = filepath.Abs(file)
-			}
+			out, err = internal.FileDSN(rawDSN)
 			if err != nil {
 				return nil, err
-			}
-			output = &internal.FileWriter{
-				Filename:   file,
-				MaxSize:    100,   // Mb.
-				MaxAge:     30,    // days
-				MaxBackups: 3,     // log files
-				LocalTime:  false, // UTC !
-				Compress:   true,
 			}
 		}
 	default:
@@ -77,8 +53,26 @@ func withOptions(ctx context.Context, rawDSN string) ([]log.Option, error) {
 	}
 
 	var (
+		noColor   = true
 		encoder   Encoder // formatter
 		codecOpts []codec.Option
+		newCodec  = func(name string) {
+			if encoder != nil {
+				return // already
+			}
+			// Apply: COLORIZE options
+			if noColor {
+				codecOpts = append(codecOpts,
+					codec.WithNoColor(),
+				)
+			}
+			encoder = codec.NewCodec(name, out, codecOpts...)
+			if encoder == nil {
+				re := fmt.Errorf("invalid OTEL_LOGRECORD_CODEC value %s: codec %[1]q not found", name)
+				err = errors.Join(err, re)
+				otel.Handle(re)
+			}
+		}
 	)
 	internal.Environment.Apply(
 		internal.EnvString("LOGRECORD_TIMESTAMP", func(s string) {
@@ -106,29 +100,30 @@ func withOptions(ctx context.Context, rawDSN string) ([]log.Option, error) {
 				codec.WithPrittyPrint(indent),
 			)
 		}),
-		internal.EnvString("LOGRECORD_CODEC", func(s string) {
-			encoder = codec.NewCodec(s, output, codecOpts...)
-			if encoder == nil {
-				re := fmt.Errorf("invalid OTEL_LOGS_FORMAT value %s: codec %[1]q not found", s)
-				err = errors.Join(err, re)
-				otel.Handle(re)
-				return
+		internal.EnvString("LOGRECORD_COLOR", func(s string) {
+			// Accept: [ false | true | "auto" ]
+			enable, _ := strconv.ParseBool(s)
+			if strings.EqualFold(s, "auto") {
+				enable = true
 			}
+			noColor = !enable
+		}),
+		internal.EnvString("LOGRECORD_CODEC", func(s string) {
+			newCodec(s)
 		}),
 	)
 
-	// exporter, err := stdoutlog.New(
-	// 	// options ...
-	// 	stdoutlog.WithWriter(output),
-	// 	// stdoutlog.WithPrettyPrint(),
-	// 	// stdoutlog.WithoutTimestamps(),
-	// )
+	// OTEL_LOGRECORD_CODEC = "text"; default
+	newCodec("text")
+
+	if err != nil {
+		return nil, err
+	}
+
 	exporter, err := New(
 		// options ...
-		WithWriter(output),
+		WithWriter(out),
 		WithCodec(encoder),
-		// stdoutlog.WithPrettyPrint(),
-		// stdoutlog.WithoutTimestamps(),
 	)
 	if err != nil {
 		return nil, err

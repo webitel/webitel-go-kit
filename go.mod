@@ -7,6 +7,7 @@ require (
 	github.com/go-logr/stdr v1.2.2
 	github.com/grafana/otel-profiling-go v0.5.1
 	github.com/jackc/pgx/v5 v5.6.0
+	github.com/mattn/go-isatty v0.0.20
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.19.1
 	github.com/prometheus/client_model v0.6.1

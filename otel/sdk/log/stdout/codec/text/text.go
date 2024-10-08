@@ -1,13 +1,13 @@
 package text
 
 import (
-	"bytes"
 	"fmt"
 	"io"
-	"path"
-	"sync"
+	"os"
+	"strconv"
 
-	logv "github.com/webitel/webitel-go-kit/otel/log"
+	"github.com/mattn/go-isatty"
+	// logv "github.com/webitel/webitel-go-kit/otel/log"
 	"github.com/webitel/webitel-go-kit/otel/sdk/log/stdout/codec"
 	"go.opentelemetry.io/otel/log"
 	sdk "go.opentelemetry.io/otel/sdk/log"
@@ -21,43 +21,94 @@ type Encoder struct {
 var _ codec.Encoder = (*Encoder)(nil)
 
 func NewCodec(w io.Writer, opts ...codec.Option) codec.Encoder {
-	return &Encoder{
+	enc := &Encoder{
 		opts: codec.NewOptions(opts...),
 		out:  w,
 	}
+	if !enc.opts.NoColor {
+		file, is := w.(*os.File)
+		enc.opts.NoColor =
+			!(is && file != nil) ||
+				!isatty.IsTerminal(
+					file.Fd(),
+				)
+	}
+	return enc
 }
 
 func (enc *Encoder) Encode(rec sdk.Record) error {
 	// panic("not implemented")
-	state, free := alloc()
-	defer free()
+	buf := newBuffer()
+	defer buf.Free()
+	noColor := enc.opts.NoColor
 
 	if date := enc.opts.Timestamp(
 		rec.Timestamp(),
 	); date != nil {
-		_, err := fmt.Fprintf(state, "%s ", date)
-		if err != nil {
-			return err
+		buf.WriteStringIf(!noColor, ansiFaint)
+		*buf = date.Time.AppendFormat(*buf, date.Format)
+		buf.WriteStringIf(!noColor, ansiReset)
+		buf.WriteByte(' ')
+	}
+
+	levelVerb := rec.Severity()
+	// levelText := rec.SeverityText()
+	// if levelText == "" {
+	// 	// level = rec.Severity().String()
+	// 	levelText = logv.Severity(rec.Severity()).String()
+	// }
+
+	// scope := rec.InstrumentationScope()
+	// name := path.Base(scope.Name)
+
+	// buf.WriteString(name)
+	// buf.WriteByte(':')
+	// buf.WriteByte(' ')
+
+	// func (h *handler) appendLevel(buf *buffer, level slog.Level) {
+	appendLevelDelta := func(delta log.Severity) {
+		if delta == 0 {
+			return
+		} else if delta > 0 {
+			buf.WriteByte('+')
 		}
+		*buf = strconv.AppendInt(*buf, int64(delta), 10)
 	}
-
-	level := rec.SeverityText()
-	if level == "" {
-		// level = rec.Severity().String()
-		level = logv.Severity(rec.Severity()).String()
+	switch {
+	// case levelVerb < log.SeverityDebug:
+	// 	buf.WriteString("TRC")
+	// 	appendLevelDelta(levelVerb - log.SeverityTrace)
+	case levelVerb < log.SeverityInfo:
+		// buf.WriteStringIf(!noColor, ansiFaint)
+		buf.WriteStringIf(!noColor, ansiBrightYellow)
+		buf.WriteString("DEBUG")
+		appendLevelDelta(levelVerb - log.SeverityDebug)
+		buf.WriteStringIf(!noColor, ansiReset)
+	case levelVerb < log.SeverityWarn:
+		buf.WriteStringIf(!noColor, ansiBrightGreen)
+		buf.WriteString("INFO")
+		appendLevelDelta(levelVerb - log.SeverityInfo)
+		buf.WriteStringIf(!noColor, ansiReset)
+	case levelVerb < log.SeverityError:
+		// buf.WriteStringIf(!noColor, ansiBrightYellow)
+		buf.WriteStringIf(!noColor, ansiBrightRed)
+		buf.WriteString("WARN")
+		appendLevelDelta(levelVerb - log.SeverityWarn)
+		buf.WriteStringIf(!noColor, ansiReset)
+	case levelVerb < log.SeverityFatal:
+		buf.WriteStringIf(!noColor, ansiBrightRed)
+		buf.WriteString("ERROR")
+		appendLevelDelta(levelVerb - log.SeverityError)
+		buf.WriteStringIf(!noColor, ansiReset)
+	default:
+		buf.WriteStringIf(!noColor, ansiBrightRed)
+		buf.WriteString("FATAL")
+		appendLevelDelta(levelVerb - log.SeverityFatal)
+		buf.WriteStringIf(!noColor, ansiReset)
 	}
-	scope := rec.InstrumentationScope()
-	name := path.Base(scope.Name)
-
-	_, err := fmt.Fprintf(
-		state, "%-7s %-6s ",
-		("[" + level + "]"), (name + ":"),
-	)
-	if err != nil {
-		return err
-	}
-
-	printValue(state, rec.Body())
+	// }
+	buf.WriteByte(' ')
+	enc.printValue(buf, rec.Body())
 	// body := rec.Body().String()
 	// _, err := fmt.Fprintf(state, "[%s] %v", level, body)
 	// if err != nil {
@@ -65,79 +116,80 @@ func (enc *Encoder) Encode(rec sdk.Record) error {
 	// }
 
 	rec.WalkAttributes(func(att log.KeyValue) bool {
-		err := printAttr(state, att)
+		err := enc.printAttr(buf, att)
 		return err == nil
 	})
 
-	err = state.WriteByte('\n')
+	err := buf.WriteByte('\n')
 	if err != nil {
 		return err
 	}
 
-	_, err = state.WriteTo(enc.out)
+	// _, err = state.WriteTo(enc.out)
+	_, err = enc.out.Write(*buf)
 	return err
 }
 
-var statepool = sync.Pool{
-	New: func() any {
-		return bytes.NewBuffer(make([]byte, 0, 255))
-	},
-}
-
-func alloc() (state *bytes.Buffer, free func()) {
-	state = statepool.Get().(*bytes.Buffer)
-	free = func() {
-		state.Reset()
-		statepool.Put(state)
+func (enc *Encoder) printAttr(buf *buffer, att log.KeyValue) (err error) {
+	// complex
+	if att.Value.Kind() == log.KindMap {
+		prefix := att.Key
+		for _, att := range att.Value.AsMap() {
+			att.Key = prefix + "." + att.Key
+			err = enc.printAttr(buf, att)
+			if err != nil {
+				return err
+			}
+		}
+		return
 	}
-	return
-}
-
-func printAttr(w io.Writer, e log.KeyValue) (err error) {
-	_, err = fmt.Fprintf(w, " ; %s=", e.Key)
+	// scalar
+	buf.WriteStringIf(!enc.opts.NoColor, ansiFaint)
+	_, err = fmt.Fprintf(buf, " ; %s=", att.Key)
+	buf.WriteStringIf(!enc.opts.NoColor, ansiReset)
 	if err != nil {
 		return err
 	}
-	return printValue(w, e.Value)
+	return enc.printValue(buf, att.Value)
 }
 
-func printValue(w io.Writer, v log.Value) (err error) {
-	switch v.Kind() {
+func (enc *Encoder) printValue(buf *buffer, val log.Value) (err error) {
+	switch val.Kind() {
 	case log.KindBool:
 		{
-			_, err = fmt.Fprintf(w, "%t", v.AsBool())
+			_, err = fmt.Fprintf(buf, "%t", val.AsBool())
 		}
 	case log.KindFloat64:
 		{
-			_, err = fmt.Fprintf(w, "%f", v.AsFloat64())
+			_, err = fmt.Fprintf(buf, "%f", val.AsFloat64())
 		}
 	case log.KindInt64:
 		{
-			_, err = fmt.Fprintf(w, "%d", v.AsInt64())
+			_, err = fmt.Fprintf(buf, "%d", val.AsInt64())
 		}
 	case log.KindString:
 		{
-			_, err = fmt.Fprintf(w, "%s", v.AsString())
+			_, err = buf.WriteString(val.AsString())
 		}
 	case log.KindBytes:
 		{
-			_, err = fmt.Fprintf(w, "%x", v.AsBytes())
+			_, err = fmt.Fprintf(buf, "%x", val.AsBytes())
 		}
 	case log.KindSlice:
 		{
 			sep := func(c byte) {
-				_, err = w.Write([]byte{c})
+				err = buf.WriteByte(c)
 			}
 			if sep('['); err != nil {
 				return // err
 			}
-			for i, v := range v.AsSlice() {
+			for i, item := range val.AsSlice() {
 				if i > 0 {
 					if sep(','); err != nil {
 						return // err
 					}
 				}
-				err = printValue(w, v)
+				err = enc.printValue(buf, item)
 				if err != nil {
 					return // err
 				}
@@ -146,36 +198,18 @@ func printValue(w io.Writer, v log.Value) (err error) {
 				return // err
 			}
 		}
-	case log.KindMap:
-		{
-			print := func(bin ...byte) {
-				_, err = w.Write(bin)
-			}
-			if print('{', ' '); err != nil {
-				return // err
-			}
-			for i, v := range v.AsMap() {
-				if i > 0 {
-					if print(',', ' '); err != nil {
-						return // err
-					}
-				}
-				_, err = fmt.Fprintf(w, "%s=", v.Key)
-				if err != nil {
-					return // err
-				}
-				err = printValue(w, v.Value)
-				if err != nil {
-					return // err
-				}
-			}
-			if print(' ', '}'); err != nil {
-				return // err
-			}
-		}
+	// case log.KindMap:
+	// 	{
+	// 		for _, att := range value.AsMap() {
+	// 			err = enc.printAttr(buf, att, group)
+	// 			if err != nil {
+	// 				return // err
+	// 			}
+	// 		}
+	// 	}
 	// case log.KindEmpty:
 	default:
-		_, err = fmt.Fprintf(w, "%s", v.AsString())
+		_, err = buf.WriteString(val.AsString())
 	}
 	return // err?
 }
