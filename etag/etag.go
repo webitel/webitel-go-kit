@@ -195,7 +195,7 @@ func ConsumeTag(src []byte) (typ EtagType, oid int64, ver int32, n int) {
 }
 
 // Base32 alphabet for internal ETag string presentation
-const encodeEtag = "eNYuSrBqFdCJILGfPtobMQaWEyTzlXmD"
+const encodeEtag = "AbCdEfGhIjKlMnOpQrStUvWxYzQwXeVr"
 
 // ETagEncoding is base32.Encoding for human-readable text presentation of internal ETag values
 var ETagEncoding = base32.NewEncoding(encodeEtag).WithPadding(base32.NoPadding)
