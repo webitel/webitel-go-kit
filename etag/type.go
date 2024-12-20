@@ -16,6 +16,7 @@ const (
 	EtagCase                              // Case type
 	EtagCaseComment                       // Case Comment type
 	EtagCaseLink                          // Case Link type
+	EtagRelatedCase                       // Case Related case type
 	EtagCaseCommunication                 // Case Communication type
 )
 
