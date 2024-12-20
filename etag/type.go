@@ -10,17 +10,18 @@ type EtagType uint32
 // echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
 // source ~/.zshrc
 // go generate ./...
-// **Commands** 
+// **Commands**
 const (
-	NoType          EtagType = iota // NoType represents an unknown or invalid type
-	EtagCase                        // Case type
-	EtagCaseComment                 // Case Comment type
-	EtagCaseLink                    // Case Link type
+	NoType                EtagType = iota // NoType represents an unknown or invalid type
+	EtagCase                              // Case type
+	EtagCaseComment                       // Case Comment type
+	EtagCaseLink                          // Case Link type
+	EtagCaseCommunication                 // Case Communication type
 )
 
 // **maxWellKnownType** is updated after the case types to track the highest value.
 // Future blocks for other business entities will start counting from this value.
-const maxWellKnownType = EtagCaseLink
+const maxWellKnownType = EtagCaseCommunication
 
 // validType checks if the provided type is valid.
 func validType(typ EtagType) bool {
