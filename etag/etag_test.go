@@ -60,20 +60,23 @@ func TestETag_Valid(t *testing.T) {
 
 // TestEncodeEtag tests the EncodeEtag function
 func TestEncodeEtag(t *testing.T) {
-	encoded := EncodeEtag(EtagCase, 12345, 0)
+	encoded, err := EncodeEtag(EtagCase, 12345, 0)
+	if err != nil {
+		t.Error(err.Error())
+	}
 	assert.NotEmpty(t, encoded, "Encoded ETag should not be empty")
 	t.Logf("Successfully encoded ETag: %s", encoded)
+	_, err = EncodeEtag(NoType, 12345, 0)
+	assert.Error(t, err, "Encoding with NoType should return error")
 
-	assert.Panics(t, func() { EncodeEtag(NoType, 12345, 0) }, "Encoding with NoType should panic")
-	t.Log("Encoding with NoType panicked as expected")
+	_, err = EncodeEtag(EtagCase, 0, 0)
 
-	assert.Panics(t, func() { EncodeEtag(EtagCase, 0, 0) }, "Encoding with OID 0 should panic")
-	t.Log("Encoding with OID 0 panicked as expected")
+	assert.Error(t, err, "Encoding with OID 0 should panic")
 }
 
 // TestDecodeEtag tests the DecodeEtag function
 func TestDecodeEtag(t *testing.T) {
-	encoded := EncodeEtag(EtagCase, 12345, 0)
+	encoded, _ := EncodeEtag(EtagCase, 12345, 0)
 	typ, oid, ver, err := DecodeEtag(encoded)
 	assert.NoError(t, err, "Decoding valid ETag should not produce an error")
 	assert.Equal(t, EtagCase, typ, "Expected EtagCase type")
@@ -88,7 +91,7 @@ func TestDecodeEtag(t *testing.T) {
 
 // TestExpectEtag tests the ExpectEtag function
 func TestExpectEtag(t *testing.T) {
-	encoded := EncodeEtag(EtagCase, 12345, 0)
+	encoded, _ := EncodeEtag(EtagCase, 12345, 0)
 	tag, err := ExpectEtag(EtagCase, encoded)
 	assert.NoError(t, err, "ExpectEtag should succeed for valid input")
 	assert.Equal(t, int64(12345), tag.Oid, "Expected OID to be 12345")
@@ -98,7 +101,7 @@ func TestExpectEtag(t *testing.T) {
 	assert.Error(t, err, "ExpectEtag should return error for invalid input")
 	t.Log("ExpectEtag returned error for invalid input as expected")
 
-	encodedWrongType := EncodeEtag(EtagCaseLink, 12345, 0)
+	encodedWrongType, _ := EncodeEtag(EtagCaseLink, 12345, 0)
 	_, err = ExpectEtag(EtagCase, encodedWrongType)
 	assert.Error(t, err, "ExpectEtag should return error for mismatched types")
 	t.Log("ExpectEtag returned error for mismatched types as expected")
@@ -107,7 +110,7 @@ func TestExpectEtag(t *testing.T) {
 // TestEtagOrId tests the EtagOrId function
 func TestEtagOrId(t *testing.T) {
 	// Test ETag input
-	encoded := EncodeEtag(EtagCase, 12345, 0)
+	encoded, _ := EncodeEtag(EtagCase, 12345, 0)
 	tag, err := EtagOrId(EtagCase, encoded)
 	assert.NoError(t, err, "EtagOrId should succeed for valid ETag input")
 	assert.Equal(t, int64(12345), tag.Oid, "Expected OID to be 12345")
@@ -125,7 +128,7 @@ func TestEtagOrId(t *testing.T) {
 	t.Log("EtagOrId returned error for invalid OID input as expected")
 
 	// Test mismatched types
-	encodedWrongType := EncodeEtag(EtagCaseLink, 12345, 0)
+	encodedWrongType, _ := EncodeEtag(EtagCaseLink, 12345, 0)
 	_, err = EtagOrId(EtagCase, encodedWrongType)
 	assert.Error(t, err, "EtagOrId should return error for mismatched types")
 	t.Log("EtagOrId returned error for mismatched types as expected")
