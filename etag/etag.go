@@ -84,10 +84,10 @@ func (e *Tid) IsNone() bool {
 
 func (e *Tid) Valid() error {
 	if e == nil {
-		return NewBadRequestError(NoType, "invalid", "missing_tid")
+		return fmt.Errorf("missing tid")
 	}
 	if e.Oid < 1 {
-		return NewBadRequestError(NoType, "invalid", "missing_oid")
+		return fmt.Errorf("missing oid")
 	}
 	return nil
 }
@@ -130,7 +130,7 @@ func InputIdOrEtag(typeOf EtagType, input ...string) (data Tids, err error) {
 		}
 		for e := 0; e < r; e++ {
 			if data[r].Oid == data[e].Oid {
-				return nil, NewBadRequestError(typeOf, "id.conflict", fmt.Sprintf("input( etag: %s, id: %d ); duplicate", s, data[r].Oid))
+				return nil, fmt.Errorf("input( etag: %s, id: %d ); duplicate", s, data[r].Oid)
 			}
 		}
 	}
@@ -148,17 +148,17 @@ type ETag struct {
 func (e *ETag) Valid() error {
 	// Check if the ETag object itself is nil
 	if e == nil {
-		return NewBadRequestError(NoType, "invalid", "missing_tag")
+		return fmt.Errorf("missing tag")
 	}
 	// Check if the Type is valid
 	if e.EtagType <= NoType {
-		return NewBadRequestError(e.EtagType, "invalid", "missing_type")
+		return fmt.Errorf("missing type")
 	}
 	// Validate the Tid field
 	return e.Tid.Valid()
 }
 
-func (e *ETag) String() string {
+func (e *ETag) String() (string, error) {
 	return EncodeEtag(e.EtagType, e.Oid, e.GetVer())
 }
 
@@ -200,31 +200,31 @@ const encodeEtag = "QRSTVWXYZabcdefghjklmnpqrstvwxyz"
 // ETagEncoding is base32.Encoding for human-readable text presentation of internal ETag values
 var ETagEncoding = base32.NewEncoding(encodeEtag).WithPadding(base32.NoPadding)
 
-func EncodeEtag(typ EtagType, oid int64, ver int32) string {
+func EncodeEtag(typ EtagType, oid int64, ver int32) (string, error) {
 	if typ <= NoType {
-		panic(fmt.Errorf("etag: encode tag{typ:%d}; expect: positive, non-zero integer identifier", int8(typ)))
+		return "", fmt.Errorf("etag: encode tag{typ:%d}; expect: positive, non-zero integer identifier", int8(typ))
 	}
 	if oid < 1 {
-		panic(fmt.Errorf("etag: encode tag{oid:%d}; expect: positive, non-zero integer identifier", oid))
+		return "", fmt.Errorf("etag: encode tag{oid:%d}; expect: positive, non-zero integer identifier", oid)
 	}
 	if ver < 0 {
-		panic(fmt.Errorf("etag: encode tag{ver:%d}; expect: zero-based, positive integer number", ver))
+		return "", fmt.Errorf("etag: encode tag{ver:%d}; expect: zero-based, positive integer number", ver)
 	}
 	buf := AppendTag(nil, typ, oid, ver)
-	return ETagEncoding.EncodeToString(buf)
+	return ETagEncoding.EncodeToString(buf), nil
 }
 
 func DecodeEtag(s string) (typ EtagType, oid int64, ver int32, err error) {
 	src, err := ETagEncoding.DecodeString(s)
 	if err != nil {
-		err = NewBadRequestError(NoType, "invalid", fmt.Sprintf("( etag:%s ); invalid encoding", s))
+		err = fmt.Errorf("( etag:%s ); invalid encoding", s)
 		return
 	}
 
 	var n int
 	typ, oid, ver, n = ConsumeTag(src) // Adjust to return all three values
 	if n <= errTagMalformed || n < len(src) {
-		err = NewBadRequestError(NoType, "malformed", fmt.Sprintf("( etag:%s ); malformed input", s))
+		err = fmt.Errorf("( etag:%s ); malformed input", s)
 		return
 	}
 	return
@@ -240,15 +240,15 @@ func DecodeTag(s string) (typ EtagType, tag Tid, err error) {
 	return
 }
 
-func EncodeTag(typ EtagType, tag Tid) string {
+func EncodeTag(typ EtagType, tag Tid) (string, error) {
 	if !validType(typ) {
-		panic(fmt.Errorf("etag( typ:%d ); accept: positive, non-zero integer", int8(typ)))
+		return "", fmt.Errorf("etag( typ:%d ); accept: positive, non-zero integer", int8(typ))
 	}
 	if tag.IsNone() {
-		panic(fmt.Errorf("etag( oid:%d ); expect: positive, non-zero integer", tag.Oid))
+		return "", fmt.Errorf("etag( oid:%d ); expect: positive, non-zero integer", tag.Oid)
 	}
 	if !tag.HasVer() || tag.GetVer() < 0 {
-		panic(fmt.Errorf("etag( ver: ); expect: zero-based, positive integer"))
+		return "", fmt.Errorf("etag( ver: ); expect: zero-based, positive integer")
 	}
 	return EncodeEtag(typ, tag.Oid, tag.GetVer())
 }
@@ -256,12 +256,12 @@ func EncodeTag(typ EtagType, tag Tid) string {
 // ExpectETag parses a given string as an ETag string of the expected reference type.
 func ExpectEtag(of EtagType, s string) (tag Tid, err error) {
 	if !validType(of) {
-		panic(fmt.Errorf("etag: expect tag{typ:%d}; must be positive, non-zero integer identifier", int8(of)))
+		return Tid{}, fmt.Errorf("etag: expect tag{typ:%d}; must be positive, non-zero integer identifier", int8(of))
 	}
 	typ, tag, err := DecodeTag(s) // DecodeTag now returns 3 values
 	if err == nil {
 		if of != typ { // Compare the provided type with the decoded type
-			err = NewBadRequestError(of, "invalid", fmt.Sprintf("invalid ETag identifier for type %d", of))
+			err = fmt.Errorf("invalid ETag identifier for type %d", of)
 		}
 	}
 	return
@@ -272,17 +272,17 @@ func EtagOrId(of EtagType, s string) (tag Tid, err error) {
 	typ, tag, err := DecodeTag(s)
 	if err == nil {
 		if of != typ {
-			return tag, NewBadRequestError(of, "illegal", fmt.Sprintf("( etag:%s ); illegal type", s))
+			return tag, fmt.Errorf("( etag:%s ); illegal type", s)
 		}
 		return tag, nil
 	}
 
 	tag.Oid, err = GetOid(of, s)
 	if err != nil {
-		return tag, NewBadRequestError(of, "invalid", fmt.Sprintf("( etag:%s ); invalid format", s))
+		return tag, fmt.Errorf("( etag:%s ); invalid format", s)
 	}
 	if tag.Oid < 1 {
-		return tag, NewBadRequestError(of, "negative", fmt.Sprintf("( id:%s ); negative value", s))
+		return tag, fmt.Errorf("( id:%s ); negative value", s)
 	}
 	return tag, nil
 }
@@ -300,10 +300,10 @@ func GetTag(node IVersional, typ EtagType) (tag Tid, err error) {
 
 func MustTag(tag Tid, err error) Tid {
 	if err == nil && !tag.HasOid() {
-		panic(NewBadRequestError(NoType, "invalid", "tag( oid: int64! ) ISNULL"))
+		panic(fmt.Errorf("tag( oid: int64! ) ISNULL"))
 	}
 	if err == nil && !tag.HasVer() {
-		panic(NewBadRequestError(NoType, "invalid", "tag( rev: int32! ) ISNULL"))
+		panic(fmt.Errorf("tag( rev: int32! ) ISNULL"))
 	}
 	if err != nil {
 		panic(err)
