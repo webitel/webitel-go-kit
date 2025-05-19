@@ -86,11 +86,11 @@ func NewPublisher(
 ) (*MessagePublisher, error) {
 	ch, err := broker.Channel(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("failed to create channel: %w", err)
+		return nil, fmt.Errorf("create channel: %w", err)
 	}
 
 	if err := ch.Confirm(false); err != nil {
-		return nil, fmt.Errorf("failed to enable confirm mode: %w", err)
+		return nil, fmt.Errorf("enable confirm mode: %w", err)
 	}
 
 	return &MessagePublisher{

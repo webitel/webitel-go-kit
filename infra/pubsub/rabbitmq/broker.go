@@ -35,7 +35,7 @@ type Connection struct {
 	logger      Logger
 }
 
-func NewConnectionBroker(cfg *Config, logger Logger) (*Connection, error) {
+func NewConnection(cfg *Config, logger Logger) (*Connection, error) {
 	if logger == nil {
 		// by default no-operation logger
 		logger = &NoopLogger{}
@@ -70,7 +70,7 @@ func (b *Connection) connect() error {
 	channel, err := conn.Channel()
 	if err != nil {
 		_ = conn.Close()
-		return fmt.Errorf("failed to open channel after connection: %w", err)
+		return fmt.Errorf("open channel after connection: %w", err)
 	}
 
 	b.conn = conn
@@ -97,7 +97,7 @@ func (b *Connection) Channel(ctx context.Context) (*amqp091.Channel, error) {
 func (b *Connection) DeclareExchange(ctx context.Context, cfg *ExchangeConfig) error {
 	ch, err := b.Channel(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get channel for exchange declaration: %w", err)
+		return fmt.Errorf("get channel for exchange declaration: %w", err)
 	}
 	defer ch.Close()
 
@@ -121,7 +121,7 @@ func (b *Connection) DeclareExchange(ctx context.Context, cfg *ExchangeConfig) e
 func (b *Connection) DeclareQueue(ctx context.Context, cfg *QueueConfig, exchange *ExchangeConfig, routingKey string) error {
 	ch, err := b.Channel(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get channel for queue declaration: %w", err)
+		return fmt.Errorf("get channel for queue declaration: %w", err)
 	}
 	defer ch.Close()
 
@@ -146,7 +146,7 @@ func (b *Connection) DeclareQueue(ctx context.Context, cfg *QueueConfig, exchang
 			nil,   // args
 		)
 		if err != nil {
-			return fmt.Errorf("failed to bind queue: %w", err)
+			return fmt.Errorf("bind queue: %w", err)
 		}
 	}
 

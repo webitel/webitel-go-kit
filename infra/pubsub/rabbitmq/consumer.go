@@ -136,7 +136,7 @@ func (c *MessageConsumer) consumeLoop(ctx context.Context) {
 		default:
 			ch, err := c.broker.Channel(ctx)
 			if err != nil {
-				c.logger.Error("failed to get channel", err)
+				c.logger.Error("get channel", err)
 				time.Sleep(retryDelay)
 				retryDelay = min(retryDelay*2, c.consumer.ReconnectDelay)
 				continue
@@ -207,7 +207,7 @@ func (c *MessageConsumer) processMessage(ctx context.Context, msg amqp.Delivery)
 	}
 
 	if err := msg.Ack(false); err != nil {
-		c.logger.Error("failed to Ack message", err)
+		c.logger.Error("ack message", err)
 	}
 }
 
