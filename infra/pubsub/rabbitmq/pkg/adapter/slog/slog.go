@@ -1,4 +1,4 @@
-package rabbitmq
+package slog
 
 import (
 	"log/slog"
