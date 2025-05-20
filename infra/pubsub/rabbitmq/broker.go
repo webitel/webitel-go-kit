@@ -20,6 +20,7 @@ type Broker interface {
 	Channel(ctx context.Context) (*amqp091.Channel, error)
 	DeclareExchange(ctx context.Context, cfg *ExchangeConfig) error
 	DeclareQueue(ctx context.Context, cfg *QueueConfig, exchange *ExchangeConfig, routingKey string) error
+	BindExchange(ctx context.Context, destination, source, routingKey string, noWait bool, args amqp091.Table) error
 	Close() error
 }
 
@@ -115,6 +116,26 @@ func (b *Connection) DeclareExchange(ctx context.Context, cfg *ExchangeConfig) e
 	}
 
 	b.logger.Info("exchange declared", "exchange", cfg.Name)
+	return nil
+}
+
+func (b *Connection) BindExchange(ctx context.Context, source, destination, routingKey string, noWait bool, args amqp091.Table) error {
+	ch, err := b.Channel(ctx)
+	if err != nil {
+		return fmt.Errorf("get channel for exchange bind: %w", err)
+	}
+	defer ch.Close()
+
+	if err := ch.ExchangeBind(
+		destination,
+		routingKey,
+		source,
+		noWait,
+		args,
+	); err != nil {
+		return fmt.Errorf("bind exchange: %w", err)
+	}
+
 	return nil
 }
 
