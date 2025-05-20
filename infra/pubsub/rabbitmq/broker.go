@@ -100,7 +100,6 @@ func (b *Connection) DeclareExchange(ctx context.Context, cfg *ExchangeConfig) e
 	if err != nil {
 		return fmt.Errorf("get channel for exchange declaration: %w", err)
 	}
-	defer ch.Close()
 
 	err = ch.ExchangeDeclare(
 		cfg.Name,
@@ -124,7 +123,6 @@ func (b *Connection) BindExchange(ctx context.Context, source, destination, rout
 	if err != nil {
 		return fmt.Errorf("get channel for exchange bind: %w", err)
 	}
-	defer ch.Close()
 
 	if err := ch.ExchangeBind(
 		destination,
@@ -144,7 +142,6 @@ func (b *Connection) DeclareQueue(ctx context.Context, cfg *QueueConfig, exchang
 	if err != nil {
 		return fmt.Errorf("get channel for queue declaration: %w", err)
 	}
-	defer ch.Close()
 
 	_, err = ch.QueueDeclare(
 		cfg.Name,
