@@ -2,6 +2,7 @@ package rabbitmq
 
 import (
 	"errors"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"time"
 )
 
@@ -79,7 +80,10 @@ type QueueConfig struct {
 	Durable    bool
 	AutoDelete bool
 	Exclusive  bool
+	Arguments  amqp.Table
 }
+
+type QueueOption func(*QueueConfig)
 
 func NewQueueConfig(name string, opts ...QueueOption) (*QueueConfig, error) {
 	if name == "" {
@@ -88,9 +92,10 @@ func NewQueueConfig(name string, opts ...QueueOption) (*QueueConfig, error) {
 
 	cfg := &QueueConfig{
 		Name:       name,
-		Durable:    true, // default
+		Durable:    true,
 		AutoDelete: false,
 		Exclusive:  false,
+		Arguments:  amqp.Table{},
 	}
 
 	for _, opt := range opts {
@@ -99,8 +104,6 @@ func NewQueueConfig(name string, opts ...QueueOption) (*QueueConfig, error) {
 
 	return cfg, nil
 }
-
-type QueueOption func(*QueueConfig)
 
 func WithQueueDurable(durable bool) QueueOption {
 	return func(c *QueueConfig) {
@@ -114,8 +117,21 @@ func WithQueueAutoDelete(autoDelete bool) QueueOption {
 	}
 }
 
-func WithExclusive(exclusive bool) QueueOption {
+func WithQueueExclusive(exclusive bool) QueueOption {
 	return func(c *QueueConfig) {
 		c.Exclusive = exclusive
 	}
+}
+
+func WithQueueArgument(key string, value interface{}) QueueOption {
+	return func(c *QueueConfig) {
+		if c.Arguments == nil {
+			c.Arguments = amqp.Table{}
+		}
+		c.Arguments[key] = value
+	}
+}
+
+func WithQueueTypeQuorum() QueueOption {
+	return WithQueueArgument("x-queue-type", "quorum")
 }

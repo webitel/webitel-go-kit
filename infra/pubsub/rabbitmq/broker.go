@@ -131,7 +131,7 @@ func (b *Connection) DeclareQueue(ctx context.Context, cfg *QueueConfig, exchang
 		cfg.AutoDelete,
 		cfg.Exclusive,
 		false, // noWait
-		nil,   // args
+		cfg.Arguments,
 	)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrDeclarationFailed, err)
