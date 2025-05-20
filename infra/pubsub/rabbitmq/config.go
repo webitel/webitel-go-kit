@@ -22,14 +22,29 @@ type Config struct {
 }
 
 // NewConfig creates a new Config with URL and connect timeout validation.
-func NewConfig(url string, connectTimeout time.Duration) (*Config, error) {
+func NewConfig(url string, opts ...ConfigOption) (*Config, error) {
 	if url == "" {
 		return nil, errors.New("rabbitmq config URL is required")
 	}
-	return &Config{
+
+	cfg := &Config{
 		URL:            url,
-		ConnectTimeout: connectTimeout,
-	}, nil
+		ConnectTimeout: 10 * time.Second,
+	}
+
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	return cfg, nil
+}
+
+type ConfigOption func(config *Config)
+
+func WithConnectTimeout(timeout time.Duration) ConfigOption {
+	return func(config *Config) {
+		config.ConnectTimeout = timeout
+	}
 }
 
 type ExchangeConfig struct {

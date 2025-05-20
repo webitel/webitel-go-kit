@@ -5,27 +5,27 @@ import (
 )
 
 // SlogLogger is an adapter for slog.Logger to implement the rabbitmq.Logger interface.
-type SlogLogger struct {
+type Logger struct {
 	log *slog.Logger
 }
 
 // NewSlogLogger creates a new SlogLogger.
-func NewSlogLogger(logger *slog.Logger) *SlogLogger {
-	return &SlogLogger{log: logger}
+func NewSlogLogger(logger *slog.Logger) *Logger {
+	return &Logger{log: logger}
 }
 
 // Info logs informational messages with structured args.
-func (l *SlogLogger) Info(msg string, args ...any) {
+func (l *Logger) Info(msg string, args ...any) {
 	l.log.LogAttrs(nil, slog.LevelInfo, msg, toSlogAttrs(args)...)
 }
 
 // Warn logs warning messages with structured args.
-func (l *SlogLogger) Warn(msg string, args ...any) {
+func (l *Logger) Warn(msg string, args ...any) {
 	l.log.LogAttrs(nil, slog.LevelWarn, msg, toSlogAttrs(args)...)
 }
 
 // Error logs error messages with the error as an attribute.
-func (l *SlogLogger) Error(msg string, err error, args ...any) {
+func (l *Logger) Error(msg string, err error, args ...any) {
 	attrs := append([]any{"error", err}, args...)
 	l.log.LogAttrs(nil, slog.LevelError, msg, toSlogAttrs(attrs)...)
 }
