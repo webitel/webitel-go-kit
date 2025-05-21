@@ -76,7 +76,7 @@ func (b *Connection) connect() error {
 
 	b.conn = conn
 	b.ch = channel
-	b.logger.Info("connected to RabbitMQ", "url", b.cfg.URL)
+	b.logger.Info("connected to RabbitMQ")
 	return nil
 }
 
