@@ -76,7 +76,7 @@ func (b *Connection) connect() error {
 
 	b.conn = conn
 	b.ch = channel
-	b.logger.Info("connected to RabbitMQ", "url", b.cfg.URL)
+	b.logger.Info("connected to RabbitMQ")
 	return nil
 }
 
@@ -114,7 +114,6 @@ func (b *Connection) DeclareExchange(ctx context.Context, cfg *ExchangeConfig) e
 		return fmt.Errorf("%w: %v", ErrDeclarationFailed, err)
 	}
 
-	b.logger.Info("exchange declared", "exchange", cfg.Name)
 	return nil
 }
 
@@ -168,7 +167,6 @@ func (b *Connection) DeclareQueue(ctx context.Context, cfg *QueueConfig, exchang
 		}
 	}
 
-	b.logger.Info("queue declared", "queue", cfg.Name)
 	return nil
 }
 
