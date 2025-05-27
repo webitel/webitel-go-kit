@@ -136,6 +136,10 @@ func (p *MessagePublisher) publishWithConfirmation(
 	body []byte,
 	headers amqp.Table,
 ) error {
+	if err := p.ensureChannel(); err != nil {
+		return fmt.Errorf("ensure channel: %w", err)
+	}
+
 	err := p.channel.Publish(
 		p.exchange.Name,
 		routingKey,
@@ -163,6 +167,25 @@ func (p *MessagePublisher) publishWithConfirmation(
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (p *MessagePublisher) ensureChannel() error {
+	if p.channel != nil && !p.channel.IsClosed() {
+		return nil
+	}
+
+	ch, err := p.broker.Channel(context.Background())
+	if err != nil {
+		return fmt.Errorf("recreate channel: %w", err)
+	}
+
+	if err := ch.Confirm(false); err != nil {
+		return fmt.Errorf("enable confirm mode: %w", err)
+	}
+
+	p.channel = ch
+	p.confirmCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+	return nil
 }
 
 func (p *MessagePublisher) Close() error {
