@@ -74,6 +74,14 @@ func (b *Connection) connect() error {
 		return fmt.Errorf("open channel after connection: %w", err)
 	}
 
+	// Close old connection & channel if they exist
+	if b.ch != nil && !b.ch.IsClosed() {
+		_ = b.ch.Close()
+	}
+	if b.conn != nil && !b.conn.IsClosed() {
+		_ = b.conn.Close()
+	}
+
 	b.conn = conn
 	b.ch = channel
 	b.logger.Info("connected to RabbitMQ")
@@ -114,7 +122,6 @@ func (b *Connection) DeclareExchange(ctx context.Context, cfg *ExchangeConfig) e
 		return fmt.Errorf("%w: %v", ErrDeclarationFailed, err)
 	}
 
-	b.logger.Info("exchange declared", "exchange", cfg.Name)
 	return nil
 }
 
@@ -168,7 +175,6 @@ func (b *Connection) DeclareQueue(ctx context.Context, cfg *QueueConfig, exchang
 		}
 	}
 
-	b.logger.Info("queue declared", "queue", cfg.Name)
 	return nil
 }
 
