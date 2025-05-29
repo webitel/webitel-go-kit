@@ -172,6 +172,21 @@ func (b *Connection) DeclareQueue(ctx context.Context, cfg *QueueConfig, exchang
 	return nil
 }
 
+func (b *Connection) BindQueue(queueName string, rk string, exchange string, noWait bool, args amqp091.Table) error {
+	ch, err := b.Channel(context.Background())
+	if err != nil {
+		return fmt.Errorf("get channel for exchange declaration: %w", err)
+	}
+
+	err = ch.QueueBind(queueName, rk, exchange, noWait, args)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrDeclarationFailed, err)
+	}
+
+	b.logger.Info("queue binded")
+	return nil
+}
+
 func (b *Connection) connectionWatcher() {
 	defer func() {
 		if r := recover(); r != nil {
