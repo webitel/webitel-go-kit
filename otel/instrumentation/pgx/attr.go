@@ -10,7 +10,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/webitel/webitel-go-kit/semconv"
+	"github.com/webitel/webitel-go-kit/otel/semconv"
 )
 
 const (
