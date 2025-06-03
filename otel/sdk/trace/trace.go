@@ -6,11 +6,10 @@ import (
 	"strings"
 	"sync"
 
-	// "github.com/pkg/errors"
-
-	"github.com/webitel/webitel-go-kit/otel/internal"
 	"go.opentelemetry.io/otel"
 	sdk "go.opentelemetry.io/otel/sdk/trace"
+
+	"github.com/webitel/webitel-go-kit/otel/internal"
 )
 
 // Options constructor to build

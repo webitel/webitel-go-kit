@@ -3,7 +3,7 @@ package pgx
 import (
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/webitel/webitel-go-kit/tracing"
+	tracesdk "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // Option specifies instrumentation configuration options.
@@ -19,7 +19,7 @@ func (o optionFunc) apply(c *tracerConfig) {
 
 // WithTracerProvider specifies a tracer provider to use for creating a tracer.
 // If none is specified, the global provider is used.
-func WithTracerProvider(provider tracing.TracerProvider) Option {
+func WithTracerProvider(provider *tracesdk.TracerProvider) Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		if provider != nil {
 			cfg.tp = provider

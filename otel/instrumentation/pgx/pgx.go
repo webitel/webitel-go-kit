@@ -12,13 +12,17 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/webitel/webitel-go-kit/internal"
 	"github.com/webitel/webitel-go-kit/semconv"
 )
 
 const (
-	scopeName = "github.com/webitel/webitel-go-kit/tracing/pgx"
+	scopeName = "github.com/webitel/webitel-go-kit/otel/instrumentation/pgx"
 )
+
+// Version is the current release version of the gRPC instrumentation.
+func Version() string {
+	return "0.0.0"
+}
 
 // Tracer is a wrapper around the pgx tracer interfaces which instrument
 // queries.
@@ -61,7 +65,7 @@ func NewTracer(opts ...Option) *Tracer {
 	}
 
 	return &Tracer{
-		tracer:              cfg.tp.Tracer(scopeName, trace.WithInstrumentationVersion(internal.Version())),
+		tracer:              cfg.tp.Tracer(scopeName, trace.WithInstrumentationVersion(Version())),
 		attrs:               cfg.attrs,
 		trimQuerySpanName:   cfg.trimQuerySpanName,
 		spanNameFunc:        cfg.spanNameFunc,
