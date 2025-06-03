@@ -69,12 +69,15 @@ func (l *Logger) GetObjectedLogger(object string) (*ObjectedLogger, error) {
 	}, nil
 }
 
-func (l *Logger) sendContext(ctx context.Context, domainId int64, object string, message *Message) (operationId string, err error) {
+func (l *Logger) SendContext(ctx context.Context, domainId int64, object string, message *Message) (operationId string, err error) {
 	if object == "" {
 		return "", errors.New("no object")
 	}
 	if message == nil {
 		return "", errors.New("message required")
+	}
+	if domainId <= 0 {
+		return "", errors.New("domain required")
 	}
 	err = ValidateMessage(message)
 	if err != nil {
@@ -100,7 +103,7 @@ func (l *ObjectedLogger) SendContext(ctx context.Context, domainId int64, messag
 		return "", errors.New("no parent logger")
 	}
 
-	return l.parent.sendContext(ctx, domainId, l.objClass, message)
+	return l.parent.SendContext(ctx, domainId, l.objClass, message)
 }
 
 func (l *ObjectedLogger) GetObjClass() string {
