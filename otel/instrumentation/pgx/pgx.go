@@ -14,7 +14,6 @@ import (
 
 	"github.com/webitel/webitel-go-kit/internal"
 	"github.com/webitel/webitel-go-kit/semconv"
-	tracinginternal "github.com/webitel/webitel-go-kit/tracing/internal"
 )
 
 const (
@@ -125,7 +124,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	spanName := data.SQL
 	if t.trimQuerySpanName {
-		spanName = tracinginternal.SQLOperationName(data.SQL)
+		spanName = SQLOperationName(data.SQL)
 	}
 
 	if t.prefixQuerySpanName {
@@ -236,7 +235,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	var spanName string
 	if t.trimQuerySpanName {
-		spanName = tracinginternal.SQLOperationName(data.SQL)
+		spanName = SQLOperationName(data.SQL)
 		if t.prefixQuerySpanName {
 			spanName = "db.Query." + spanName
 		}
@@ -317,7 +316,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 
 	spanName := data.SQL
 	if t.trimQuerySpanName {
-		spanName = tracinginternal.SQLOperationName(data.SQL)
+		spanName = SQLOperationName(data.SQL)
 	}
 
 	if t.prefixQuerySpanName {

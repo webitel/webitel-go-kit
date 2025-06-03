@@ -1,4 +1,4 @@
-package internal
+package pgx
 
 import (
 	"database/sql/driver"
