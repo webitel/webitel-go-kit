@@ -94,9 +94,8 @@ func (h *Handler) Enabled(v int) bool {
 		return false // skip ; unknown
 	}
 
-	var test log.Record
-	test.SetSeverity(level)
-	return h.logger.Enabled(noCtx, test)
+	params := log.EnabledParameters{Severity: level}
+	return h.logger.Enabled(noCtx, params)
 }
 
 func (h *Handler) convertRecord(level log.Severity, message string, keysAndValues []any) log.Record {
