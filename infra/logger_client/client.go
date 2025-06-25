@@ -19,6 +19,8 @@ const (
 	UpdateAction Action = "update"
 	DeleteAction Action = "delete"
 	ReadAction   Action = "read"
+
+	ExhchangeName = "logger"
 )
 
 type Logger struct {
@@ -31,7 +33,7 @@ type ObjectedLogger struct {
 type LoggerOpts func(*Logger) error
 
 type Publisher interface {
-	Publish(ctx context.Context, routingKey string, body []byte, headers map[string]any) error
+	Publish(ctx context.Context, exchange string, routingKey string, body []byte, headers map[string]any) error
 }
 
 func WithPublisher(publisher Publisher) LoggerOpts {
@@ -44,7 +46,7 @@ func WithPublisher(publisher Publisher) LoggerOpts {
 	}
 }
 
-func New(opts ...LoggerOpts) (*Logger, error) {
+func New(pub Publisher, opts ...LoggerOpts) (*Logger, error) {
 	var err error
 	logger := &Logger{}
 	for _, opt := range opts {
@@ -88,7 +90,7 @@ func (l *Logger) SendContext(ctx context.Context, domainId int64, object string,
 	if err != nil {
 		return operationId, err
 	}
-	err = l.publisher.Publish(ctx, formatKey(domainId, object), body, nil)
+	err = l.publisher.Publish(ctx, ExhchangeName, formatKey(domainId, object), body, nil)
 	if err != nil {
 		return operationId, err
 	}
