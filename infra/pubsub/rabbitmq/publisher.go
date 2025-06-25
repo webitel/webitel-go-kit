@@ -17,7 +17,7 @@ var (
 )
 
 type Publisher interface {
-	Publish(ctx context.Context, routingKey string, body []byte, headers amqp.Table) error
+	Publish(ctx context.Context, exchange string, routingKey string, body []byte, headers amqp.Table) error
 	Close() error
 }
 
@@ -70,7 +70,6 @@ func WithPublisherConfirmationTimeout(timeout time.Duration) PublisherOption {
 
 type MessagePublisher struct {
 	broker    *Connection
-	exchange  *ExchangeConfig
 	config    *PublisherConfig
 	channel   *amqp.Channel
 	confirmCh <-chan amqp.Confirmation
@@ -80,7 +79,6 @@ type MessagePublisher struct {
 
 func NewPublisher(
 	broker *Connection,
-	exchange *ExchangeConfig,
 	config *PublisherConfig,
 	logger Logger,
 ) (*MessagePublisher, error) {
@@ -95,7 +93,6 @@ func NewPublisher(
 
 	return &MessagePublisher{
 		broker:    broker,
-		exchange:  exchange,
 		config:    config,
 		channel:   ch,
 		confirmCh: ch.NotifyPublish(make(chan amqp.Confirmation, 1)),
@@ -105,6 +102,7 @@ func NewPublisher(
 
 func (p *MessagePublisher) Publish(
 	ctx context.Context,
+	exchange string,
 	routingKey string,
 	body []byte,
 	headers amqp.Table,
@@ -113,7 +111,7 @@ func (p *MessagePublisher) Publish(
 	defer p.mu.Unlock()
 
 	for attempt := 0; attempt < p.config.MaxRetries; attempt++ {
-		err := p.publishWithConfirmation(ctx, routingKey, body, headers)
+		err := p.publishWithConfirmation(ctx, exchange, routingKey, body, headers)
 		if err == nil {
 			return nil
 		}
@@ -132,6 +130,7 @@ func (p *MessagePublisher) Publish(
 
 func (p *MessagePublisher) publishWithConfirmation(
 	ctx context.Context,
+	exchange string,
 	routingKey string,
 	body []byte,
 	headers amqp.Table,
@@ -141,7 +140,7 @@ func (p *MessagePublisher) publishWithConfirmation(
 	}
 
 	err := p.channel.Publish(
-		p.exchange.Name,
+		exchange,
 		routingKey,
 		false, // mandatory
 		false, // immediate
