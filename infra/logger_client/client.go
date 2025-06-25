@@ -33,7 +33,7 @@ type ObjectedLogger struct {
 type LoggerOpts func(*Logger) error
 
 type Publisher interface {
-	Publish(ctx context.Context, exchange string, routingKey string, body []byte, headers map[string]any) error
+	Publish(ctx context.Context, exchange string, routingKey string, body []byte) error
 }
 
 func WithPublisher(publisher Publisher) LoggerOpts {
@@ -90,7 +90,7 @@ func (l *Logger) SendContext(ctx context.Context, domainId int64, object string,
 	if err != nil {
 		return operationId, err
 	}
-	err = l.publisher.Publish(ctx, ExhchangeName, formatKey(domainId, object), body, nil)
+	err = l.publisher.Publish(ctx, ExhchangeName, formatKey(domainId, object), body)
 	if err != nil {
 		return operationId, err
 	}
