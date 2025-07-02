@@ -48,7 +48,9 @@ func WithPublisher(publisher Publisher) LoggerOpts {
 
 func New(pub Publisher, opts ...LoggerOpts) (*Logger, error) {
 	var err error
-	logger := &Logger{}
+	logger := &Logger{
+		publisher: pub,
+	}
 	for _, opt := range opts {
 		err = opt(logger)
 		if err != nil {
