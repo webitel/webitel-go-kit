@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package test_stubs.proto.v1;
+
+
+
+option go_package = "github.com/webitel/protos/filters/test_stubs;stubs";
+
+
+
+message TestingObject {
+    int64 id = 1;
+    string name = 2;
+    string description = 3;
+    bool state = 4;
+    Lookup created_by = 9;
+    int64 created_at = 10;
+    RelatedEntity related_entity = 5;
+    repeated Lookup related_entities = 6;
+    repeated string tags = 7;
+    map<string, string> variables = 8;
+}
+
+message Lookup {
+    int64 id = 1;
+    string name = 2;
+}
+
+message RelatedEntity {
+    int64 id = 1;
+    string name = 2;
+    Lookup contact = 3;
+}

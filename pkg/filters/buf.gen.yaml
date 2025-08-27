@@ -1,0 +1,12 @@
+version: v2
+
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: test_stubs/gen
+    opt: paths=source_relative
+    include_imports: true
+inputs:
+  - directory: "./test_stubs/proto"
+#  - git_repo: "https://github.com/webitel/protos"
+#    branch: "main"
+#    subdir: cases
