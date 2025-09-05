@@ -27,9 +27,11 @@ func ExtractIdentifier(expr *expr.Expr) (string, error) {
 }
 
 // ProtoToCELVariables converts a protobuf message's fields into CEL variable declarations.
+// Also registers the message type itself in the CEL environment.
 func ProtoToCELVariables(msg proto.Message) []cel.EnvOption {
 	fields := msg.ProtoReflect().Descriptor().Fields()
 	var opts []cel.EnvOption
+	opts = append(opts, cel.Types(msg))
 	for i := 0; i < fields.Len(); i++ {
 		descriptor := fields.Get(i)
 		var celType *cel.Type
