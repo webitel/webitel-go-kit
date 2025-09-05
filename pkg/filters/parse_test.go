@@ -50,7 +50,7 @@ func Test_extractIdentifier(t *testing.T) {
 					},
 				},
 			},
-			want:    "id",
+			want:    "case.id",
 			wantErr: false,
 		},
 		// "case.status_condition.id"
@@ -77,7 +77,7 @@ func Test_extractIdentifier(t *testing.T) {
 					},
 				},
 			},
-			want:    "status_condition.id",
+			want:    "case.status_condition.id",
 			wantErr: false,
 		},
 	}

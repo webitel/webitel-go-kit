@@ -3,27 +3,10 @@ package filters
 import (
 	"fmt"
 
-	"github.com/google/cel-go/cel"
 	"google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 )
 
-// ParseFilters parses a CEL expression string into a Filterer tree structure using the provided CEL environment.
-func ParseFilters(env *cel.Env, query string) (Filterer, error) {
-	ast, iss := env.Compile(query)
-	if err := iss.Err(); err != nil {
-		return nil, err
-	}
-	expr, err := cel.AstToCheckedExpr(ast)
-	if err != nil {
-		return nil, err
-	}
-	return parseCELASTToFilter(expr.GetExpr())
-}
-
-func parseCELASTToFilter(expr *expr.Expr) (Filterer, error) {
-	return parseExpr(expr)
-}
-
+// parseExpr recursively parses a CEL expression into a Filterer structure.
 func parseExpr(s *expr.Expr) (Filterer, error) {
 	switch e := s.ExprKind.(type) {
 	case *expr.Expr_CallExpr:
@@ -37,6 +20,7 @@ func parseExpr(s *expr.Expr) (Filterer, error) {
 	}
 }
 
+// parseCallExpr handles function call expressions and delegates to specific parsers based on the function name.
 func parseCallExpr(call *expr.Expr_Call) (Filterer, error) {
 	switch call.Function {
 	case "_&&_", "_||_":
@@ -50,6 +34,7 @@ func parseCallExpr(call *expr.Expr_Call) (Filterer, error) {
 	}
 }
 
+// parseLogicalExpr parses logical expressions (AND, OR) into a FilterNode.
 func parseLogicalExpr(call *expr.Expr_Call) (*FilterNode, error) {
 	if len(call.Args) != 2 {
 		return nil, fmt.Errorf("logical expression must have 2 arguments")
@@ -78,6 +63,7 @@ func parseLogicalExpr(call *expr.Expr_Call) (*FilterNode, error) {
 	}, nil
 }
 
+// parseComparisonExpr parses comparison expressions into a Filter.
 func parseComparisonExpr(call *expr.Expr_Call) (*Filter, error) {
 	if len(call.Args) != 2 {
 		return nil, fmt.Errorf("comparison expression must have 2 arguments")
@@ -105,6 +91,7 @@ func parseComparisonExpr(call *expr.Expr_Call) (*Filter, error) {
 	}, nil
 }
 
+// parseLikeExpr parses 'like' expressions into a Filter.
 func parseLikeExpr(call *expr.Expr_Call) (*Filter, error) {
 	if len(call.Args) != 2 {
 		return nil, fmt.Errorf("like expression must have 2 arguments")
@@ -127,29 +114,29 @@ func parseLikeExpr(call *expr.Expr_Call) (*Filter, error) {
 	}, nil
 }
 
-func ExtractIdentifier(expr *expr.Expr) (string, error) {
-	var depth int
-	return extractIdentifier(expr, depth)
+// parseCELASTToFilter converts a CEL AST expression into a Filterer structure.
+func parseCELASTToFilter(expr *expr.Expr) (Filterer, error) {
+	return parseExpr(expr)
 }
 
-func extractIdentifier(expr *expr.Expr, depth int) (string, error) {
-	if ident := expr.GetSelectExpr(); ident != nil {
-		nested, err := extractIdentifier(ident.Operand, depth+1)
+// extractIdentifier recursively extracts the full identifier path from a CEL expression.
+func extractIdentifier(expression *expr.Expr, depth int) (string, error) {
+	if selectExpr := expression.GetSelectExpr(); selectExpr != nil {
+		nested, err := extractIdentifier(selectExpr.Operand, depth+1)
 		if err != nil {
 			return "", err
 		}
 		if nested == "" {
-			return ident.GetField(), nil
+			return selectExpr.GetField(), nil
 		}
-		return fmt.Sprintf("%s.%s", nested, ident.GetField()), nil
-	} else if depth == 0 {
-		if ident := expr.GetIdentExpr(); ident != nil {
-			return ident.Name, nil
-		}
+		return fmt.Sprintf("%s.%s", nested, selectExpr.GetField()), nil
+	} else if identExpr := expression.GetIdentExpr(); identExpr != nil {
+		return identExpr.Name, nil
 	}
 	return "", nil
 }
 
+// extractConstant extracts the constant value from a CEL expression.
 func extractConstant(s *expr.Expr) (any, error) {
 	if constant := s.GetConstExpr(); constant != nil {
 		switch v := constant.ConstantKind.(type) {
@@ -168,6 +155,7 @@ func extractConstant(s *expr.Expr) (any, error) {
 	return nil, fmt.Errorf("expected constant")
 }
 
+// mapCELComparison maps CEL comparison function names to Comparison types.
 func mapCELComparison(function string) (Comparison, error) {
 	switch function {
 	case "_==_":
