@@ -8,7 +8,7 @@ import (
 )
 
 // ParseFilters parses a CEL expression string into a Filterer tree structure using the provided CEL environment.
-func ParseFilters(env *cel.Env, query string) (Filterer, error) {
+func ParseFilters(env *cel.Env, query string) (*FilterExpr, error) {
 	ast, iss := env.Compile(query)
 	if err := iss.Err(); err != nil {
 		return nil, err

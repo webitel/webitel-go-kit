@@ -100,31 +100,31 @@ func TestParseFilters(t *testing.T) {
 		env   *cel.Env
 		query string
 	}
-	env, _ := cel.NewEnv(cel.Types(&stubs.TestingObject{}), cel.Variable("obj", cel.ObjectType("test_stubs.proto.v1.TestingObject")))
+	env, _ := cel.NewEnv(ProtoToCELVariables(&stubs.TestingObject{})...)
 	tests := []struct {
 		name    string
 		args    args
-		want    Filterer
+		want    *FilterExpr
 		wantErr bool
 	}{
 		{
 			name: "Single filter",
 			args: args{
 				env:   env,
-				query: "obj.description == 'test'",
+				query: "description == 'test'",
 			},
-			want: &Filter{
+			want: &FilterExpr{&Filter{
 				Column:         "description",
 				Value:          "test",
 				ComparisonType: Equal,
-			},
+			}},
 			wantErr: false,
 		},
 		{
 			name: "Single filter with unknown field",
 			args: args{
 				env:   env,
-				query: "obj.desc == 'test'",
+				query: "desc == 'test'",
 			},
 			want:    nil,
 			wantErr: true,
@@ -133,7 +133,7 @@ func TestParseFilters(t *testing.T) {
 			name: "Single filter with unknown operator",
 			args: args{
 				env:   env,
-				query: "obj.created_by.id === 1",
+				query: "created_by.id === 1",
 			},
 			want:    nil,
 			wantErr: true,
@@ -142,72 +142,94 @@ func TestParseFilters(t *testing.T) {
 			name: "Single filter more than",
 			args: args{
 				env:   env,
-				query: "obj.created_by.id > 1",
+				query: "created_by.id > 1",
 			},
-			want: &Filter{
+			want: &FilterExpr{&Filter{
 				Column:         "created_by.id",
 				Value:          int64(1),
 				ComparisonType: GreaterThan,
-			},
+			}},
 			wantErr: false,
 		},
 		{
 			name: "Single filter less than",
 			args: args{
 				env:   env,
-				query: "obj.created_by.id < 1",
+				query: "created_by.id < 1",
 			},
-			want: &Filter{
+			want: &FilterExpr{&Filter{
 				Column:         "created_by.id",
 				Value:          int64(1),
 				ComparisonType: LessThan,
-			},
+			}},
 			wantErr: false,
 		},
 		{
 			name: "Single filter less than or equal",
 			args: args{
 				env:   env,
-				query: "obj.created_by.id <= 1",
+				query: "created_by.id <= 1",
 			},
-			want: &Filter{
+			want: &FilterExpr{&Filter{
 				Column:         "created_by.id",
 				Value:          int64(1),
 				ComparisonType: LessThanOrEqual,
-			},
+			}},
 			wantErr: false,
 		},
 		{
 			name: "Single filter greater than or equal",
 			args: args{
 				env:   env,
-				query: "obj.created_by.id >= 1",
+				query: "created_by.id >= 1",
 			},
-			want: &Filter{
+			want: &FilterExpr{&Filter{
 				Column:         "created_by.id",
 				Value:          int64(1),
 				ComparisonType: GreaterThanOrEqual,
+			}},
+			wantErr: false,
+		},
+		{
+			name: "Single filter with unknown nested field",
+			args: args{
+				env:   env,
+				query: "created_by.ok >= 1",
 			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "Single filter with known double nested field",
+			args: args{
+				env:   env,
+				query: "related_entity.contact.id >= 1",
+			},
+			want: &FilterExpr{&Filter{
+				Column:         "related_entity.contact.id",
+				Value:          int64(1),
+				ComparisonType: GreaterThanOrEqual,
+			}},
 			wantErr: false,
 		},
 		{
 			name: "Single filter with lookup field",
 			args: args{
 				env:   env,
-				query: "obj.created_by.id == 1",
+				query: "created_by.id == 1",
 			},
-			want: &Filter{
+			want: &FilterExpr{&Filter{
 				Column:         "created_by.id",
 				Value:          int64(1),
 				ComparisonType: Equal,
-			},
+			}},
 			wantErr: false,
 		},
 		{
 			name: "Single with unknown root",
 			args: args{
 				env:   env,
-				query: "description == 'test'",
+				query: "root.description == 'test'",
 			},
 			wantErr: true,
 		},
@@ -215,79 +237,79 @@ func TestParseFilters(t *testing.T) {
 			name: "And filter",
 			args: args{
 				env:   env,
-				query: "obj.description == 'test' && obj.description == '123'",
+				query: "description == 'test' && description == '123'",
 			},
-			want: &FilterNode{
+			want: &FilterExpr{&FilterNode{
 				Connection: And,
-				Nodes: []Filterer{
-					&Filter{
+				Nodes: []*FilterExpr{
+					{&Filter{
 						Column:         "description",
 						Value:          "test",
 						ComparisonType: Equal,
-					},
-					&Filter{
+					}},
+					{&Filter{
 						Column:         "description",
 						Value:          "123",
 						ComparisonType: Equal,
-					},
+					}},
 				},
-			},
+			}},
 			wantErr: false,
 		},
 		{
 			name: "OR filter",
 			args: args{
 				env:   env,
-				query: "obj.description == 'test' || obj.description == '123'",
+				query: "description == 'test' || description == '123'",
 			},
-			want: &FilterNode{
+			want: &FilterExpr{&FilterNode{
 				Connection: Or,
-				Nodes: []Filterer{
-					&Filter{
+				Nodes: []*FilterExpr{
+					{&Filter{
 						Column:         "description",
 						Value:          "test",
 						ComparisonType: Equal,
-					},
-					&Filter{
+					}},
+					{&Filter{
 						Column:         "description",
 						Value:          "123",
 						ComparisonType: Equal,
-					},
+					}},
 				},
-			},
+			}},
 			wantErr: false,
 		},
 		{
 			name: "Complex filter",
 			args: args{
 				env:   env,
-				query: "(obj.description == 'test' || obj.description == '123') && obj.created_by.id == 1",
+				query: "(description == 'test' || description == '123') && created_by.id == 1",
 			},
-			want: &FilterNode{
+			want: &FilterExpr{&FilterNode{
 				Connection: And,
-				Nodes: []Filterer{
-					&FilterNode{
+				Nodes: []*FilterExpr{
+					{&FilterNode{
 						Connection: Or,
-						Nodes: []Filterer{
-							&Filter{
+						Nodes: []*FilterExpr{
+							{&Filter{
 								Column:         "description",
 								Value:          "test",
 								ComparisonType: Equal,
-							},
-							&Filter{
+							}},
+							{&Filter{
 								Column:         "description",
 								Value:          "123",
 								ComparisonType: Equal,
-							},
+							}},
 						},
-					},
-					&Filter{
+					}},
+					{&Filter{
 						Column:         "created_by.id",
 						Value:          int64(1),
 						ComparisonType: Equal,
-					},
+					}},
 				},
-			},
+			}},
 			wantErr: false,
 		},
 	}

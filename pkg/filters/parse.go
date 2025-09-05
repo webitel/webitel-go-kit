@@ -7,7 +7,7 @@ import (
 )
 
 // parseExpr recursively parses a CEL expression into a Filterer structure.
-func parseExpr(s *expr.Expr) (Filterer, error) {
+func parseExpr(s *expr.Expr) (*FilterExpr, error) {
 	switch e := s.ExprKind.(type) {
 	case *expr.Expr_CallExpr:
 		return parseCallExpr(e.CallExpr)
@@ -21,7 +21,7 @@ func parseExpr(s *expr.Expr) (Filterer, error) {
 }
 
 // parseCallExpr handles function call expressions and delegates to specific parsers based on the function name.
-func parseCallExpr(call *expr.Expr_Call) (Filterer, error) {
+func parseCallExpr(call *expr.Expr_Call) (*FilterExpr, error) {
 	switch call.Function {
 	case "_&&_", "_||_":
 		return parseLogicalExpr(call)
@@ -35,7 +35,7 @@ func parseCallExpr(call *expr.Expr_Call) (Filterer, error) {
 }
 
 // parseLogicalExpr parses logical expressions (AND, OR) into a FilterNode.
-func parseLogicalExpr(call *expr.Expr_Call) (*FilterNode, error) {
+func parseLogicalExpr(call *expr.Expr_Call) (*FilterExpr, error) {
 	if len(call.Args) != 2 {
 		return nil, fmt.Errorf("logical expression must have 2 arguments")
 	}
@@ -57,14 +57,14 @@ func parseLogicalExpr(call *expr.Expr_Call) (*FilterNode, error) {
 		return nil, err
 	}
 
-	return &FilterNode{
-		Nodes:      []Filterer{left, right},
+	return &FilterExpr{filter: &FilterNode{
+		Nodes:      []*FilterExpr{left, right},
 		Connection: connection,
-	}, nil
+	}}, nil
 }
 
 // parseComparisonExpr parses comparison expressions into a Filter.
-func parseComparisonExpr(call *expr.Expr_Call) (*Filter, error) {
+func parseComparisonExpr(call *expr.Expr_Call) (*FilterExpr, error) {
 	if len(call.Args) != 2 {
 		return nil, fmt.Errorf("comparison expression must have 2 arguments")
 	}
@@ -84,15 +84,15 @@ func parseComparisonExpr(call *expr.Expr_Call) (*Filter, error) {
 		return nil, err
 	}
 
-	return &Filter{
+	return &FilterExpr{&Filter{
 		Column:         column,
 		Value:          value,
 		ComparisonType: comparison,
-	}, nil
+	}}, nil
 }
 
 // parseLikeExpr parses 'like' expressions into a Filter.
-func parseLikeExpr(call *expr.Expr_Call) (*Filter, error) {
+func parseLikeExpr(call *expr.Expr_Call) (*FilterExpr, error) {
 	if len(call.Args) != 2 {
 		return nil, fmt.Errorf("like expression must have 2 arguments")
 	}
@@ -107,15 +107,15 @@ func parseLikeExpr(call *expr.Expr_Call) (*Filter, error) {
 		return nil, err
 	}
 
-	return &Filter{
+	return &FilterExpr{&Filter{
 		Column:         column,
 		Value:          value,
 		ComparisonType: Like,
-	}, nil
+	}}, nil
 }
 
 // parseCELASTToFilter converts a CEL AST expression into a Filterer structure.
-func parseCELASTToFilter(expr *expr.Expr) (Filterer, error) {
+func parseCELASTToFilter(expr *expr.Expr) (*FilterExpr, error) {
 	return parseExpr(expr)
 }
 
