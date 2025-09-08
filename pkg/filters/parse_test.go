@@ -121,6 +121,24 @@ func TestParseFilters(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Empty query filter",
+			args: args{
+				env:   env,
+				query: "",
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "Empty env",
+			args: args{
+				env:   nil,
+				query: "description == 'test'",
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
 			name: "Single filter with unknown field",
 			args: args{
 				env:   env,

@@ -1,14 +1,27 @@
 package filters
 
 import (
+	"fmt"
+
 	"github.com/google/cel-go/cel"
 	expr "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
+var (
+	ErrEmptyQuery     = fmt.Errorf("empty query")
+	ErrNilEnvironment = fmt.Errorf("nil CEL environment provided")
+)
+
 // ParseFilters parses a CEL expression string into a Filterer tree structure using the provided CEL environment.
 func ParseFilters(env *cel.Env, query string) (*FilterExpr, error) {
+	if query == "" {
+		return nil, ErrEmptyQuery
+	}
+	if env == nil {
+		return nil, ErrNilEnvironment
+	}
 	ast, iss := env.Compile(query)
 	if err := iss.Err(); err != nil {
 		return nil, err
