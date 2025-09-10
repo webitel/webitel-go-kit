@@ -157,7 +157,7 @@ func TestParseFilters(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "Single filter more than",
+			name: "Single filter greater than",
 			args: args{
 				env:   env,
 				query: "created_by.id > 1",
@@ -168,6 +168,56 @@ func TestParseFilters(t *testing.T) {
 				ComparisonType: GreaterThan,
 			}},
 			wantErr: false,
+		},
+		{
+			name: "Single filter like",
+			args: args{
+				env:   env,
+				query: "like(created_by.name, 'test')",
+			},
+			want: &FilterExpr{&Filter{
+				Column:         "created_by.name",
+				Value:          "test",
+				ComparisonType: Like,
+			}},
+			wantErr: false,
+		},
+		{
+			name: "Single filter like with string args",
+			args: args{
+				env:   env,
+				query: "like(created_by.name, 'test')",
+			},
+			want: &FilterExpr{&Filter{
+				Column:         "created_by.name",
+				Value:          "test",
+				ComparisonType: Like,
+			}},
+			wantErr: false,
+		},
+		{
+			name: "Single filter like with non-string args",
+			args: args{
+				env:   env,
+				query: "like(created_by.id, 1)",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Single filter equal timestamp with int",
+			args: args{
+				env:   env,
+				query: "equal(created_by.id, 1)",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Single filter equal timestamp with int",
+			args: args{
+				env:   env,
+				query: "equal(created_by.id, 1)",
+			},
+			wantErr: true,
 		},
 		{
 			name: "Single filter less than",

@@ -53,6 +53,8 @@ const (
 	NotEqual
 	Like
 	ILike
+	IsNull
+	NotNull
 )
 
 type ConnectionType int64

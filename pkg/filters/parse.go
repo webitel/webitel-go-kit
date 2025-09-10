@@ -25,10 +25,10 @@ func parseCallExpr(call *expr.Expr_Call) (*FilterExpr, error) {
 	switch call.Function {
 	case "_&&_", "_||_":
 		return parseLogicalExpr(call)
-	case "_==_", "_!=_", "_>_", "_>=_", "_<_", "_<=_":
+	case "_==_", "_!=_", "_>_", "_>=_", "_<_", "_<=_", "like":
 		return parseComparisonExpr(call)
-	case "contains", "matches":
-		return parseLikeExpr(call)
+	case "isnull", "notnull":
+		return parseNullExpr(call)
 	default:
 		return nil, fmt.Errorf("unsupported function: %s", call.Function)
 	}
@@ -114,6 +114,26 @@ func parseLikeExpr(call *expr.Expr_Call) (*FilterExpr, error) {
 	}}, nil
 }
 
+// parseNullExpr parses isnull notnull expressions into a Filter.
+func parseNullExpr(call *expr.Expr_Call) (*FilterExpr, error) {
+	if len(call.Args) == 0 {
+		return nil, fmt.Errorf("is null expression must have 1 argument")
+	}
+
+	column, err := ExtractIdentifier(call.Args[0])
+	if err != nil {
+		return nil, err
+	}
+	comparison, err := mapCELComparison(call.Function)
+	if err != nil {
+		return nil, err
+	}
+	return &FilterExpr{&Filter{
+		Column:         column,
+		ComparisonType: comparison,
+	}}, nil
+}
+
 // parseCELASTToFilter converts a CEL AST expression into a Filterer structure.
 func parseCELASTToFilter(expr *expr.Expr) (*FilterExpr, error) {
 	return parseExpr(expr)
@@ -170,6 +190,14 @@ func mapCELComparison(function string) (Comparison, error) {
 		return LessThan, nil
 	case "_<=_":
 		return LessThanOrEqual, nil
+	case "like":
+		return Like, nil
+	case "isnull":
+		return IsNull, nil
+	case "notnull":
+		return NotNull, nil
+	case "equals":
+		return Equal, nil
 	default:
 		return 0, fmt.Errorf("unsupported comparison: %s", function)
 	}

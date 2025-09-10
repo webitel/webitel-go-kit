@@ -22,6 +22,14 @@ func ParseFilters(env *cel.Env, query string) (*FilterExpr, error) {
 	if env == nil {
 		return nil, ErrNilEnvironment
 	}
+	extensions := make([]cel.EnvOption, 0, len(FunctionExtends))
+	for _, ext := range FunctionExtends {
+		extensions = append(extensions, ext)
+	}
+	env, err := env.Extend(extensions...)
+	if err != nil {
+		return nil, err
+	}
 	ast, iss := env.Compile(query)
 	if err := iss.Err(); err != nil {
 		return nil, err
