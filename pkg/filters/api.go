@@ -42,21 +42,32 @@ func ParseFilters(env *cel.Env, query string) (*FilterExpr, error) {
 }
 
 // ExtractIdentifier extracts the full identifier path from a CEL expression.
-func ExtractIdentifier(expr *expr.Expr) (string, error) {
+func ExtractIdentifier(expr *expr.Expr, aliasToParent map[string]string) (string, error) {
 	var depth int
-	return extractIdentifier(expr, depth)
+	return extractIdentifier(expr, depth, aliasToParent)
 }
 
 // ProtoToCELVariables converts a protobuf message's fields into CEL variable declarations.
 // Also registers the message type itself in the CEL environment.
 func ProtoToCELVariables(msg proto.Message) []cel.EnvOption {
 	fields := msg.ProtoReflect().Descriptor().Fields()
-	var opts []cel.EnvOption
+	var (
+		opts []cel.EnvOption
+	)
 	opts = append(opts, cel.Types(msg))
 	for i := 0; i < fields.Len(); i++ {
-		descriptor := fields.Get(i)
-		var celType *cel.Type
-		switch descriptor.Kind() {
+		var (
+			fieldDesc = fields.Get(i)
+			repeated  bool
+			celType   *cel.Type
+			kind      = fieldDesc.Kind()
+		)
+
+		switch fieldDesc.Cardinality() {
+		case protoreflect.Repeated:
+			repeated = true
+		}
+		switch kind {
 		case protoreflect.StringKind:
 			celType = cel.StringType
 		case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind,
@@ -69,10 +80,15 @@ func ProtoToCELVariables(msg proto.Message) []cel.EnvOption {
 		case protoreflect.FloatKind, protoreflect.DoubleKind:
 			celType = cel.DoubleType
 		case protoreflect.MessageKind:
-			name := descriptor.Message().FullName()
+			name := fieldDesc.Message().FullName()
 			celType = cel.ObjectType(string(name))
+		default:
+			celType = cel.DynType
 		}
-		opts = append(opts, cel.Variable(string(descriptor.Name()), celType))
+		if repeated {
+			celType = cel.ListType(celType)
+		}
+		opts = append(opts, cel.Variable(string(fieldDesc.Name()), celType))
 	}
 	return opts
 }

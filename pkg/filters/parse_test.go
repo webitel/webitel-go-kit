@@ -83,7 +83,7 @@ func Test_extractIdentifier(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ExtractIdentifier(tt.args.expr)
+			got, err := ExtractIdentifier(tt.args.expr, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("extractIdentifier() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -302,6 +302,108 @@ func TestParseFilters(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "Wrong filter in repeated field",
+			args: args{
+				env:   env,
+				query: "tags == 'test'",
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "Wrong filter by nested field of the complex repeated field ",
+			args: args{
+				env:   env,
+				query: "related_entities.name == 'test'",
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "Exists function on list ",
+			args: args{
+				env:   env,
+				query: "related_entities.exists(v, v.name == 'test')",
+			},
+			want: &FilterExpr{
+				&Filter{
+					Column:         "related_entities.name",
+					Value:          "test",
+					ComparisonType: Contains,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Filter by nested field of the complex repeated field ",
+			args: args{
+				env:   env,
+				query: "related_entities.filter(v, v.name == 'test')",
+			},
+			want: &FilterExpr{&Filter{
+				Column:         "related_entities.name",
+				Value:          "test",
+				ComparisonType: Contains,
+			}},
+			wantErr: false,
+		},
+		{
+			name: "Filter by nested field of the complex repeated field ",
+			args: args{
+				env:   env,
+				query: "related_entities.filter(v, (v.name == 'test' && v.id != 1))",
+			},
+			want: &FilterExpr{&FilterNode{
+				Connection: And,
+				Nodes: []*FilterExpr{
+					{&Filter{
+						Column:         "related_entities.name",
+						Value:          "test",
+						ComparisonType: Contains,
+					}},
+					{&Filter{
+						Column:         "related_entities.id",
+						Value:          int64(1),
+						ComparisonType: NotContains,
+					}},
+				},
+			}},
+			wantErr: false,
+		},
+		{
+			name: "Complex filter by nested field of the complex repeated field and other complex field",
+			args: args{
+				env:   env,
+				query: "related_entities.exists(v, (v.name == 'test' && v.id != 1)) || created_by.id == 1",
+			},
+			want: &FilterExpr{&FilterNode{
+				Connection: Or,
+				Nodes: []*FilterExpr{
+					{&FilterNode{
+						Connection: And,
+						Nodes: []*FilterExpr{
+							{&Filter{
+								Column:         "related_entities.name",
+								Value:          "test",
+								ComparisonType: Contains,
+							}},
+							{&Filter{
+								Column:         "related_entities.id",
+								Value:          int64(1),
+								ComparisonType: NotContains,
+							}},
+						},
+					}},
+					{&Filter{
+						Column:         "created_by.id",
+						Value:          int64(1),
+						ComparisonType: Equal,
+					}},
+				},
+			}},
+			wantErr: false,
+		},
+		{
 			name: "And filter",
 			args: args{
 				env:   env,
@@ -388,7 +490,10 @@ func TestParseFilters(t *testing.T) {
 				t.Errorf("ParseFilters() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
+			if err != nil {
+				return
+			}
+			if !reflect.DeepEqual(*got, *tt.want) {
 				t.Errorf("ParseFilters() got = %v, want %v", got, tt.want)
 			}
 		})

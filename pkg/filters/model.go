@@ -23,6 +23,13 @@ func (f *FilterExpr) GetFilterNode() *FilterNode {
 	return nil
 }
 
+func (f *FilterExpr) GetMultiFilter() *MultiFilter[any] {
+	if x, ok := f.filter.(*MultiFilter[any]); ok {
+		return x
+	}
+	return nil
+}
+
 // Filter is a leave node in a filter tree.
 // It represents a single condition that can be applied to a query.
 type Filter struct {
@@ -42,24 +49,12 @@ type FilterNode struct {
 
 func (f *FilterNode) isFilter() {}
 
-type Comparison int64
+// MultiFilter is a leave node in a filter tree.
+// It represents a condition that checks if a column's value is in a list of values or matches any/all of them.
+type MultiFilter[T any] struct {
+	Column         string
+	Values         []T
+	ComparisonType MultiComparison
+}
 
-const (
-	Equal Comparison = iota
-	GreaterThan
-	GreaterThanOrEqual
-	LessThan
-	LessThanOrEqual
-	NotEqual
-	Like
-	ILike
-	IsNull
-	NotNull
-)
-
-type ConnectionType int64
-
-const (
-	And ConnectionType = 0
-	Or  ConnectionType = 1
-)
+func (f *MultiFilter[T]) isFilter() {}

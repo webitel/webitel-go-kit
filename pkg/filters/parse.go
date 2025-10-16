@@ -15,6 +15,8 @@ func parseExpr(s *expr.Expr) (*FilterExpr, error) {
 		return nil, fmt.Errorf("standalone identifier not supported")
 	case *expr.Expr_ConstExpr:
 		return nil, fmt.Errorf("standalone constant not supported")
+	case *expr.Expr_ComprehensionExpr:
+		return parseComprehensionExpr(e.ComprehensionExpr)
 	default:
 		return nil, fmt.Errorf("unsupported expression type")
 	}
@@ -69,7 +71,7 @@ func parseComparisonExpr(call *expr.Expr_Call) (*FilterExpr, error) {
 		return nil, fmt.Errorf("comparison expression must have 2 arguments")
 	}
 
-	column, err := ExtractIdentifier(call.Args[0])
+	column, err := ExtractIdentifier(call.Args[0], nil)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +99,7 @@ func parseLikeExpr(call *expr.Expr_Call) (*FilterExpr, error) {
 		return nil, fmt.Errorf("like expression must have 2 arguments")
 	}
 
-	column, err := ExtractIdentifier(call.Args[0])
+	column, err := ExtractIdentifier(call.Args[0], nil)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +122,7 @@ func parseNullExpr(call *expr.Expr_Call) (*FilterExpr, error) {
 		return nil, fmt.Errorf("is null expression must have 1 argument")
 	}
 
-	column, err := ExtractIdentifier(call.Args[0])
+	column, err := ExtractIdentifier(call.Args[0], nil)
 	if err != nil {
 		return nil, err
 	}
@@ -140,9 +142,9 @@ func parseCELASTToFilter(expr *expr.Expr) (*FilterExpr, error) {
 }
 
 // extractIdentifier recursively extracts the full identifier path from a CEL expression.
-func extractIdentifier(expression *expr.Expr, depth int) (string, error) {
+func extractIdentifier(expression *expr.Expr, depth int, aliasToParent map[string]string) (string, error) {
 	if selectExpr := expression.GetSelectExpr(); selectExpr != nil {
-		nested, err := extractIdentifier(selectExpr.Operand, depth+1)
+		nested, err := extractIdentifier(selectExpr.Operand, depth+1, aliasToParent)
 		if err != nil {
 			return "", err
 		}
@@ -151,7 +153,14 @@ func extractIdentifier(expression *expr.Expr, depth int) (string, error) {
 		}
 		return fmt.Sprintf("%s.%s", nested, selectExpr.GetField()), nil
 	} else if identExpr := expression.GetIdentExpr(); identExpr != nil {
-		return identExpr.Name, nil
+		name := identExpr.Name
+		if aliasToParent == nil {
+			return name, nil
+		}
+		if parent, found := aliasToParent[name]; found {
+			name = parent
+		}
+		return name, nil
 	}
 	return "", nil
 }
