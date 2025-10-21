@@ -19,6 +19,15 @@ message TestingObject {
     repeated Lookup related_entities = 6;
     repeated string tags = 7;
     map<string, string> variables = 8;
+    ListMessageImitation list_imitation = 11;
+}
+
+
+message ListMessageImitation {
+    repeated Lookup items = 1;
+    int64 total = 2;
+    int64 page = 3;
+    int64 per_page = 4;
 }
 
 message Lookup {

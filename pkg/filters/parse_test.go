@@ -404,6 +404,32 @@ func TestParseFilters(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Complex filter by nested field of the complex repeated field and other complex field",
+			args: args{
+				env:   env,
+				query: "tags.exists(v, v == 'test')",
+			},
+			want: &FilterExpr{&Filter{
+				Column:         "tags",
+				Value:          "test",
+				ComparisonType: Contains,
+			}},
+			wantErr: false,
+		},
+		{
+			name: "List Message multivalue filtration",
+			args: args{
+				env:   env,
+				query: "list_imitation.items.filter(v, v.name == 'test')",
+			},
+			want: &FilterExpr{&Filter{
+				Column:         "list_imitation.items.name",
+				Value:          "test",
+				ComparisonType: Contains,
+			}},
+			wantErr: false,
+		},
+		{
 			name: "And filter",
 			args: args{
 				env:   env,

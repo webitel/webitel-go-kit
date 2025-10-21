@@ -10,10 +10,13 @@ import (
 func parseComprehensionExpr(call *expr.Expr_Comprehension) (*FilterExpr, error) {
 	// get loop step to determine the operation
 	var (
-		parent      = call.GetIterRange().GetIdentExpr().GetName()
 		parentAlias = call.GetIterVar()
 		loopStep    = call.LoopStep
 	)
+	parent, err := extractIdentifier(call.GetIterRange(), 0, nil)
+	if err != nil {
+		return nil, err
+	}
 	if loopStep == nil {
 		return nil, fmt.Errorf("comprehension expression missing loop step")
 	}
