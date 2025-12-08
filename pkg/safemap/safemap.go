@@ -5,8 +5,8 @@ import (
 	"sync"
 )
 
-// NewSafeMap creates a new thread-safe map.
-func NewSafeMap[Key comparable, Value any](init map[Key]Value) (*SafeMap[Key, Value], error) {
+// New creates a new thread-safe map.
+func New[Key comparable, Value any](init map[Key]Value) (*SafeMap[Key, Value], error) {
 	if init == nil {
 		init = make(map[Key]Value)
 	}
