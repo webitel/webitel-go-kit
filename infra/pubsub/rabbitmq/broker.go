@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rabbitmq/amqp091-go"
@@ -19,41 +20,40 @@ var (
 type Broker interface {
 	Channel(ctx context.Context) (*amqp091.Channel, error)
 	DeclareExchange(ctx context.Context, cfg *ExchangeConfig) error
-	DeclareQueue(ctx context.Context, cfg *QueueConfig, exchange *ExchangeConfig, routingKey string) error
 	BindExchange(ctx context.Context, destination, source, routingKey string, noWait bool, args amqp091.Table) error
+	DeclareQueue(ctx context.Context, cfg *QueueConfig, exchange *ExchangeConfig, routingKey string) error
+	BindQueue(queueName string, rk string, exchange string, noWait bool, args amqp091.Table) error
 	Close() error
 }
 
 var _ Broker = (*Connection)(nil)
 
 type Connection struct {
-	cfg         *Config
-	conn        *amqp091.Connection
-	ch          *amqp091.Channel
-	mu          sync.RWMutex
-	done        chan struct{}
-	reconnectCh chan struct{}
-	logger      Logger
+	cfg    *Config
+	conn   *amqp091.Connection
+	ch     *amqp091.Channel
+	mu     sync.RWMutex
+	done   chan struct{}
+	logger Logger
+
+	reconnecting atomic.Bool
 }
 
 func NewConnection(cfg *Config, logger Logger) (*Connection, error) {
 	if logger == nil {
-		// by default no-operation logger
 		logger = &NoopLogger{}
 	}
 
 	b := &Connection{
-		cfg:         cfg,
-		done:        make(chan struct{}),
-		reconnectCh: make(chan struct{}, 1),
-		logger:      logger,
+		cfg:    cfg,
+		done:   make(chan struct{}),
+		logger: logger,
 	}
 
 	if err := b.connect(); err != nil {
 		return nil, fmt.Errorf("broker creation: %w", err)
 	}
 
-	go b.connectionWatcher()
 	return b, nil
 }
 
@@ -68,13 +68,13 @@ func (b *Connection) connect() error {
 		return fmt.Errorf("%w: %v", ErrConnectionFailed, err)
 	}
 
-	channel, err := conn.Channel()
+	ch, err := conn.Channel()
 	if err != nil {
 		_ = conn.Close()
-		return fmt.Errorf("open channel after connection: %w", err)
+		return fmt.Errorf("open channel: %w", err)
 	}
 
-	// Close old connection & channel if they exist
+	// close old resources
 	if b.ch != nil && !b.ch.IsClosed() {
 		_ = b.ch.Close()
 	}
@@ -83,9 +83,49 @@ func (b *Connection) connect() error {
 	}
 
 	b.conn = conn
-	b.ch = channel
+	b.ch = ch
+
+	go b.watchConn(conn)
+
 	b.logger.Info("connected to RabbitMQ")
 	return nil
+}
+
+func (b *Connection) watchConn(conn *amqp091.Connection) {
+	notifyClose := conn.NotifyClose(make(chan *amqp091.Error, 1))
+
+	select {
+	case err := <-notifyClose:
+		b.logger.Warn("rabbitmq connection closed", err)
+		b.reconnect()
+	case <-b.done:
+		return
+	}
+}
+
+func (b *Connection) reconnect() {
+	if !b.reconnecting.CompareAndSwap(false, true) {
+		return
+	}
+	defer b.reconnecting.Store(false)
+
+	const maxRetry = 30 * time.Second
+	retry := time.Second
+
+	for {
+		select {
+		case <-b.done:
+			return
+		default:
+			if err := b.connect(); err == nil {
+				b.logger.Info("successfully reconnected to RabbitMQ")
+				return
+			}
+
+			time.Sleep(retry)
+			retry = minDuration(retry*2, maxRetry)
+		}
+	}
 }
 
 func (b *Connection) Channel(ctx context.Context) (*amqp091.Channel, error) {
@@ -94,7 +134,7 @@ func (b *Connection) Channel(ctx context.Context) (*amqp091.Channel, error) {
 
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("context canceled while getting channel: %w", ctx.Err())
+		return nil, ctx.Err()
 	default:
 		if b.conn == nil || b.conn.IsClosed() || b.ch == nil || b.ch.IsClosed() {
 			return nil, ErrConnectionNotAvailable
@@ -106,29 +146,33 @@ func (b *Connection) Channel(ctx context.Context) (*amqp091.Channel, error) {
 func (b *Connection) DeclareExchange(ctx context.Context, cfg *ExchangeConfig) error {
 	ch, err := b.Channel(ctx)
 	if err != nil {
-		return fmt.Errorf("get channel for exchange declaration: %w", err)
+		return err
 	}
 
-	err = ch.ExchangeDeclare(
+	if err := ch.ExchangeDeclare(
 		cfg.Name,
 		string(cfg.Type),
 		cfg.Durable,
 		cfg.AutoDelete,
-		false, // internal
-		false, // noWait
-		nil,   // args
-	)
-	if err != nil {
+		false,
+		false,
+		nil,
+	); err != nil {
 		return fmt.Errorf("%w: %v", ErrDeclarationFailed, err)
 	}
 
 	return nil
 }
 
-func (b *Connection) BindExchange(ctx context.Context, source, destination, routingKey string, noWait bool, args amqp091.Table) error {
+func (b *Connection) BindExchange(
+	ctx context.Context,
+	destination, source, routingKey string,
+	noWait bool,
+	args amqp091.Table,
+) error {
 	ch, err := b.Channel(ctx)
 	if err != nil {
-		return fmt.Errorf("get channel for exchange bind: %w", err)
+		return err
 	}
 
 	if err := ch.ExchangeBind(
@@ -144,33 +188,36 @@ func (b *Connection) BindExchange(ctx context.Context, source, destination, rout
 	return nil
 }
 
-func (b *Connection) DeclareQueue(ctx context.Context, cfg *QueueConfig, exchange *ExchangeConfig, routingKey string) error {
+func (b *Connection) DeclareQueue(
+	ctx context.Context,
+	cfg *QueueConfig,
+	exchange *ExchangeConfig,
+	routingKey string,
+) error {
 	ch, err := b.Channel(ctx)
 	if err != nil {
-		return fmt.Errorf("get channel for queue declaration: %w", err)
+		return err
 	}
 
-	_, err = ch.QueueDeclare(
+	if _, err := ch.QueueDeclare(
 		cfg.Name,
 		cfg.Durable,
 		cfg.AutoDelete,
 		cfg.Exclusive,
-		false, // noWait
+		false,
 		cfg.Arguments,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("%w: %v", ErrDeclarationFailed, err)
 	}
 
 	if exchange != nil && routingKey != "" {
-		err = ch.QueueBind(
+		if err := ch.QueueBind(
 			cfg.Name,
 			routingKey,
 			exchange.Name,
-			false, // noWait
-			nil,   // args
-		)
-		if err != nil {
+			false,
+			nil,
+		); err != nil {
 			return fmt.Errorf("bind queue: %w", err)
 		}
 	}
@@ -193,70 +240,6 @@ func (b *Connection) BindQueue(queueName string, rk string, exchange string, noW
 	return nil
 }
 
-func (b *Connection) connectionWatcher() {
-	defer func() {
-		if r := recover(); r != nil {
-			b.logger.Error("panic in connection watcher", fmt.Errorf("%v", r))
-		}
-	}()
-
-	for {
-		select {
-		case <-b.done:
-			b.logger.Info("connection watcher stopping due to done signal")
-			return
-		default:
-			b.mu.RLock()
-			conn := b.conn
-			b.mu.RUnlock()
-
-			if conn == nil {
-				b.logger.Warn("connection watcher stopped: connection is nil")
-				return
-			}
-
-			notifyClose := conn.NotifyClose(make(chan *amqp091.Error, 2))
-			select {
-			case err := <-notifyClose:
-				if err != nil {
-					b.logger.Error("connection closed", fmt.Errorf("%v", err))
-					b.reconnect()
-				}
-			case <-b.done:
-				b.logger.Info("connection watcher stopping due to done signal")
-				return
-			}
-		}
-	}
-}
-
-func (b *Connection) reconnect() {
-	const maxRetryInterval = 30 * time.Second
-	retryInterval := time.Second
-
-	for i := 0; ; i++ {
-		select {
-		case <-b.done:
-			b.logger.Info("reconnect stopped due to done signal")
-			return
-		default:
-			if err := b.connect(); err == nil {
-				b.logger.Info("successfully reconnected to RabbitMQ")
-				return
-			}
-
-			if i%5 == 0 {
-				b.logger.Warn("reconnection attempt failed",
-					"attempt", i+1,
-					"retry_interval", retryInterval,
-				)
-			}
-			time.Sleep(retryInterval)
-			retryInterval = minDuration(retryInterval*2, maxRetryInterval)
-		}
-	}
-}
-
 func (b *Connection) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -274,11 +257,11 @@ func (b *Connection) Close() error {
 	if b.conn != nil && !b.conn.IsClosed() {
 		return b.conn.Close()
 	}
+
 	b.logger.Info("broker closed")
 	return nil
 }
 
-// Helper function to get minimum of two durations
 func minDuration(a, b time.Duration) time.Duration {
 	if a < b {
 		return a
