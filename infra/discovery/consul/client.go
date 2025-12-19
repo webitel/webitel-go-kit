@@ -445,7 +445,7 @@ func (c *Client) retryRegister(ctx context.Context, serviceId string, asr *api.A
 	}
 
 	if err := c.client.Agent().ServiceRegisterOpts(asr, api.ServiceRegisterOpts{}.WithContext(ctx)); err != nil {
-		c.logger.Error("[Consul] re registry service failed!, err=%v", err)
+		c.logger.Error("[Consul] re-registry service failed", "err", err)
 	} else {
 		c.logger.Warn("[Consul] re registry of service occurred success")
 	}
@@ -462,7 +462,7 @@ func (c *Client) startHeartbeat(asr *api.AgentServiceRegistration, serviceId str
 	go func() {
 		defer close(cc.done)
 		if err := c.client.Agent().UpdateTTL(ServiceStr+serviceId, "pass", "pass"); err != nil {
-			c.logger.Error("[Consul]update ttl heartbeat to consul failed! err=%v", err)
+			c.logger.Error("[Consul]update ttl heartbeat to consul failed!", "err", err)
 		}
 
 		ticker := time.NewTicker(time.Second * time.Duration(c.healthCheckInterval))
