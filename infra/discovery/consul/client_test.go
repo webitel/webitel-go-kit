@@ -25,7 +25,7 @@ func (m *mockLogger) Warn(format string, args ...any) {
 	m.Called(format, args)
 }
 
-func (m *mockLogger) Error(msg string, err error, args ...any) {
+func (m *mockLogger) Error(msg string, args ...any) {
 	m.Called(msg, args)
 }
 
