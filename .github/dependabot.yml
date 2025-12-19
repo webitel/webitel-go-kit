@@ -1,0 +1,17 @@
+version: 2
+
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/infra/discovery"
+    schedule:
+      interval: "weekly"
+    allow:
+      - dependency-type: direct
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "discovery"
+      - "go"
+    commit-message:
+      include: "scope"
+      prefix: "chore(deps): "
