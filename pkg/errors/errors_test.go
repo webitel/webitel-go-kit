@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	werror "github.com/webitel/cases/internal/errors"
+	werror "github.com/webitel/webitel-go-kit/pkg/errors"
 )
 
 func TestErrWithValue_Format(t *testing.T) {

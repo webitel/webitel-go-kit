@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/codes"
 
-	werror "github.com/webitel/cases/internal/errors"
+	werror "github.com/webitel/webitel-go-kit/pkg/errors"
 )
 
 func TestWrappers(t *testing.T) {
