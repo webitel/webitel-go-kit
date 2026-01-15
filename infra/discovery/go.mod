@@ -1,9 +1,9 @@
 module github.com/webitel/webitel-go-kit/infra/discovery
 
-go 1.25.3
+go 1.25.5
 
 require (
-	github.com/hashicorp/consul/api v1.33.0
+	github.com/hashicorp/consul/api v1.33.2
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.40.0
 	go.uber.org/goleak v1.3.0
