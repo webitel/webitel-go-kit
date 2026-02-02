@@ -350,8 +350,8 @@ func (c *Client) tcpCheck(addr string) *api.AgentServiceCheck {
 func (c *Client) ttlCheck(svc *discovery.ServiceInstance) *api.AgentServiceCheck {
 	check := new(api.AgentServiceCheck)
 	{
-		check.CheckID = ServiceStr + svc.Id
-		check.TTL = fmt.Sprintf("%ds", c.healthCheckInterval)
+		check.CheckID = ServiceStr + svc.Id + ":ttl:1"
+		check.TTL = fmt.Sprintf("%ds", c.healthCheckInterval*2)
 		check.DeregisterCriticalServiceAfter = fmt.Sprintf("%ds", c.deregisterCriticalServiceAfter)
 	}
 	return check
@@ -424,7 +424,7 @@ func (c *Client) registerService(ctx context.Context, asr *api.AgentServiceRegis
 // error, the function will cancel the heartbeat and deregister the service. Otherwise, it
 // will return the error.
 func (c *Client) sendTTL(ctx context.Context, serviceId string) error {
-	err := c.client.Agent().UpdateTTLOpts(ServiceStr+serviceId, "pass", "pass", new(api.QueryOptions).WithContext(ctx))
+	err := c.client.Agent().UpdateTTLOpts(ServiceStr+serviceId+":ttl:1", "pass", "pass", new(api.QueryOptions).WithContext(ctx))
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		_ = c.client.Agent().ServiceDeregister(serviceId)
 		return TTLContextCanceledErr
@@ -461,7 +461,7 @@ func (c *Client) retryRegister(ctx context.Context, serviceId string, asr *api.A
 func (c *Client) startHeartbeat(asr *api.AgentServiceRegistration, serviceId string, cc *canceler) {
 	go func() {
 		defer close(cc.done)
-		if err := c.client.Agent().UpdateTTL(ServiceStr+serviceId, "pass", "pass"); err != nil {
+		if err := c.client.Agent().UpdateTTL(ServiceStr+serviceId+":ttl:1", "pass", "pass"); err != nil {
 			c.logger.Error("[Consul]update ttl heartbeat to consul failed!", "err", err)
 		}
 
