@@ -1,6 +1,10 @@
 package profiler
 
-import "go.uber.org/fx"
+import (
+	"context"
+
+	"go.uber.org/fx"
+)
 
 func NewWithFx(lc fx.Lifecycle, config Config, logger Logger) *Profiler {
 	p := New(config, logger)
@@ -8,7 +12,9 @@ func NewWithFx(lc fx.Lifecycle, config Config, logger Logger) *Profiler {
 		return nil
 	}
 
-	lc.Append(fx.Hook{OnStart: p.Start, OnStop: p.Stop})
+	lc.Append(fx.Hook{OnStart: func(ctx context.Context) error {
+		return p.Start()
+	}, OnStop: p.Stop})
 
 	return p
 }
