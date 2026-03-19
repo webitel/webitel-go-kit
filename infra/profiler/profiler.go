@@ -21,8 +21,8 @@ func New(logger logger.Logger, config Config) *Profiler {
 		return nil
 	}
 
-	runtime.SetMutexProfileFraction(int(config.MutexProfileFraction))
-	runtime.SetBlockProfileRate(int(config.BlockProfileRate))
+	runtime.SetMutexProfileFraction(config.MutexProfileFraction)
+	runtime.SetBlockProfileRate(config.BlockProfileRate)
 
 	mux := http.NewServeMux()
 

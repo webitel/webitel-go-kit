@@ -1,14 +1,12 @@
 package profiler
 
-type Flag int
-
 const (
-	Enabled Flag = iota
+	Enabled = iota
 	Disabled
 )
 
 type Config struct {
 	Addr                 string
-	MutexProfileFraction Flag
-	BlockProfileRate     Flag
+	MutexProfileFraction int
+	BlockProfileRate     int
 }
