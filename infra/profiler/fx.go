@@ -3,18 +3,39 @@ package profiler
 import (
 	"context"
 
+	"github.com/webitel/webitel-go-kit/pkg/logger"
 	"go.uber.org/fx"
 )
 
-func NewWithFx(lc fx.Lifecycle, config Config, logger Logger) *Profiler {
-	p := New(config, logger)
-	if p == nil {
+type Params struct {
+	fx.In
+
+	Lifecycle fx.Lifecycle
+	Config    Config
+	Logger    logger.Logger
+}
+
+func NewProfiler(p Params) *Profiler {
+	prof := New(p.Logger, p.Config)
+	if prof == nil {
 		return nil
 	}
 
-	lc.Append(fx.Hook{OnStart: func(ctx context.Context) error {
-		return p.Start()
-	}, OnStop: p.Stop})
+	p.Lifecycle.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			return prof.Start()
+		},
+		OnStop: func(ctx context.Context) error {
+			return prof.Stop(ctx)
+		},
+	})
 
-	return p
+	return prof
 }
+
+var Module = fx.Module(
+	"profiler",
+	fx.Provide(
+		NewProfiler,
+	),
+)

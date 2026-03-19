@@ -1,32 +1,32 @@
-package slogadapter
+package logger
 
 import "log/slog"
 
-type Adapter struct {
+type SlogAdapter struct {
 	log *slog.Logger
 }
 
-func New(log *slog.Logger) *Adapter {
-	return &Adapter{log: log}
+func NewSlog(log *slog.Logger) Logger {
+	return &SlogAdapter{log: log}
 }
 
 // Info logs informational messages with structured args.
-func (a *Adapter) Info(msg string, args ...any) {
+func (a *SlogAdapter) Info(msg string, args ...any) {
 	a.log.LogAttrs(nil, slog.LevelInfo, msg, toSlogAttrs(args)...)
 }
 
 // Error logs error messages with the error as an attribute.
-func (a *Adapter) Error(msg string, args ...any) {
+func (a *SlogAdapter) Error(msg string, args ...any) {
 	a.log.LogAttrs(nil, slog.LevelError, msg, toSlogAttrs(args)...)
 }
 
 // Debug logs debug messages with the structured args.
-func (a *Adapter) Debug(msg string, args ...any) {
+func (a *SlogAdapter) Debug(msg string, args ...any) {
 	a.log.LogAttrs(nil, slog.LevelDebug, msg, toSlogAttrs(args)...)
 }
 
 // Warn logs warning messages with structured args.
-func (a *Adapter) Warn(msg string, args ...any) {
+func (a *SlogAdapter) Warn(msg string, args ...any) {
 	a.log.LogAttrs(nil, slog.LevelWarn, msg, toSlogAttrs(args)...)
 }
 

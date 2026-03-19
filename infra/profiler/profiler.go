@@ -7,20 +7,22 @@ import (
 	"net/http/pprof"
 	"runtime"
 	"time"
+
+	"github.com/webitel/webitel-go-kit/pkg/logger"
 )
 
 type Profiler struct {
 	server *http.Server
-	logger Logger
+	logger logger.Logger
 }
 
-func New(config Config, logger Logger) *Profiler {
+func New(logger logger.Logger, config Config) *Profiler {
 	if config.Addr == "" {
 		return nil
 	}
 
-	runtime.SetMutexProfileFraction(1)
-	runtime.SetBlockProfileRate(1)
+	runtime.SetMutexProfileFraction(int(config.MutexProfileFraction))
+	runtime.SetBlockProfileRate(int(config.BlockProfileRate))
 
 	mux := http.NewServeMux()
 
