@@ -23,5 +23,3 @@ require (
 	golang.org/x/sys v0.0.0-20220412211240-33da011f77ad // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
 )
-
-replace github.com/webitel/webitel-go-kit/pkg/logger => ../../pkg/logger

@@ -1,8 +1,8 @@
 package profiler
 
 const (
-	Enabled = iota
-	Disabled
+	Disabled = iota
+	Enabled
 )
 
 type Config struct {
