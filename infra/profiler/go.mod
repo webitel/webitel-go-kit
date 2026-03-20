@@ -3,14 +3,13 @@ module profiler
 go 1.26.1
 
 require (
-	github.com/webitel/webitel-go-kit/pkg/logger v0.0.21
+	github.com/webitel/webitel-go-kit/pkg/logger v0.0.0-20260319194757-156f10ec5c45
 	go.uber.org/fx v1.24.0
 )
 
 require (
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/stretchr/testify v1.9.0 // indirect
 	github.com/webitel/wlog v0.0.0-20250325101442-de4f125c1ec7 // indirect
 	go.opentelemetry.io/contrib/bridges/otelzap v0.0.0-20240812153829-bb9ac54eca05 // indirect
 	go.opentelemetry.io/otel v1.28.0 // indirect
