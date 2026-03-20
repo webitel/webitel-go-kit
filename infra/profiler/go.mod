@@ -1,6 +1,6 @@
 module github.com/webitel/webitel-go-kit/infra/profiler
 
-go 1.26.1
+go 1.25.4
 
 require (
 	github.com/webitel/webitel-go-kit/pkg/logger v0.0.0-20260319194757-156f10ec5c45
