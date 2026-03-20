@@ -1,4 +1,4 @@
-module profiler
+module github.com/webitel/webitel-go-kit/infra/profiler
 
 go 1.26.1
 
