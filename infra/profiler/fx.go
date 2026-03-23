@@ -15,7 +15,7 @@ type Params struct {
 	Logger    logger.Logger
 }
 
-func NewProfiler(p Params) *Profiler {
+func NewWithFx(p Params) *Profiler {
 	prof := New(p.Logger, p.Config)
 	if prof == nil {
 		return nil
@@ -35,7 +35,6 @@ func NewProfiler(p Params) *Profiler {
 
 var Module = fx.Module(
 	"profiler",
-	fx.Provide(
-		NewProfiler,
-	),
+	fx.Provide(NewWithFx),
+	fx.Invoke(func(*Profiler) {}),
 )
