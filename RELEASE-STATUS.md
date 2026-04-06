@@ -20,7 +20,7 @@ the `release-status` workflow from the Actions tab.
 | `infra/sqldb` | `(none)` | 2 | never released |
 | `infra/transport` | `(none)` | 1 | never released |
 | `pkg/errors` | `(none)` | 4 | never released |
-| `pkg/etag` | `(none)` | 1 | never released |
+| `pkg/etag` | `v0.1.0` | 0 | up to date |
 | `pkg/filters` | `v0.1.0` | 0 | up to date |
 | `pkg/interceptors` | `v0.1.0` | 0 | up to date |
 | `pkg/logger` | `v0.1.1` | 0 | up to date |
