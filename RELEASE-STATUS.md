@@ -15,7 +15,7 @@ the `release-status` workflow from the Actions tab.
 | `infra/fts_client` | `(none)` | 1 | never released |
 | `infra/logger_client` | `(none)` | 5 | never released |
 | `infra/otel` | `(none)` | 3 | never released |
-| `infra/profiler` | `(none)` | 11 | never released |
+| `infra/profiler` | `(none)` | 12 | never released |
 | `infra/pubsub/rabbitmq` | `(none)` | 20 | never released |
 | `infra/sqldb` | `(none)` | 2 | never released |
 | `infra/transport` | `(none)` | 1 | never released |
