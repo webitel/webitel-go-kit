@@ -9,8 +9,20 @@ name: Modules
 
 on:
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'RELEASE-STATUS.md'
+
   push:
     branches: [main]
+
+    # Skip docs-only pushes. In particular, release-status.yml commits
+    # RELEASE-STATUS.md refreshes straight to main; without this filter
+    # every such refresh would cancel the previous modules-ci run
+    # (cancel-in-progress: true below) and rebuild 15 modules for nothing.
+    paths-ignore:
+      - '**/*.md'
+      - 'RELEASE-STATUS.md'
 
 concurrency:
   group: modules-ci-${{ github.ref }}
