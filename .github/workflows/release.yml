@@ -1,0 +1,209 @@
+name: Release
+
+# Homegrown single-step release for one Go module.
+#
+# You pick a module and a bump kind (patch / minor / major). The workflow
+# reads the latest existing tag for that module from git, computes the next
+# version, builds and tests the module in isolation, and then tags + pushes.
+#
+# Why bump-kind instead of typing the version: typing semver by hand is the
+# easiest way to skip a number, repeat one, or push v0.20 when you meant
+# v0.2.0. Picking from {patch, minor, major} cannot produce a malformed tag.
+#
+# What it does:
+#   1. Looks up the latest <module>/vX.Y.Z tag in git, computes the next
+#      version, refuses to clobber an existing tag.
+#   2. Verifies the chosen module directory has a go.mod.
+#   3. Builds, vets, and tests the module in isolation (GOWORK=off, exactly
+#      how an external consumer would resolve it).
+#   4. Creates an annotated tag <module-dir>/<version> on main and pushes it.
+#
+# After the tag lands, cascade-deps.yml notices the new tag and opens a PR
+# bumping every dependent go.mod in the repo.
+#
+# First release of a module: if no <module>/v* tag exists yet, the bump kind
+# is ignored and the first release is always v0.1.0 (matching the convention
+# in this repo that nothing starts API-stable).
+#
+# The `module` options list is kept in sync with go.mod files on disk by
+# sync-release-modules.yml. You should not need to edit it by hand.
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: 'Module to release'
+        required: true
+        type: choice
+        options:
+          - infra/discovery
+          - infra/fts_client
+          - infra/logger_client
+          - infra/otel
+          - infra/profiler
+          - infra/pubsub/rabbitmq
+          - infra/sqldb
+          - infra/transport
+          - pkg/errors
+          - pkg/etag
+          - pkg/filters
+          - pkg/interceptors
+          - pkg/logger
+          - pkg/safemap
+          - pkg/watcher
+
+      bump:
+        description: 'How to bump the version'
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    name: ${{ inputs.module }} / ${{ inputs.bump }}
+    env:
+      GOWORK: "off"
+
+    steps:
+      - name: Create Github APP token
+        id: app-token
+        uses: webitel/reusable-workflows/actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.DELIVERY_BOT_APP_ID }}
+          private-key: ${{ secrets.DELIVERY_BOT_APP_PEM }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Compute next version
+        id: compute
+        run: |
+          set -euo pipefail
+
+          MODULE="${{ inputs.module }}"
+          BUMP="${{ inputs.bump }}"
+
+          # Module dir sanity.
+          if [[ ! -f "${MODULE}/go.mod" ]]; then
+            echo "::error::No go.mod found at ${MODULE}/go.mod"
+            exit 1
+          fi
+
+          # Find the highest existing tag for this module.
+          LATEST=$(git tag --list "${MODULE}/v[0-9]*.[0-9]*.[0-9]*" \
+            | sort -V | tail -n 1 || true)
+
+          if [[ -z "$LATEST" ]]; then
+            # First release of this module: convention is v0.1.0 regardless
+            # of bump kind.
+            echo "::notice::No existing tag for ${MODULE} — first release will be v0.1.0 (bump kind '${BUMP}' ignored)"
+            CURRENT="(none)"
+            NEW_VERSION="v0.1.0"
+          else
+            CURRENT="${LATEST##*/}"          # strip "<module>/" prefix
+            VER="${CURRENT#v}"               # strip leading v
+
+            # Refuse to bump from a prerelease — semantics are ambiguous.
+            if [[ "$VER" == *-* ]]; then
+              echo "::error::Latest tag ${LATEST} is a prerelease. Cut a stable release manually before using this workflow."
+              exit 1
+            fi
+
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
+            case "$BUMP" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+              *)
+                echo "::error::Unknown bump '${BUMP}'"
+                exit 1
+                ;;
+            esac
+            NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          TAG="${MODULE}/${NEW_VERSION}"
+
+          # Defensive: refuse if tag already exists (covers manual tags and
+          # races between concurrent dispatches).
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Tag ${TAG} already exists"
+            exit 1
+          fi
+
+          echo "current=${CURRENT}"     >> "$GITHUB_OUTPUT"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"             >> "$GITHUB_OUTPUT"
+
+          echo "Module:   ${MODULE}"
+          echo "Current:  ${CURRENT}"
+          echo "Bump:     ${BUMP}"
+          echo "New:      ${NEW_VERSION}"
+          echo "Tag:      ${TAG}"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.module }}/go.mod
+          cache-dependency-path: ${{ inputs.module }}/go.sum
+
+      - name: Download dependencies
+        working-directory: ${{ inputs.module }}
+        run: go mod download
+
+      - name: Check suspicious constructs
+        working-directory: ${{ inputs.module }}
+        run: go vet ./...
+
+      - name: Build module
+        working-directory: ${{ inputs.module }}
+        run: go build ./...
+
+      - name: Test module
+        working-directory: ${{ inputs.module }}
+        run: go test -race ./...
+
+      - name: Configure git
+        run: |
+          git config user.name  "${{ steps.app-token.outputs.user-name }}"
+          git config user.email "${{ steps.app-token.outputs.user-email }}"
+
+      - name: Create and push tag
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.compute.outputs.tag }}"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Release run"
+            echo
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| module | \`${{ inputs.module }}\` |"
+            echo "| bump | \`${{ inputs.bump }}\` |"
+            echo "| previous | \`${{ steps.compute.outputs.current }}\` |"
+            echo "| new | \`${{ steps.compute.outputs.version }}\` |"
+            echo "| tag | \`${{ steps.compute.outputs.tag }}\` |"
+            echo
+            if [[ "${{ job.status }}" == "success" ]]; then
+              echo "Tag pushed. \`cascade-deps\` will now scan for dependents and"
+              echo "open a PR if any other module needs its pseudo-version bumped."
+            else
+              echo "Release did not complete. No tag was pushed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

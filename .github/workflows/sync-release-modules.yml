@@ -1,0 +1,122 @@
+name: Release modules
+
+# When a PR adds, removes, or moves a go.mod, the static `options:` list in
+# release.yml drifts away from reality. This workflow detects that drift on
+# every PR commit and fixes it IN-PLACE: it pushes the corrected release.yml
+# straight back to the PR branch, so the same PR that changes module layout
+# also carries the release.yml update. No second PR, no review-two-things,
+# no merge ordering puzzle.
+#
+# Triggers on every push to the PR (synchronize), so if a contributor adds
+# go.mod in commit A and the workflow updates release.yml in commit B, then
+# the contributor force-pushes commit C without that update — the next
+# synchronize event will re-add it.
+#
+# Limitations:
+#   - Forks can't be pushed to from this workflow (the same-repo `if:` guard
+#     skips them). For fork PRs you'd update release.yml manually, or merge
+#     a branch from the main repo first.
+#   - GITHUB_TOKEN-pushed commits do not re-trigger pull_request workflows
+#     (GitHub safety), so this never recurses.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**/go.mod'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  sync:
+    # Skip fork PRs — we can't push to a fork's branch with GITHUB_TOKEN.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    name: Sync
+    steps:
+      - name: Create Github APP token
+        id: app-token
+        uses: webitel/reusable-workflows/actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.DELIVERY_BOT_APP_ID }}
+          private-key: ${{ secrets.DELIVERY_BOT_APP_PEM }}
+
+      - name: Checkout PR head branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Detect drift between disk and release.yml
+        id: diff
+        run: |
+          set -euo pipefail
+
+          # Modules currently on disk.
+          DESIRED=$(find . -name go.mod -not -path './.git/*' -not -path '*/vendor/*' \
+            -exec dirname {} \; | sed 's|^\./||' | sort)
+
+          # Modules currently listed in release.yml.
+          CURRENT=$(yq '.on.workflow_dispatch.inputs.module.options[]' \
+            .github/workflows/release.yml | sort)
+
+          if [[ "$DESIRED" == "$CURRENT" ]]; then
+            echo "::notice::release.yml module list already in sync"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Drift detected (- current, + desired):"
+          diff <(printf '%s\n' "$CURRENT") <(printf '%s\n' "$DESIRED") || true
+
+          # Persist the desired list as a JSON array for the yq edit step.
+          printf '%s\n' "$DESIRED" | jq -R -s -c 'split("\n") | map(select(length > 0))' \
+            > /tmp/modules.json
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Rewrite release.yml options
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          MODULES_JSON=$(cat /tmp/modules.json)
+          export MODULES_JSON
+          yq -i \
+            '.on.workflow_dispatch.inputs.module.options = (env(MODULES_JSON) | from_json)' \
+            .github/workflows/release.yml
+
+          echo "New release.yml options:"
+          yq '.on.workflow_dispatch.inputs.module.options' .github/workflows/release.yml
+
+      - name: Commit and push to PR branch
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name  "${{ steps.app-token.outputs.user-name }}"
+          git config user.email "${{ steps.app-token.outputs.user-email }}"
+
+          git add .github/workflows/release.yml
+          git commit -m "chore(ci): sync release.yml module list" \
+                     -m "Auto-detected drift after go.mod changes in this PR."
+          
+          git push origin "HEAD:${{ github.head_ref }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Sync release modules"
+            if [[ "${{ steps.diff.outputs.changed }}" == "true" ]]; then
+              echo "Drift detected — pushed sync commit to \`${{ github.head_ref }}\`."
+            else
+              echo "No drift — release.yml module list is in sync."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
