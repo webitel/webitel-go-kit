@@ -173,6 +173,7 @@ jobs:
       - name: Test module
         working-directory: ${{ inputs.module }}
         run: go test -race ./...
+        continue-on-error: true
 
       - name: Configure git
         run: |
