@@ -19,7 +19,7 @@ the `release-status` workflow from the Actions tab.
 | `infra/pubsub/rabbitmq` | `(none)` | 20 | never released |
 | `infra/sqldb` | `(none)` | 2 | never released |
 | `infra/transport` | `(none)` | 1 | never released |
-| `pkg/errors` | `(none)` | 5 | never released |
+| `pkg/errors` | `v0.1.0` | 0 | up to date |
 | `pkg/etag` | `v0.1.0` | 0 | up to date |
 | `pkg/filters` | `v0.1.0` | 0 | up to date |
 | `pkg/interceptors` | `v0.1.0` | 0 | up to date |
