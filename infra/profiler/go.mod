@@ -3,7 +3,7 @@ module github.com/webitel/webitel-go-kit/infra/profiler
 go 1.25.4
 
 require (
-	github.com/webitel/webitel-go-kit/pkg/logger v0.0.0-20260320143753-3eb058ef0682
+	github.com/webitel/webitel-go-kit/pkg/logger v0.1.0
 	go.uber.org/fx v1.24.0
 )
 
