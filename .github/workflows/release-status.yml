@@ -8,9 +8,10 @@ name: Release status
 #   - A status: "released" / "needs release" / "never released"
 #
 # Triggers:
-#   - push to main          → keep status fresh after every change
-#   - daily cron            → safety net in case a push is missed
-#   - workflow_dispatch     → manual refresh from the Actions tab
+#   - push to main            → keep status fresh after every change
+#   - push of a release tag   → reflect a just-released module immediately
+#   - daily cron              → safety net in case a push is missed
+#   - workflow_dispatch       → manual refresh from the Actions tab
 #
 # How it commits:
 #   Pushes the refreshed RELEASE-STATUS.md directly to `main` using a
@@ -18,15 +19,16 @@ name: Release status
 #   for `main` — otherwise this workflow will fail on the push step.
 #
 # Loop safety: the push only changes RELEASE-STATUS.md, and `paths-ignore`
-# on the push trigger skips re-runs when only that file changes — so the
-# workflow cannot re-trigger itself.
+# on the `push:branches` trigger skips re-runs when only that file changes,
+# so the workflow cannot re-trigger itself.
 
 on:
   push:
     branches: [main]
+    tags:
+      - '**/v[0-9]+.[0-9]+.[0-9]+'
+      - '**/v[0-9]+.[0-9]+.[0-9]+-*'
 
-    # Skip the cosmetic refresh path: don't re-run when only RELEASE-STATUS.md
-    # changes (which is what THIS workflow itself just committed).
     paths-ignore:
       - 'RELEASE-STATUS.md'
 
@@ -37,6 +39,14 @@ on:
 
 permissions:
   contents: read
+
+# Serialize runs so that two releases dispatched back-to-back can't race
+# each other on the push to main. The second run queues behind the first
+# and then sees the already-updated file via `ref: main` checkout, so it
+# incrementally adds its own delta.
+concurrency:
+  group: release-status
+  cancel-in-progress: false
 
 jobs:
   status:
@@ -53,6 +63,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          ref: main
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
