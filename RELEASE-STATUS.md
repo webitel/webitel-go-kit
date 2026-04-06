@@ -25,7 +25,7 @@ the `release-status` workflow from the Actions tab.
 | `pkg/interceptors` | `(none)` | 2 | never released |
 | `pkg/logger` | `(none)` | 3 | never released |
 | `pkg/safemap` | `v0.1.0` | 0 | up to date |
-| `pkg/watcher` | `(none)` | 2 | never released |
+| `pkg/watcher` | `v0.1.0` | 0 | up to date |
 
 **How to release a module:** dispatch the `release` workflow from the
 Actions tab, choose the module, choose a bump kind (`patch` / `minor` /
