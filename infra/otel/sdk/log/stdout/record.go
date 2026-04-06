@@ -93,7 +93,6 @@ type recordOTEL struct {
 }
 
 func (e *Exporter) newRecordJSON(r sdklog.Record) recordOTEL {
-	res := r.Resource()
 	newRecord := recordOTEL{
 		Severity:     r.Severity(),
 		SeverityText: r.SeverityText(),
@@ -105,7 +104,7 @@ func (e *Exporter) newRecordJSON(r sdklog.Record) recordOTEL {
 
 		Attributes: make([]keyValue, 0, r.AttributesLen()),
 
-		Resource: &res,
+		Resource: r.Resource(),
 		Scope:    r.InstrumentationScope(),
 
 		DroppedAttributes: r.DroppedAttributes(),
