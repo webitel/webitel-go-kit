@@ -51,7 +51,7 @@ jobs:
           private-key: ${{ secrets.DELIVERY_BOT_APP_PEM }}
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}

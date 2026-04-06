@@ -36,7 +36,7 @@ jobs:
       modules: ${{ steps.list.outputs.modules }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: list
         name: Discover go.mod files
         run: |
@@ -60,9 +60,9 @@ jobs:
         module: ${{ fromJson(needs.discover.outputs.modules) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ matrix.module }}/go.mod
           cache-dependency-path: ${{ matrix.module }}/go.sum

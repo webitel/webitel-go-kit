@@ -1,4 +1,4 @@
-name: Release modules
+name: Sync modules
 
 # When a PR adds, removes, or moves a go.mod, the static `options:` list in
 # release.yml drifts away from reality. This workflow detects that drift on
@@ -44,7 +44,7 @@ jobs:
           private-key: ${{ secrets.DELIVERY_BOT_APP_PEM }}
 
       - name: Checkout PR head branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
