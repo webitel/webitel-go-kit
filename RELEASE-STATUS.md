@@ -12,7 +12,7 @@ the `release-status` workflow from the Actions tab.
 | Module | Latest released | Unreleased commits | Status |
 |---|---|---|---|
 | `infra/discovery` | `(none)` | 5 | never released |
-| `infra/errors` | `(none)` | 1 | never released |
+| `infra/errors` | `v0.0.1` | 0 | up to date |
 | `infra/fts_client` | `(none)` | 1 | never released |
 | `infra/logger_client` | `(none)` | 5 | never released |
 | `infra/otel` | `v0.1.0` | 0 | up to date |
