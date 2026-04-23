@@ -18,6 +18,7 @@ the `release-status` workflow from the Actions tab.
 | `infra/otel` | `v0.1.0` | 0 | up to date |
 | `infra/profiler` | `v0.1.0` | 0 | up to date |
 | `infra/pubsub/rabbitmq` | `(none)` | 20 | never released |
+| `infra/ratelimit` | `(none)` | 1 | never released |
 | `infra/sqldb` | `(none)` | 2 | never released |
 | `infra/transport` | `(none)` | 1 | never released |
 | `pkg/errors` | `v0.1.0` | 0 | up to date |
