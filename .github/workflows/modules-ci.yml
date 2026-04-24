@@ -1,0 +1,84 @@
+name: Modules
+
+# Safety net for the multi-module repo: on every PR and push to main, build
+# and test each Go module IN ISOLATION. GOWORK=off guarantees that modules
+# resolve their dependencies exactly as an external consumer would via
+# proxy.golang.org, not via any local go.work shortcut. If a module's
+# pseudo-version pins are stale or its go.mod is incomplete, this job is
+# where it fails — before a release tag is cut.
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'RELEASE-STATUS.md'
+
+  push:
+    branches: [main]
+
+    # Skip docs-only pushes. In particular, release-status.yml commits
+    # RELEASE-STATUS.md refreshes straight to main; without this filter
+    # every such refresh would cancel the previous modules-ci run
+    # (cancel-in-progress: true below) and rebuild 15 modules for nothing.
+    paths-ignore:
+      - '**/*.md'
+      - 'RELEASE-STATUS.md'
+
+concurrency:
+  group: modules-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    name: Discover
+    runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.list.outputs.modules }}
+
+    steps:
+      - uses: actions/checkout@v6
+      - id: list
+        name: Discover go.mod files
+        run: |
+          set -euo pipefail
+          modules=$(find . -name go.mod -not -path './.git/*' -not -path '*/vendor/*' \
+            -exec dirname {} \; | sed 's|^\./||' | sort | jq -R -s -c 'split("\n")[:-1]')
+          echo "modules=$modules" >> "$GITHUB_OUTPUT"
+          echo "Found modules:"
+          echo "$modules" | jq -r '.[]'
+
+  build:
+    needs: discover
+    runs-on: ubuntu-latest
+    name: Build
+    env:
+      GOWORK: "off"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJson(needs.discover.outputs.modules) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Download dependencies
+        working-directory: ${{ matrix.module }}
+        run: go mod download
+
+      - name: Check suspicious constructs
+        working-directory: ${{ matrix.module }}
+        run: go vet ./...
+
+      - name: Build module
+        working-directory: ${{ matrix.module }}
+        run: go build ./...
+
+      - name: Test module
+        working-directory: ${{ matrix.module }}
+        run: go test -race ./...

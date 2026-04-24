@@ -1,4 +1,4 @@
-// Package werror provides a way to return detailed information
+// Package errors provides a way to return detailed information
 // for an RPC request error. The error is normally JSON encoded.
 package errors
 
@@ -8,10 +8,6 @@ import (
 
 	"google.golang.org/grpc/codes"
 )
-
-// один тип загальний з полями ід, мессадж, статус, інфо
-// ід, мессадж, статус як константа
-// метод для сеттінгу деталей map[string]any
 
 // New creates a new error, with a stack attached.
 // The equivalent of golang's errors.New()

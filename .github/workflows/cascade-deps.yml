@@ -1,0 +1,285 @@
+name: Update dependents
+
+# Fires automatically when a release tag is pushed by release.yml.
+#
+# Problem it solves: when module A pseudo-version-pins module B and B just
+# got released, A's go.mod still points at the old version. Someone has to
+# run `go get B@<new-version>` inside A, commit, and re-release A. This
+# workflow automates the mechanical part of that cascade.
+#
+# Logic:
+#   1. Read the just-pushed tag from GITHUB_REF (and any sibling tags on the
+#      same commit, in case multiple releases landed together).
+#   2. Scan every go.mod in the repo. For each one that has a `require`
+#      line for a freshly-tagged module, run `go get <mod>@<new-version>`
+#      followed by `go mod tidy` in that module's directory.
+#   3. If anything changed, create ONE consolidated PR titled
+#      "chore(deps): cascade intra-repo module bumps".
+#
+# What this workflow does NOT do: it does not release the dependent
+# modules. You still need to dispatch release.yml for them manually once
+# this cascade PR is reviewed and merged. That's intentional — the cascade
+# is mechanical, but the decision "should dependents also get a new version
+# tag" remains yours.
+
+on:
+  push:
+    tags:
+      - '**/v[0-9]+.[0-9]+.[0-9]+'
+      - '**/v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Serialize cascade runs so two releases dispatched back-to-back don't race
+# each other when scanning go.mod files and opening PRs. The second run waits
+# for the first to finish instead of producing a stale parallel PR.
+concurrency:
+  group: cascade-deps
+  cancel-in-progress: false
+
+jobs:
+  cascade:
+    runs-on: ubuntu-latest
+    name: Cascade bumps
+    env:
+      GOWORK: "off"
+
+    steps:
+      - name: Create Github APP token
+        id: app-token
+        uses: webitel/reusable-workflows/actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.DELIVERY_BOT_APP_ID }}
+          private-key: ${{ secrets.DELIVERY_BOT_APP_PEM }}
+
+      - name: Checkout repo at tagged commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Discover freshly-published module tags
+        id: fresh
+        run: |
+          set -euo pipefail
+          SHA="${{ github.sha }}"
+          TAGS=$(git tag --points-at "$SHA" || true)
+
+          if [[ -z "$TAGS" ]]; then
+            echo "::notice::No tags on $SHA, nothing to cascade"
+            echo "has_updates=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Tags on release commit:"
+          echo "$TAGS"
+
+          REPO_PREFIX="github.com/${{ github.repository }}"
+          : > /tmp/released.txt
+
+          while IFS= read -r tag; do
+            [[ -z "$tag" ]] && continue
+            # Expected tag format: <module-relative-path>/vX.Y.Z[-prerelease]
+            if [[ ! "$tag" =~ ^(.+)/(v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?)$ ]]; then
+              echo "::warning::Tag '$tag' does not match <path>/<version>, skipping"
+              continue
+            fi
+          
+            modpath_rel="${BASH_REMATCH[1]}"
+            version="${BASH_REMATCH[2]}"
+            modpath="${REPO_PREFIX}/${modpath_rel}"
+            echo "${modpath} ${version}" >> /tmp/released.txt
+          done <<< "$TAGS"
+
+          if [[ ! -s /tmp/released.txt ]]; then
+            echo "::notice::No parseable module tags found"
+            echo "has_updates=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Released modules:"
+          cat /tmp/released.txt
+          echo "has_updates=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout main for update work
+        if: steps.fresh.outputs.has_updates == 'true'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: false
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Find dependents and bump
+        id: update
+        if: steps.fresh.outputs.has_updates == 'true'
+        run: |
+          set -euo pipefail
+          : > /tmp/updates.txt
+
+          while IFS=' ' read -r modpath version; do
+            [[ -z "$modpath" ]] && continue
+            echo "=== Scanning for dependents of $modpath ==="
+
+            # Find go.mod files that require this module (as direct or indirect).
+            # We match `<tab><modpath> v` to avoid matching the module declaration
+            # line and avoid partial-path false positives.
+            dependents=$(grep -lrE "^[[:space:]]+${modpath//\//\\/}[[:space:]]+v" \
+              --include=go.mod . 2>/dev/null || true)
+
+            if [[ -z "$dependents" ]]; then
+              echo "  (no dependents)"
+              continue
+            fi
+
+            for gomod in $dependents; do
+              mod_dir=$(dirname "$gomod")
+
+              # Self-reference guard: skip if this go.mod declares the module itself.
+              self_path=$(awk '/^module / {print $2; exit}' "$gomod")
+              if [[ "$self_path" == "$modpath" ]]; then
+                continue
+              fi
+
+              echo "  bumping in $mod_dir"
+              (
+                cd "$mod_dir"
+                go get "${modpath}@${version}"
+                go mod tidy
+              )
+              echo "${mod_dir}: ${modpath} -> ${version}" >> /tmp/updates.txt
+            done
+          done < /tmp/released.txt
+
+          if ! git diff --quiet; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "Changes detected:"
+            git diff --stat
+          else
+            echo "::notice::No dependents needed updates (already at target version)"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify dependents still build
+        if: steps.update.outputs.has_changes == 'true'
+        run: |
+          set -euo pipefail
+          
+          # Build each module that we touched, not the whole repo.
+          # This catches cases where the bump exposes a compile break
+          # (e.g. the released module had an API change).
+          cut -d: -f1 /tmp/updates.txt | sort -u | while IFS= read -r mod_dir; do
+            echo "=== Build $mod_dir ==="
+            (cd "$mod_dir" && go build ./... && go vet ./...)
+          done
+
+      - name: Create cascade PR
+        if: steps.update.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          git config user.name  "${{ steps.app-token.outputs.user-name }}"
+          git config user.email "${{ steps.app-token.outputs.user-email }}"
+
+          BRANCH="cascade-deps-$(date -u +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "chore(deps): cascade intra-repo module bumps"
+
+          # Compute "modules pending release" from THIS branch's perspective
+          # (after the cascade commit). For each module, count commits since
+          # its last <module>/v* tag that touched files in its directory.
+          # The cascade commit will make most dependents show up here, which
+          # is exactly the actionable list the maintainer needs.
+          : > /tmp/pending.txt
+          while IFS= read -r mod_dir; do
+            [[ -z "$mod_dir" ]] && continue
+            LATEST=$(git tag --list "${mod_dir}/v[0-9]*.[0-9]*.[0-9]*" \
+              | sort -V | tail -n 1 || true)
+            if [[ -z "$LATEST" ]]; then
+              COUNT=$(git rev-list HEAD -- "$mod_dir" 2>/dev/null | wc -l | tr -d ' ')
+              if [[ "$COUNT" -gt 0 ]]; then
+                echo "${mod_dir}|(never released)|${COUNT}" >> /tmp/pending.txt
+              fi
+            else
+              COUNT=$(git rev-list "${LATEST}..HEAD" -- "$mod_dir" 2>/dev/null \
+                | wc -l | tr -d ' ')
+              if [[ "$COUNT" -gt 0 ]]; then
+                VERSION="${LATEST##*/}"
+                echo "${mod_dir}|${VERSION}|${COUNT}" >> /tmp/pending.txt
+              fi
+            fi
+          done < <(find . -name go.mod -not -path './.git/*' -not -path '*/vendor/*' \
+                   -exec dirname {} \; | sed 's|^\./||' | sort)
+
+          # Build PR body from updates.txt + pending.txt.
+          {
+            echo "Automated cascade of intra-repo module bumps after release.yml ran."
+            echo
+            echo "### Bumps applied in this PR"
+            while IFS= read -r line; do
+              echo "- \`${line}\`"
+            done < /tmp/updates.txt
+            echo
+            echo "### Modules pending release after merge"
+            echo
+            if [[ -s /tmp/pending.txt ]]; then
+              echo "After this PR is merged, the following modules will have unreleased"
+              echo "commits on \`main\` and may need a new release dispatched via \`release.yml\`:"
+              echo
+              echo "| Module | Last released | Unreleased commits |"
+              echo "|---|---|---|"
+              while IFS='|' read -r dir ver count; do
+                echo "| \`${dir}\` | \`${ver}\` | ${count} |"
+              done < /tmp/pending.txt
+              echo
+              echo "Releasing them is a judgment call — bundle related cascades into a"
+              echo "single new version when it makes sense, instead of one tag per cascade."
+            else
+              echo "_No modules have unreleased commits._"
+            fi
+            echo
+            echo "### Notes"
+            echo "- Each bumped module was verified with \`go build ./...\` and \`go vet ./...\`."
+            echo "- This PR does **not** release the dependents. To release them, dispatch"
+            echo "  the \`release\` workflow with the appropriate bump kind after merging."
+            echo "- The \`release-status.yml\` workflow refreshes \`RELEASE-STATUS.md\` on every"
+            echo "  push to \`main\` if you want a longer-lived view of pending releases."
+          } > /tmp/pr_body.md
+
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(deps): cascade intra-repo module bumps" \
+            --body-file /tmp/pr_body.md \
+            --label dependencies \
+            --label automated
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## cascade-deps run"
+            if [[ "${{ steps.fresh.outputs.has_updates }}" != "true" ]]; then
+              echo "No released modules detected on the release commit."
+            elif [[ "${{ steps.update.outputs.has_changes }}" != "true" ]]; then
+              echo "Released modules detected but no dependents needed bumps."
+            else
+              echo "Opened cascade PR with the following bumps:"
+              echo
+              echo '```'
+              cat /tmp/updates.txt 2>/dev/null || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

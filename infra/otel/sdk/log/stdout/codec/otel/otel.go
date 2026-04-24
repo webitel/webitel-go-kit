@@ -112,7 +112,6 @@ type record struct {
 }
 
 func (enc *Encoder) record(src sdk.Record) record {
-	rsc := src.Resource()
 	out := record{
 
 		Timestamp:         enc.opts.Timestamp(src.Timestamp()),
@@ -128,7 +127,7 @@ func (enc *Encoder) record(src sdk.Record) record {
 
 		Attributes: make([]keyValue, 0, src.AttributesLen()),
 
-		Resource: &rsc,
+		Resource: src.Resource(),
 		Scope:    src.InstrumentationScope(),
 
 		DroppedAttributes: src.DroppedAttributes(),

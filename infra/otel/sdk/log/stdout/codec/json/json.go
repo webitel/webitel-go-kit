@@ -229,7 +229,7 @@ func (enc *Encoder) record(src sdk.Record) record {
 		// Attributes: make([]keyValue, 0, rec.AttributesLen()),
 
 		Resource: Resource(
-			src.Resource(),
+			*src.Resource(),
 		),
 		Scope: instrumentationScope(
 			src.InstrumentationScope(),

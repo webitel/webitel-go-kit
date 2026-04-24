@@ -116,21 +116,20 @@ func severity(level int) log.Severity {
 // V reports whether verbosity level l is at least the requested verbose level.
 // https://github.com/grpc/grpc-go/blob/v1.65.0/grpclog/loggerv2.go#L79
 func (h *Handler) V(level int) bool {
-	var test log.Record
-	test.SetSeverity(severity(level))
 	return h.Logger.Enabled(
-		context.Background(), test,
+		context.Background(),
+		log.EnabledParameters{Severity: severity(level)},
 	)
 }
 
 func (h *Handler) emit(lvl log.Severity, msg string) {
+	ctx := context.TODO()
+	if !h.Logger.Enabled(ctx, log.EnabledParameters{Severity: lvl}) {
+		return // ignore
+	}
 	var rec log.Record
 	rec.SetTimestamp(time.Now())
 	rec.SetSeverity(lvl)
-	ctx := context.TODO()
-	if !h.Logger.Enabled(ctx, rec) {
-		return // ignore
-	}
 	rec.SetBody(log.StringValue(msg))
 	h.Logger.Emit(ctx, rec)
 }
