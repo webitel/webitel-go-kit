@@ -32,7 +32,7 @@ func UnaryServerErrorInterceptor() grpc.UnaryServerInterceptor {
 }
 
 func logAndReturnGRPCError(ctx context.Context, err error, info *grpc.UnaryServerInfo) error {
-	slog.WarnContext(ctx, fmt.Sprintf("method %s, error: %v", info.FullMethod, err.Error()))
+	slog.WarnContext(ctx, fmt.Sprintf("method %s, error: %v", info.FullMethod, errors.Details(err)))
 
 	span := trace.SpanFromContext(ctx)
 	span.RecordError(err)
