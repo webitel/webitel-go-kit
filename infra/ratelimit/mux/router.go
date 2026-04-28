@@ -38,12 +38,12 @@ func NewRouter() *Router {
 var _ ratelimit.Handler = (*Router)(nil)
 
 // LimitRequest implements ratelimit.Handler interface
-func (c *Router) LimitRequest(req ratelimit.Request) (ratelimit.Status, error) {
+func (c *Router) LimitRequest(req *ratelimit.Request) (ratelimit.Status, error) {
 
 	if req.Http == nil {
 		// Not enough data to decide !
 		// +Passthrough by default ..
-		return ratelimit.Allow(&req), nil
+		return ratelimit.Allow(req), nil
 	}
 
 	var match mux.RouteMatch
@@ -54,7 +54,7 @@ func (c *Router) LimitRequest(req ratelimit.Request) (ratelimit.Status, error) {
 
 	if handler == nil {
 		// No route == no limit constraints !
-		return ratelimit.Allow(&req), nil
+		return ratelimit.Allow(req), nil
 	}
 
 	// PERFORM

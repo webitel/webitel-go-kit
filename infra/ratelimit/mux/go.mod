@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/gorilla/mux v1.8.1
-	github.com/webitel/webitel-go-kit/infra/ratelimit v0.0.1
+	github.com/webitel/webitel-go-kit/infra/ratelimit v0.1.0
 )
 
 require (

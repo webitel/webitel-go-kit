@@ -19,15 +19,15 @@ func (*routeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 var _ ratelimit.Handler = (*routeHandler)(nil)
 
-func (h *routeHandler) LimitRequest(req ratelimit.Request) (ratelimit.Status, error) {
+func (h *routeHandler) LimitRequest(req *ratelimit.Request) (ratelimit.Status, error) {
 	if h.handler != nil {
 		// log: route hit ..
-		h.debugRequest(&req)
+		h.debugRequest(req)
 		// invoke undelying ratelimit.Handler
 		return h.handler.LimitRequest(req)
 	}
 	// Dummy Route ; No constraints ! ALLOW !
-	return ratelimit.Allow(&req), nil
+	return ratelimit.Allow(req), nil
 }
 
 func (h *routeHandler) debugRequest(req *ratelimit.Request) {
@@ -107,7 +107,7 @@ func (c *Router) HttpMiddleware(next http.Handler) http.Handler {
 		)
 
 		// PERFORM
-		status, err := handler.LimitRequest(req)
+		status, err := handler.LimitRequest(&req)
 
 		if err != nil {
 			ratelimit.HttpWriteError(w, err)

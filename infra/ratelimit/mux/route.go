@@ -247,7 +247,7 @@ type routeLimitGroup struct {
 var _ ratelimit.Handler = (*routeLimitGroup)(nil)
 
 // LimitRequest implements ratelimit.Handler interface.
-func (h *routeLimitGroup) LimitRequest(req ratelimit.Request) (res ratelimit.Status, err error) {
+func (h *routeLimitGroup) LimitRequest(req *ratelimit.Request) (res ratelimit.Status, err error) {
 
 	// res == Forbidden
 
@@ -256,7 +256,7 @@ func (h *routeLimitGroup) LimitRequest(req ratelimit.Request) (res ratelimit.Sta
 
 	if n == 0 {
 		// NO [limit_req] directives ..
-		return ratelimit.Allow(&req), nil // OK, nil
+		return ratelimit.Allow(req), nil // OK, nil
 	}
 
 	if n == 1 {
@@ -311,7 +311,7 @@ func (h *routeLimitGroup) LimitRequest(req ratelimit.Request) (res ratelimit.Sta
 		// NONE zone of group affected
 		// -or- No ANY key(s) available !
 		// res = Passthrough
-		res = ratelimit.Allow(&req)
+		res = ratelimit.Allow(req)
 		return res, nil
 	}
 	// [Dis]allowed first !
@@ -368,6 +368,11 @@ func (x statusTopWorst) Len() int {
 	return len(x)
 }
 
+// Swap swaps the elements with indexes i and j.
+func (x statusTopWorst) Swap(i int, j int) {
+	x[i], x[j] = x[j], x[i]
+}
+
 // Less reports whether the element with index i
 // must sort before the element with index j.
 //
@@ -384,11 +389,44 @@ func (x statusTopWorst) Len() int {
 // is not a transitive ordering when not-a-number (NaN) values are involved.
 // See Float64Slice.Less for a correct implementation for floating-point values.
 func (x statusTopWorst) Less(i int, j int) bool {
-	a, b := x[i], x[j]
-	return a.RetryAfter > b.RetryAfter || a.Remaining < b.Remaining // || a.Allowed < 1
+	xi, xj := x[i], x[j]
+	// 1. More time to wait ..
+	if xi.RetryAfter > 0 {
+		return (xi.RetryAfter - xj.RetryAfter) >= 0
+	}
+	if xj.RetryAfter > 0 {
+		// xi.RetryAfter <= 0 && xj.RetryAfter > 0
+		// SWAP: [j] MUST sort BEFORE [i]
+		return false
+	}
+	// 2. NOT Allowed ?
+	if xi.Allowed == 0 {
+		// [i] MUST sort BEFORE [j]
+		return true
+	}
+	if xj.Allowed == 0 {
+		// SWAP: [j] MUST sort BEFORE [i]
+		return false
+	}
+	// 3. Has LESS tokens left ..
+	if xi.Limit > 0 {
+		if xj.Limit > 0 {
+			// both has Limits, less tokens remaining on TOP ..
+			return xi.Remaining <= xj.Remaining
+		}
+		// [i] has Limit -and- [j] dont !
+		// [i] MUST sort BEFORE [j]
+		return true
+	}
+	if xj.Limit > 0 {
+		// [j] has Limit -and- [i] dont !
+		return false
+	}
+	// It seems to be equal ; no need to swap records ..
+	return true
 }
 
-// Swap swaps the elements with indexes i and j.
-func (x statusTopWorst) Swap(i int, j int) {
-	x[i], x[j] = x[j], x[i]
-}
+// func (x statusTopWorst) Less(i int, j int) bool {
+// 	a, b := x[i], x[j]
+// 	return a.RetryAfter > b.RetryAfter || a.Remaining < b.Remaining // || a.Allowed < 1
+// }

@@ -16,8 +16,8 @@ github.com/webitel/protos/gen/go/rpc v0.0.1 h1:zjjuQhENVX6eV0LeX/eRvYLC7I8Ri32fT
 github.com/webitel/protos/gen/go/rpc v0.0.1/go.mod h1:2EKce35jl7YOIVZrUYc4t5sOxICo31W200wTZ62inNg=
 github.com/webitel/webitel-go-kit/infra/errors v0.0.1 h1:3RRT0pSOkbcWHvZZsdILBk6MNPhLiwELhzBQhYGVcqg=
 github.com/webitel/webitel-go-kit/infra/errors v0.0.1/go.mod h1:jajP5+oPTQNgBbRrFiMQxp0liir0Eq88nxxbzsYrkA4=
-github.com/webitel/webitel-go-kit/infra/ratelimit v0.0.1 h1:+C4ThRQ69Viiren2uDwSKk3v2LlpazEXAhz5wN784uI=
-github.com/webitel/webitel-go-kit/infra/ratelimit v0.0.1/go.mod h1:RO62ZGIekNxycGo9wudj/7F+KtymipYsRT9Ckv1SDuA=
+github.com/webitel/webitel-go-kit/infra/ratelimit v0.1.0 h1:k1wmSAhF/weZvV49ANZk9DfBerl+eZO8OiHd2IaMD9Q=
+github.com/webitel/webitel-go-kit/infra/ratelimit v0.1.0/go.mod h1:RO62ZGIekNxycGo9wudj/7F+KtymipYsRT9Ckv1SDuA=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/otel v1.39.0 h1:8yPrr/S0ND9QEfTfdP9V+SiwT4E0G7Y5MO7p85nis48=
