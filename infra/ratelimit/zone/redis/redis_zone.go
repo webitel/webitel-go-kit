@@ -27,7 +27,7 @@ func (rc *redisZone) Options() ratelimit.Options {
 
 // Limit single request with context
 // Returns the time duration to wait before the request can be processed.
-func (rc *redisZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, err error) {
+func (rc *redisZone) LimitRequest(req *ratelimit.Request) (res ratelimit.Status, err error) {
 	// panic("not implemented")
 	var (
 		zone = &rc.options // req.Zone
@@ -36,11 +36,17 @@ func (rc *redisZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, 
 		// burst uint32
 		cost  = max(1, req.Cost)
 		burst = max(1, zone.Burst)
+		// key.Value(?) was determined ?
+		bypass = (vkey == ratelimit.Undefined)
 	)
 
 	defer func() {
 
 		level := slog.LevelDebug
+		if bypass {
+			vkey = "$bypass" // indicates: NO key.Value("") was determined !
+			level = slog.LevelWarn
+		}
 		if err != nil || !res.OK() {
 			level = slog.LevelError
 		}
@@ -69,6 +75,11 @@ func (rc *redisZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, 
 		)
 
 	}()
+
+	if bypass {
+		// bypass: NO key.Value("") for limit was determined !
+		return ratelimit.Allow(req), nil
+	}
 
 	ctx := req.Context
 	key := limitKey(rc.options.Name, vkey)

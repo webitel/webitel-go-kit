@@ -17,11 +17,11 @@ type Key interface {
 	String() string // Key.(name)
 
 	// Key [Value] associated with given [Request]
-	Value(Request) Value
+	Value(*Request) Value
 }
 
 // MUST return [Key] specific [Value] to apply limit to ..
-type ValueFunc func(Request) Value
+type ValueFunc func(*Request) Value
 
 // NamedKey represents a ValueFunc as a [Key]
 type NamedKey struct {
@@ -39,7 +39,7 @@ func (x NamedKey) String() string {
 	return ""
 }
 
-func (x NamedKey) Value(req Request) Value {
+func (x NamedKey) Value(req *Request) Value {
 	if x.Read != nil {
 		return x.Read(req)
 	}
@@ -56,7 +56,7 @@ func KeyFunc(name string, read ValueFunc) Key {
 func KeyValue(name string, value Value) Key {
 	return NamedKey{
 		Name: name,
-		Read: func(_ Request) string {
+		Read: func(_ *Request) string {
 			return value
 		},
 	}

@@ -17,11 +17,11 @@ func (c *Forbidden) Options() ratelimit.Options {
 }
 
 // LimitRequest implements ratelimit.Handler interface.
-func (c *Forbidden) LimitRequest(req ratelimit.Request) (ratelimit.Status, error) {
+func (c *Forbidden) LimitRequest(req *ratelimit.Request) (ratelimit.Status, error) {
 	ratelimit.Log(
 		req.Context, req.Logger,
 		slog.LevelWarn, "| ✕ (forbidden)",
 		slog.String("zone.name", (*ratelimit.Options)(c).Name),
 	)
-	return ratelimit.Deny(&req), nil
+	return ratelimit.Deny(req), nil
 }

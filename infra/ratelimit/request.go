@@ -63,7 +63,7 @@ func (req *Request) setup(opts ...RequestOption) {
 // Get [env] Key.(Value) for this Request
 func (req *Request) Get(env Key) Value {
 	// return req.Env.Get(req.Context, key)
-	return req.Env.Key(env).Value(*req)
+	return req.Env.Key(env).Value(req)
 }
 
 // Set [env] Key.(Value) for this Request

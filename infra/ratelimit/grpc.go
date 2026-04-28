@@ -8,23 +8,38 @@ import (
 	"github.com/webitel/webitel-go-kit/infra/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
 )
 
-// GrpcAddress [Value]
-func GrpcAddress(ctx context.Context) Value {
-	if peer, ok := peer.FromContext(ctx); ok {
-		return peer.Addr.String()
-	}
-	return Undefined
-}
+// // GrpcAddress [Value]
+// func GrpcRemoteIP(ctx context.Context) (ip netip.Addr, ok bool) {
+// 	peer, _ := peer.FromContext(ctx)
+// 	if peer == nil {
+// 		return // netip.Addr{}, false
+// 	}
+// 	switch addr := peer.Addr.(type) {
+// 	case *net.IPAddr:
+// 		{
+// 			ip, ok = netip.AddrFromSlice(addr.IP)
+// 		}
+// 	case *net.TCPAddr:
+// 		{
+// 			ip, ok = netip.AddrFromSlice(addr.IP)
+// 		}
+// 	case *net.UDPAddr:
+// 		{
+// 			ip, ok = netip.AddrFromSlice(addr.IP)
+// 		}
+// 	case *net.UnixAddr:
+// 	}
+// 	return // ip, ok
+// }
 
 func GrpcUnaryServerInterceptor(front Handler) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, invoke grpc.UnaryHandler) (res any, err error) {
+	return func(ctx context.Context, args any, info *grpc.UnaryServerInfo, invoke grpc.UnaryHandler) (resp any, err error) {
 
 		if front != nil {
 
-			emit, err := http.NewRequestWithContext(
+			http, err := http.NewRequestWithContext(
 				ctx, http.MethodPost, info.FullMethod,
 				http.NoBody,
 			)
@@ -32,29 +47,29 @@ func GrpcUnaryServerInterceptor(front Handler) grpc.UnaryServerInterceptor {
 			// emit.RemoteAddr =
 
 			// emit.TLS = ???
-			emit.Proto = "HTTP/2.0"
-			emit.ProtoMajor = 2
-			emit.ProtoMinor = 0
+			http.Proto = "HTTP/2.0"
+			http.ProtoMajor = 2
+			http.ProtoMinor = 0
 
 			head2, _ := metadata.FromIncomingContext(ctx)
 			for h, vs := range head2 {
 				switch h {
 				case ":authority":
-					emit.Host = vs[0]
+					http.Host = vs[0]
 					continue // for ..
 				}
 				for _, v := range vs {
-					emit.Header.Add(h, v)
+					http.Header.Add(h, v)
 				}
 			}
 
-			limitReq := NewRequest(
+			req := NewRequest(
 				ctx, func(req *Request) {
-					req.Http = emit
+					req.Http = http
 				},
 			)
 
-			status, err := front.LimitRequest(limitReq)
+			status, err := front.LimitRequest(&req)
 			if err != nil {
 				// Bad Gateway ; [front] error !
 				return nil, errors.BadGateway(
@@ -73,7 +88,7 @@ func GrpcUnaryServerInterceptor(front Handler) grpc.UnaryServerInterceptor {
 		}
 
 		// passthrough ..
-		return invoke(ctx, req)
+		return invoke(ctx, args)
 	}
 }
 

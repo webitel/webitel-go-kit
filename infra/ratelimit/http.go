@@ -1,7 +1,7 @@
 package ratelimit
 
 import (
-	"net"
+	// "net"
 	"net/http"
 	"strconv"
 
@@ -9,14 +9,23 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// HttpAddress [Value]
-func HttpAddress(ctx Request) Value {
-	if req := ctx.Http; req != nil {
-		host, _, _ := net.SplitHostPort(req.RemoteAddr)
-		return host // IP address string
-	}
-	return Undefined
-}
+// // HttpAddress [Value]
+// func HttpRemoteIP(req *http.Request) (ip netip.Addr, ok bool) {
+// 	if req == nil || req.RemoteAddr == "" {
+// 		// err = fmt.Errorf("!http.Request.RemoteAddr")
+// 		return // netip.Addr{}, false
+// 	}
+// 	peer, err := netip.ParseAddrPort(req.RemoteAddr)
+// 	if ok = (err == nil); ok {
+// 		return peer.Addr(), true
+// 	}
+// 	ip, re := netip.ParseAddr(req.RemoteAddr)
+// 	if ok = (re == nil); ok {
+// 		return ip, true
+// 	}
+// 	// invalid: addr:port
+// 	return // netip.Addr{}, false
+// }
 
 // HTTP middlware
 func HttpMiddleware(front Handler, back http.Handler) http.Handler {
@@ -40,7 +49,7 @@ func HttpMiddleware(front Handler, back http.Handler) http.Handler {
 				},
 			)
 
-			status, err := front.LimitRequest(req)
+			status, err := front.LimitRequest(&req)
 
 			if err != nil {
 				HttpWriteError(w, err)

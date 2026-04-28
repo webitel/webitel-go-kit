@@ -128,7 +128,7 @@ func (c *memoryZone) Options() ratelimit.Options {
 	return c.opts
 }
 
-func (c *memoryZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, err error) {
+func (c *memoryZone) LimitRequest(req *ratelimit.Request) (res ratelimit.Status, err error) {
 
 	var (
 		// ctx = req.Context
@@ -143,11 +143,17 @@ func (c *memoryZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, 
 		// rate  = &zone.Rate
 		cost  = max(1, req.Cost)
 		burst = max(1, zone.Burst)
+		// key.Value(?) was determined ?
+		bypass = (vkey == ratelimit.Undefined)
 	)
 
 	defer func() {
 
 		level := slog.LevelDebug
+		if bypass {
+			vkey = "$bypass" // indicates: NO key.Value("") was determined !
+			level = slog.LevelWarn
+		}
 		if err != nil || !res.OK() {
 			level = slog.LevelError
 		}
@@ -176,6 +182,11 @@ func (c *memoryZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, 
 		)
 
 	}()
+
+	if bypass {
+		// bypass: NO key.Value("") for limit was determined !
+		return ratelimit.Allow(req), nil
+	}
 
 	record, ok := c.table.Get(pkey)
 	if !ok {
