@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/webitel/webitel-go-kit/infra/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
@@ -35,84 +34,87 @@ import (
 // }
 
 func GrpcUnaryServerInterceptor(front Handler) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, args any, info *grpc.UnaryServerInfo, invoke grpc.UnaryHandler) (resp any, err error) {
+	return func(ctx context.Context, args any, grpc *grpc.UnaryServerInfo, invoke grpc.UnaryHandler) (resp any, err error) {
 
-		if front != nil {
+		http, err := http.NewRequestWithContext(
+			ctx, http.MethodPost, grpc.FullMethod,
+			http.NoBody,
+		)
+		// emit.RequestURI =
+		// emit.RemoteAddr =
 
-			http, err := http.NewRequestWithContext(
-				ctx, http.MethodPost, info.FullMethod,
-				http.NoBody,
-			)
-			// emit.RequestURI =
-			// emit.RemoteAddr =
+		// emit.TLS = ???
+		http.Proto = "HTTP/2.0"
+		http.ProtoMajor = 2
+		http.ProtoMinor = 0
 
-			// emit.TLS = ???
-			http.Proto = "HTTP/2.0"
-			http.ProtoMajor = 2
-			http.ProtoMinor = 0
-
-			head2, _ := metadata.FromIncomingContext(ctx)
-			for h, vs := range head2 {
-				switch h {
-				case ":authority":
-					http.Host = vs[0]
-					continue // for ..
-				}
-				for _, v := range vs {
-					http.Header.Add(h, v)
-				}
+		head, _ := metadata.FromIncomingContext(ctx)
+		for h, vs := range head {
+			switch h {
+			case ":authority":
+				http.Host = vs[0]
+				continue // for ..
 			}
-
-			req := NewRequest(
-				ctx, func(req *Request) {
-					req.Http = http
-				},
-			)
-
-			status, err := front.LimitRequest(&req)
-			if err != nil {
-				// Bad Gateway ; [front] error !
-				return nil, errors.BadGateway(
-					errors.Message(err.Error()),
-				)
+			for _, v := range vs {
+				http.Header.Add(h, v)
 			}
-
-			// if !status.OK() {}
-
-			ctx, err = GrpcResponse(ctx, status)
-			if err != nil {
-				// Denied
-				return nil, err
-			}
-
 		}
 
-		// passthrough ..
+		req := NewRequest(
+			ctx, func(req *Request) {
+				req.Http = http
+			},
+		)
+
+		status, err := front.LimitRequest(&req)
+		if err != nil {
+			// // Bad Gateway ; [front] error !
+			// return nil, errors.BadGateway(
+			// 	errors.Message(err.Error()),
+			// )
+		}
+
+		// if !status.OK() {}
+
+		ctx, err = GrpcResponse(ctx, status)
+		if err != nil {
+			// Forbidden / Denied !
+			return nil, err
+		}
+
+		// Not Affected / Allow[ed] / Passthrough ..
 		return invoke(ctx, args)
 	}
 }
 
-func GrpcResponse(ctx context.Context, res Status) (context.Context, error) {
+func GrpcResponse(ctx context.Context, res *Status) (context.Context, error) {
+
+	if res == nil {
+		// Not affected !
+		return ctx, nil
+	}
 
 	if res.Limit == 0 {
-		// No [RATE_LIMIT] assigned !
+		// No [Limit] applied !
+		// Check permitted ?
 		if res.Allowed > 0 {
-			// +ALLOW[ed] !
+			// +[ALLOWED]
 			return ctx, nil
 		}
-		// DENIED for all !
+		// -[DENIED] for ALL !
 		return ctx, ErrForbidden
 	}
 
-	header := make([]string, 0, (4 * 2)) // kv.. == 2
+	head := make([]string, 0, (4 * 2)) // kv.. == 2
 	headQuota := func(key string, quota int64) {
 		if quota == 0 {
 			return
 		}
-		header = append(header, key, strconv.FormatInt(quota, 10))
+		head = append(head, key, strconv.FormatInt(quota, 10))
 	}
 
 	headQuota(H2LimitQuota, int64(res.Limit))
+	// headQuota("X-RateLimit-Allowed", 1) // ~ res.Allowed
 	headQuota(H2LimitRemaining, int64(res.Remaining))
 	headQuota(H2LimitResetAfter, MinSeconds(res.ResetAfter))
 
@@ -121,9 +123,9 @@ func GrpcResponse(ctx context.Context, res Status) (context.Context, error) {
 	}
 
 	// populate [X-RateLimit-*] status details
-	if len(header) > 0 {
+	if len(head) > 0 {
 		ctx = metadata.AppendToOutgoingContext(
-			ctx, header...,
+			ctx, head...,
 		)
 	}
 

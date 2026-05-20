@@ -6,11 +6,10 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/webitel/webitel-go-kit/infra/ratelimit"
 	limitzone "github.com/webitel/webitel-go-kit/infra/ratelimit/zone"
 )
 
-func New(dataSource string, options ratelimit.Options) (ratelimit.Zone, error) {
+func New(dataSource string, options limitzone.Options) (limitzone.Zone, error) {
 	// TODO: "redis:///.." => "unix:/.."
 	dsn, err := redis.ParseURL(dataSource)
 	if err != nil {

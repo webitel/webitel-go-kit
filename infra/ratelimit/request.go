@@ -60,6 +60,15 @@ func (req *Request) setup(opts ...RequestOption) {
 	req.Cost = max(1, req.Cost)
 }
 
+// Clone returns a deep copy of [req] with its context changed to ctx.
+// The provided [ctx] must be non-nil.
+func (req *Request) Clone(ctx context.Context) *Request {
+	r2 := new(Request)
+	*r2 = *req
+	r2.Context = ctx
+	return r2
+}
+
 // Get [env] Key.(Value) for this Request
 func (req *Request) Get(env Key) Value {
 	// return req.Env.Get(req.Context, key)

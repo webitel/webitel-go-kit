@@ -41,30 +41,38 @@ func (fn LogValue) LogValue() slog.Value {
 
 // LogValue implements slog.Valuer interface
 func (res *Status) LogValue() slog.Value {
-	status := "forbidden"
 	if res == nil {
-		return slog.StringValue(status)
+		return slog.StringValue("BYPASS") // ("not_applied")
 	}
+	status := "FORBIDDEN" // FOREVER ; NOT temporary
 	if res.Allowed > 0 {
-		status = "OK" // passthrough
+		if res.Limit > 0 {
+			status = "ALLOW" // SUCCESS ; applied & pass
+		} else {
+			status = "PASS" // PASSTHROUGH ; not_applied & pass
+		}
+	} else if res.Limit > 0 { // && res.Allowed == 0
+		// Has [Limit] exhausted (temporary)
+		status = "DENY"
 	}
+
 	params := []slog.Attr{
 		// slog.String("msec", res.Date.Format(":05.000")),                       // Time precision (in milliseconds) ; Date from log record
-		slog.Int("allow", int(res.Allowed)),                                   // consumed token(-s) count ; cost of the request
+		// slog.Int("allow", int(res.Allowed)),                                   // consumed token(-s) count ; cost of the request
 		slog.String("remain", fmt.Sprintf("%d/%d", res.Remaining, res.Limit)), // more tokens left in bucket after been consumed
 		slog.Duration("reset", res.ResetAfter.Round(time.Millisecond)),        // tokens count (according to the limit rate) will be fully refreshed in ..
 	}
 	if res.RetryAfter > 0 {
-		status = "flood_wait_" + strconv.FormatInt(MinSeconds(res.RetryAfter), 10) // flood_wait_$(sec)
+		status = "FLOOD_WAIT_" + strconv.FormatInt(MinSeconds(res.RetryAfter), 10) // FLOOD_WAIT_$(sec)
 		params = append(params, slog.Duration("retry", res.RetryAfter.Round(time.Millisecond)))
 	}
-	params = append(params, slog.String("status", status))
+	params = append(params, slog.String("code", status)) // slog.String("status", status))
 	return slog.GroupValue(params...)
 }
 
 var noLogs = slog.New(slog.DiscardHandler)
 
-func LogModule(module string, logger *slog.Logger) *slog.Logger {
+func ModuleLog(module string, logger *slog.Logger) *slog.Logger {
 	h := logger.Handler()
 	h2 := LogHandler(module, h)
 	if h2 == h {
