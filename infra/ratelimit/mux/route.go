@@ -7,6 +7,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/webitel/webitel-go-kit/infra/ratelimit"
+	limitzone "github.com/webitel/webitel-go-kit/infra/ratelimit/zone"
 )
 
 // Route stores information to match a HTTP request
@@ -14,7 +15,7 @@ type Route struct {
 	http      *mux.Route           // HTTP matching rules
 	opts      routeOptions         // debug options
 	handler   ratelimit.Handler    // Rate-Limit request handler for the route.
-	namedZone ratelimit.NamedZones // registry of known zone(s)
+	namedZone limitzone.NamedZones // registry of known zone(s)
 	// Error resulted from building a route.
 	err error
 }
@@ -155,20 +156,7 @@ func (c *Route) PathPrefix(tmpl string) *Route {
 
 // Zone -----------------------------------------------------------------------
 
-// LimitRequest Options
-// for future expansion purpose
-type LimitOptions struct {
-	// // Zone.(Handler) for examination ..
-	// Zone Zone
-	// // Burst is the maximum number of tokens a bucket (-like algorithms) can hold,
-	// // allowing a temporary, rapid spike in traffic to exceed the average rate limit instantly
-	// Burst *uint32
-	// // The Delay parameter specifies a limit at which excessive requests become delayed.
-	// // Nil value stands for NoDelay option, i.e.
-	// // Zero value i.e. all excessive requests are delayed.
-	// // Otherwise all excessive (after N) requests are delayed.
-	// Delay *uint32
-}
+type LimitOptions = limitzone.LimitOptions
 
 // Zone adds a [sub]request to the route to check the limit of the given [name] zone with options.
 func (c *Route) Zone(name string, opts LimitOptions) *Route {
@@ -185,7 +173,7 @@ func (c *Route) Zone(name string, opts LimitOptions) *Route {
 	}
 
 	// check Handler implementation ..
-	route, _ := c.handler.(*routeLimitGroup)
+	route, _ := c.handler.(*routeZones)
 	if route == nil && c.handler != nil {
 		// intercepted ; custom handler
 		// zone could not be affected !
@@ -193,136 +181,152 @@ func (c *Route) Zone(name string, opts LimitOptions) *Route {
 	}
 
 	if route == nil && c.handler == nil {
-		route := &routeLimitGroup{
+		route := &routeZones{
 			// route: c,
 			// namedZone: c.namedZone,
-			limitOpts: map[string]LimitOptions{
+			opts: map[string]LimitOptions{
 				name: opts,
 			},
-			routeZone: []ratelimit.Zone{zone},
+			zone: []limitzone.Zone{zone},
 		}
 		c.handler = route
 		return c
 	}
 	// override req.(zone).options
-	_, exists := route.limitOpts[name]
-	if route.limitOpts[name] = opts; !exists {
-		route.routeZone = append(route.routeZone, zone)
+	_, exists := route.opts[name]
+	if route.opts[name] = opts; !exists {
+		route.zone = append(route.zone, zone)
 	}
 
 	return c
 }
 
-// Zone Handler --------------------------------------------------------------
-
-// routeLimitGroup Handler
-type routeLimitGroup struct {
-	// route *Route // top related HTTP route (matcher)
-	// namedZone ratelimit.NamedZones // .well-known zones registry
-	limitOpts map[string]LimitOptions // named zone(s) request options
-	routeZone []ratelimit.Zone        // prepared (forward) requests
+type RouteZone struct {
+	Zone limitzone.Zone
+	limitzone.LimitOptions
 }
 
-// // prepare (build) configuration(s) for handler
-// func (h *routeLimitGroup) routes() []ratelimit.Zone {
-// 	if h.routeZone != nil {
-// 		return h.routeZone
-// 	}
-// 	// build ; once ..
-// 	routes := make([]ratelimit.Zone, 0, len(h.limitOpts))
-// 	for name, opts := range h.limitOpts {
-// 		_ = opts // not affected for now ...
-// 		zone, _ := h.namedZone[name]
-// 		if zone != nil {
-// 			// defined !
-// 			routes = append(routes, zone)
-// 		}
-// 	}
-// 	// sort: worst zone.rate on top ..
-// 	sort.Sort(limitTopWorst(routes))
-// 	h.routeZone = routes
-// 	return h.routeZone
-// }
+func (c *Route) GetZone() []RouteZone {
 
-var _ ratelimit.Handler = (*routeLimitGroup)(nil)
+	group, _ := c.handler.(*routeZones)
+	if group == nil {
+		return nil
+	}
+
+	route := make([]RouteZone, len(group.zone))
+	for e, zone := range group.zone {
+		route[e] = RouteZone{
+			Zone:         zone,
+			LimitOptions: group.opts[zone.Options().Name],
+		}
+	}
+	return route
+}
+
+// Zone Handler --------------------------------------------------------------
+
+// routeZones Handler
+type routeZones struct {
+	// route *Route // top related HTTP route (matcher)
+	// namedZone ratelimit.NamedZones // .well-known zones registry
+	opts map[string]LimitOptions // named zone(s) request options
+	zone []limitzone.Zone        // prepared (forward) requests
+}
+
+var _ ratelimit.Handler = (*routeZones)(nil)
 
 // LimitRequest implements ratelimit.Handler interface.
-func (h *routeLimitGroup) LimitRequest(req *ratelimit.Request) (res ratelimit.Status, err error) {
+func (h *routeZones) LimitRequest(req *ratelimit.Request) (res *ratelimit.Status, err error) {
 
 	// res == Forbidden
 
-	routes := h.routeZone // h.routes()
-	n := len(routes)      // [BULK] request(s) count
+	route := h.zone // h.routes()
+	n := len(route) // [BULK] request(s) count
 
 	if n == 0 {
 		// NO [limit_req] directives ..
+		// MAY be used as an EXCEPT of the "default" route !
+		// ALLOW such configuration !
 		return ratelimit.Allow(req), nil // OK, nil
 	}
 
 	if n == 1 {
-		// simple case ..
-		return routes[0].LimitRequest(req)
+		// simple case: single zone !
+		return route[0].LimitRequest(req)
 	}
 
-	defer func() {
+	// defer func() {
 
-		args := []any{
-			// worst status as a single result of the group of (sub)requests
-			slog.Any("limit", &res),
-		}
+	// 	args := []any{
+	// 		// worst status as a single result of the group of (sub)requests
+	// 		slog.Any("status", res),
+	// 	}
 
-		level := slog.LevelDebug
+	// 	level := slog.LevelDebug
 
-		if err != nil {
-			level = slog.LevelError
-			args = append(args, slog.Any("err", err))
-		}
+	// 	if err != nil {
+	// 		level = slog.LevelError
+	// 		args = append(args, slog.String("err", err.Error()))
+	// 	}
 
-		req.Log(
-			// final status result of (sub)requests group
-			level, "| = (group)",
-			args...,
-		)
+	// 	req.Log(
+	// 		// final status result of (sub)requests group
+	// 		level, "└── (group)", // "| = (group)",
+	// 		args...,
+	// 	)
 
-	}()
+	// }()
 
 	// group of result(s)
 	group := make([]*ratelimit.Status, 0, n)
 
 	// TODO: sort top-worst zones
-	for _, zone := range routes {
-		// // populate LimitOptions
-		// req.setup(sub.RequestOption)
-		// // Resolve Key.(Value) once for Group of Request(s) ..
-		// req.Key = env.Key(sub.Zone.Options().Key).Value(req.Context)
-		// // zone.Value = groupEnv(zone.Key, zone.Value)
+	ctx := req.Context
+	defer func() {
+		// back to original
+		req.Context = ctx
+	}()
+	for _, zone := range route {
+
+		// populate zone.LimitOptions for this request
+		opts, _ := h.opts[zone.Options().Name]
+		req.Context = limitzone.WithLimitOptions(ctx, opts)
+
 		status, err := zone.LimitRequest(req)
 
 		if err != nil {
-			// Zone.Limiter.(Storage) error
-			return res, err
+			// Just LOG & check returned status !
+			req.Log(slog.LevelWarn, "Limit handler error", "err", err.Error())
+			continue
+			// // Zone.Limiter.(Storage) error
+			// return res, err
 		}
 
-		group = append(group, &status)
+		// Applied ?
+		if status != nil {
+			group = append(group, status)
+		}
 	}
 
 	// Has affected limit zone(s) ?
 	if len(group) == 0 {
 		// NONE zone of group affected
 		// -or- No ANY key(s) available !
-		// res = Passthrough
-		res = ratelimit.Allow(req)
-		return res, nil
+		// FIXME: Not Applied ?
+		return nil, nil
+		// // res = Passthrough
+		// res = ratelimit.Allow(req)
+		// return res, nil
 	}
 	// [Dis]allowed first !
 	sort.Sort(statusTopWorst(group))
-	res = *(group[0])
+	res = group[0]
 	return res, nil
 }
 
 // Results of limit_req(s) group
 // Sort.Interface by [top]=worst Status
-type limitTopWorst []ratelimit.Zone
+type limitTopWorst []limitzone.Zone
 
 var _ sort.Interface = limitTopWorst(nil)
 
