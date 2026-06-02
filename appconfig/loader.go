@@ -41,6 +41,10 @@ func (l *Loader) RegisterFlags(fs *pflag.FlagSet) {
 
 	if l.sections.Postgres {
 		fs.String("postgres.dsn", "", "PostgreSQL DSN (required)")
+		fs.Int("postgres.max_open_conns", 0, "Max open connections to the database (0 = unlimited)")
+		fs.Int("postgres.max_idle_conns", 0, "Max idle connections in the pool (0 = driver default)")
+		fs.Duration("postgres.conn_max_idle_time", 0, "Max time a connection may be idle (0 = no limit)")
+		fs.Duration("postgres.conn_max_lifetime", 0, "Max time a connection may be reused (0 = no limit)")
 	}
 
 	if l.sections.Redis {
@@ -55,7 +59,7 @@ func (l *Loader) RegisterFlags(fs *pflag.FlagSet) {
 
 	if l.sections.Pubsub {
 		fs.String("pubsub.url", "", "AMQP broker URL, e.g. amqp://user:pass@host/ (required)")
-		fs.String("pubsub.driver", "", "Broker driver, e.g. rabbitmq (required)")
+		fs.String("pubsub.driver", "rabbitmq", "Broker driver (default: rabbitmq)")
 	}
 
 	if l.sections.Profiler {
@@ -69,6 +73,15 @@ func (l *Loader) RegisterFlags(fs *pflag.FlagSet) {
 // by the --config_file flag (if set), and unmarshals the result into target.
 // Call after pflag.Parse().
 func (l *Loader) Load(fs *pflag.FlagSet, target any) error {
+	// Sync pflag defaults → viper defaults for flags that were not explicitly
+	// set. Viper only reads pflag values when the flag is Changed; for unchanged
+	// flags it falls through to env → config file → viper default.
+	fs.VisitAll(func(f *pflag.Flag) {
+		if !f.Changed {
+			l.v.SetDefault(f.Name, f.DefValue)
+		}
+	})
+
 	if err := l.v.BindPFlags(fs); err != nil {
 		return fmt.Errorf("appconfig: bind flags: %w", err)
 	}
