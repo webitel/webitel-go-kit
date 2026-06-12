@@ -10,37 +10,53 @@ import (
 type Status struct {
 	Date       time.Time     // Date of request
 	Limit      uint32        // Limit quota applied
-	Allowed    uint32        // Taken token(-s) count. Cost of request. Zoro indicates failure !
+	Allowed    uint32        // Taken token(-s) count. Cost of request. Zero indicates failure !
 	Remaining  uint32        // Remaining token(-s) count. Still available for use
 	ResetAfter time.Duration // Time to wait for token(-s) limit to refresh
 	RetryAfter time.Duration // Time to wait for next attempt. Non-Zero indicates failure !
 }
 
+type StatusOption func(res *Status)
+
+func (res *Status) apply(opts []StatusOption) {
+	for _, setup := range opts {
+		setup(res)
+	}
+}
+
 // ALLOW Request. [Status] defaults.
 // Optionally assign a [status.Limit] quota value to indicate that the limit is applied.
-func Allow(req *Request) Status {
-	return Status{
+func Allow(req *Request, opts ...StatusOption) *Status {
+	res := &Status{
 		Date:    req.Date,
-		Limit:   0, // no constraint affected
+		Limit:   0, // default: Not affected
 		Allowed: max(req.Cost, 1),
 	}
+	res.apply(opts)
+	return res
 }
 
 // DENY Request. [Status] defaults.
 // By default this Status represents Forbidden (forever: no Limit qouta defined).
 // Optionally assign a [status.Limit] quota value to reflect a temporary ban.
-func Deny(req *Request) Status {
-	return Status{
+func Deny(req *Request, opts ...StatusOption) *Status {
+	res := &Status{
 		Date:    req.Date,
+		Limit:   0, // default: Not affected
 		Allowed: 0,
 	}
+	res.apply(opts)
+	return res
 }
 
+// OK reports whether [res] can be treated as Success.
 func (res *Status) OK() bool {
+	// [NOT] Affected / Allowed ?!
 	return res == nil || res.Allowed > 0
 	// return stat == nil || stat.RetryAfter < 1
 }
 
+// Non-<nil> Err MUST be treated as explicit Failure.
 func (res *Status) Err() error {
 	if !res.OK() {
 		return &Error{*res}

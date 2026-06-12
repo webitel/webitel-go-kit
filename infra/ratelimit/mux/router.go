@@ -5,6 +5,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/webitel/webitel-go-kit/infra/ratelimit"
+	limitzone "github.com/webitel/webitel-go-kit/infra/ratelimit/zone"
 )
 
 // Router registers routes to be matched and dispatches a ratelimit.Handler.
@@ -13,7 +14,7 @@ type Router struct {
 	// Logs *slog.Logger
 
 	http   *mux.Router
-	zones  ratelimit.NamedZones
+	zones  limitzone.NamedZones
 	routes []*Route
 }
 
@@ -21,7 +22,7 @@ func NewRouter() *Router {
 
 	router := &Router{
 		http:  mux.NewRouter(),
-		zones: make(ratelimit.NamedZones),
+		zones: make(limitzone.NamedZones),
 	}
 
 	// // Configurable Handler to be used when no route matches.
@@ -38,23 +39,31 @@ func NewRouter() *Router {
 var _ ratelimit.Handler = (*Router)(nil)
 
 // LimitRequest implements ratelimit.Handler interface
-func (c *Router) LimitRequest(req ratelimit.Request) (ratelimit.Status, error) {
+func (c *Router) LimitRequest(req *ratelimit.Request) (*ratelimit.Status, error) {
 
 	if req.Http == nil {
 		// Not enough data to decide !
+		return nil, nil
 		// +Passthrough by default ..
-		return ratelimit.Allow(&req), nil
+		// return ratelimit.Allow(req), nil
 	}
 
+	var found bool
 	var match mux.RouteMatch
 	var handler ratelimit.Handler
-	if c.http.Match(req.Http, &match) {
+	if found = c.http.Match(req.Http, &match); found {
 		handler, _ = match.Handler.(ratelimit.Handler)
 	}
 
+	if !found {
+		// No Route == no limit restrictions ! BYPASS
+		return nil, nil
+	}
+
 	if handler == nil {
-		// No route == no limit constraints !
-		return ratelimit.Allow(&req), nil
+		// Route Found || No handler defined !
+		// DEFAULT: handle as exception(-al) route ; PASSTHROUGH
+		return ratelimit.Allow(req), nil
 	}
 
 	// PERFORM
@@ -66,7 +75,7 @@ func (c *Router) LimitRequest(req ratelimit.Request) (ratelimit.Status, error) {
 // ----------------------------------------------------------------------------
 
 // NewZone registers new zone that can be used with Route.Zone rule.
-func (c *Router) NewZone(zone ratelimit.Zone) error {
+func (c *Router) NewZone(zone limitzone.Zone) error {
 
 	opts := zone.Options()
 

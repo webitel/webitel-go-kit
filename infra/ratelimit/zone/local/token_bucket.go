@@ -58,6 +58,7 @@ func (c *tokenBucket) requestAt(date time.Time, cost uint32) (res ratelimit.Stat
 		taken := float64(burst) - tokens
 		reset := time.Duration(float64(every) * taken)
 		res = ratelimit.Status{
+			Date:       date,
 			Limit:      uint32(burst), // *rate,
 			Allowed:    cost,
 			Remaining:  uint32(tokens),

@@ -3,7 +3,6 @@ module github.com/webitel/webitel-go-kit/infra/ratelimit
 go 1.25.0
 
 require (
-	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/webitel/webitel-go-kit/infra/errors v0.0.1

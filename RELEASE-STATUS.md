@@ -11,21 +11,22 @@ the `release-status` workflow from the Actions tab.
 
 | Module | Latest released | Unreleased commits | Status |
 |---|---|---|---|
-| `infra/discovery` | `(none)` | 5 | never released |
+| `appconfig` | `(none)` | 2 | never released |
+| `infra/discovery` | `(none)` | 6 | never released |
 | `infra/errors` | `v0.0.1` | 0 | up to date |
 | `infra/fts_client` | `(none)` | 1 | never released |
 | `infra/logger_client` | `(none)` | 5 | never released |
 | `infra/otel` | `v0.1.0` | 0 | up to date |
 | `infra/profiler` | `v0.1.0` | 0 | up to date |
 | `infra/pubsub/rabbitmq` | `(none)` | 20 | never released |
-| `infra/ratelimit` | `v0.0.1` | 1 | needs release |
-| `infra/ratelimit/mux` | `v0.0.1` | 0 | up to date |
+| `infra/ratelimit` | `v0.2.0` | 1 | needs release |
+| `infra/ratelimit/mux` | `v0.2.0` | 0 | up to date |
 | `infra/sqldb` | `(none)` | 2 | never released |
 | `infra/transport` | `(none)` | 1 | never released |
 | `pkg/errors` | `v0.1.0` | 0 | up to date |
 | `pkg/etag` | `v0.1.0` | 0 | up to date |
 | `pkg/filters` | `v0.1.0` | 0 | up to date |
-| `pkg/interceptors` | `v0.1.1` | 0 | up to date |
+| `pkg/interceptors` | `v0.1.1` | 2 | needs release |
 | `pkg/logger` | `v0.1.1` | 0 | up to date |
 | `pkg/safemap` | `v0.1.0` | 0 | up to date |
 | `pkg/watcher` | `v0.1.0` | 0 | up to date |

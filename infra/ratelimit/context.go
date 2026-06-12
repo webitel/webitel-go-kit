@@ -42,7 +42,7 @@ func (c readEnv) String() string {
 	return c.key.String()
 }
 
-func (c readEnv) Value(req Request) string {
+func (c readEnv) Value(req *Request) string {
 
 	key := c.key.String()
 	val, ok := c.env[key]

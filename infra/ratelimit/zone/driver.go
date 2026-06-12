@@ -6,11 +6,11 @@ import (
 	"sync"
 
 	"github.com/webitel/webitel-go-kit/infra/ratelimit"
-	"github.com/webitel/webitel-go-kit/infra/ratelimit/zone/local"
+	// "github.com/webitel/webitel-go-kit/infra/ratelimit/zone/local"
 )
 
 // DriverFunc represents [Zone] factory method constructor
-type DriverFunc func(dataSource string, options ratelimit.Options) (ratelimit.Zone, error)
+type DriverFunc func(dataSource string, options Options) (Zone, error)
 
 // global drivers registry
 var drivers = struct {
@@ -64,7 +64,7 @@ func GetDriver(scheme string) DriverFunc {
 }
 
 // NewZone builds NEW [ratelimit.Zone] using the registered dataSource [scheme:] driver factory.
-func NewZone(dataSource string, options ratelimit.Options) (ratelimit.Zone, error) {
+func NewZone(dataSource string, options Options) (Zone, error) {
 
 	// split [scheme:][connString]
 	scheme, _, err := GetScheme(dataSource)
@@ -126,7 +126,7 @@ func GetScheme(dataSource string) (scheme, opaque string, err error) {
 	return dataSource, "", nil
 }
 
-func init() {
-	// builtin & DEFAULT
-	Register(local.New, "local", "memory", "")
-}
+// func init() {
+// 	// builtin & DEFAULT
+// 	Register(local.New, "local", "memory", "")
+// }

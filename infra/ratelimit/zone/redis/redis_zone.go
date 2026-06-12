@@ -7,40 +7,48 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/webitel/webitel-go-kit/infra/ratelimit"
+	limitzone "github.com/webitel/webitel-go-kit/infra/ratelimit/zone"
 )
 
 type redisZone struct {
-	options ratelimit.Options
+	options limitzone.Options
 	client  *redis.Client
 }
 
-func newZone(client *redis.Client, options ratelimit.Options) *redisZone {
+func newZone(client *redis.Client, options limitzone.Options) *redisZone {
 	return &redisZone{options: options, client: client}
 }
 
-var _ ratelimit.Zone = (*redisZone)(nil)
+var _ limitzone.Zone = (*redisZone)(nil)
 
 // Zone Options
-func (rc *redisZone) Options() ratelimit.Options {
+func (rc *redisZone) Options() limitzone.Options {
 	return rc.options
 }
 
 // Limit single request with context
 // Returns the time duration to wait before the request can be processed.
-func (rc *redisZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, err error) {
+func (rc *redisZone) LimitRequest(req *ratelimit.Request) (res *ratelimit.Status, err error) {
 	// panic("not implemented")
 	var (
 		zone = &rc.options // req.Zone
 		// rate  = &zone.Rate
-		vkey = req.Get(rc.options.Key)
+		// vkey = req.Get(zone.Key)
+		vkey = limitzone.RequestKey(req, zone.Key)
 		// burst uint32
 		cost  = max(1, req.Cost)
 		burst = max(1, zone.Burst)
+		// key.Value(?) was determined ?
+		bypass = (vkey == ratelimit.Undefined)
 	)
 
 	defer func() {
 
 		level := slog.LevelDebug
+		if bypass {
+			vkey = "$bypass" // indicates: NO key.Value("") was determined !
+			level = slog.LevelWarn
+		}
 		if err != nil || !res.OK() {
 			level = slog.LevelError
 		}
@@ -63,28 +71,35 @@ func (rc *redisZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, 
 						slog.String("rate", zone.Rate.String()),
 						// slog.Int64("burst", int64(burst)),
 					),
-					slog.Any("limit", &res),
+					slog.Any("status", res),
 				)
 			}),
 		)
 
 	}()
 
+	if bypass {
+		// bypass: NO key.Value("") for limit was determined !
+		return nil, nil
+		// return ratelimit.Allow(req), nil
+	}
+
 	ctx := req.Context
 	key := limitKey(rc.options.Name, vkey)
 
 	switch zone.Algo {
 	case ratelimit.AlgoTokenBucket:
-		res, err = rc.tokenBucket(ctx, key, zone.Rate, burst, cost)
+		res, err = rc.tokenBucket(ctx, key, req.Date, zone.Rate, burst, cost)
 	case ratelimit.AlgoFixedWindow:
-		res, err = rc.fixedWindow(ctx, key, zone.Rate, cost)
+		res, err = rc.fixedWindow(ctx, key, req.Date, zone.Rate, cost)
 	case ratelimit.AlgoSlidingWindow:
-		res, err = rc.slidingWindow(ctx, key, zone.Rate, cost)
+		res, err = rc.slidingWindow(ctx, key, req.Date, zone.Rate, cost)
 	default:
 		// not implemented yet
+		err = fmt.Errorf("redis( algo: %s ); not implemented", zone.Algo)
 	}
 
-	return // stat, err
+	return // res, err
 }
 
 func limitKey(path string, key any) string {

@@ -3,11 +3,11 @@ package local
 import (
 	"fmt"
 	"log/slog"
-	"reflect"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/webitel/webitel-go-kit/infra/ratelimit"
+	limitzone "github.com/webitel/webitel-go-kit/infra/ratelimit/zone"
 )
 
 // internal record limiter interface
@@ -17,8 +17,8 @@ type limiter interface {
 
 // memoryZone implements local (memory) LRU cache::table of [key::state] limits.
 type memoryZone struct {
-	opts  ratelimit.Options
-	table *lru.Cache[limitkey, limiter]
+	opts  limitzone.Options
+	table *lru.Cache[string, limiter]
 }
 
 // https://nginx.org/en/docs/http/ngx_http_limit_req_module.html
@@ -36,7 +36,7 @@ type memoryZone struct {
 //	FixedWindow(size=56b): ~[ 19 000 ] records ;
 const DefaultSize = (1 * ratelimit.Megabyte)
 
-func newZone(opts ratelimit.Options) *memoryZone {
+func newZone(opts limitzone.Options) *memoryZone {
 
 	bytes := DefaultSize
 	if opts.Size > 0 {
@@ -60,101 +60,109 @@ func newZone(opts ratelimit.Options) *memoryZone {
 	// size = int(sizeInRecordsNumber(uint64(zone.Size), unit))
 	size := int(bytes.Capacity(unit)) + 1
 
-	table, _ := lru.New[limitkey, limiter](size)
+	table, _ := lru.New[string, limiter](size)
 	return &memoryZone{opts: opts, table: table}
 }
 
-type limitkey struct {
-	Path string
-	PKey any
-}
+// type limitkey struct {
+// 	Path string
+// 	PKey any
+// }
 
-func canhash(typ reflect.Kind) bool {
-	switch typ {
-	case
-		reflect.Bool,
-		reflect.Int,
-		reflect.Int8,
-		reflect.Int16,
-		reflect.Int32,
-		reflect.Int64,
-		reflect.Uint,
-		reflect.Uint8, // byte
-		reflect.Uint16,
-		reflect.Uint32,
-		reflect.Uint64,
-		reflect.Uintptr,
-		reflect.Float32,
-		reflect.Float64,
-		reflect.String:
-		return true
-	}
-	return false
-}
+// func canhash(typ reflect.Kind) bool {
+// 	switch typ {
+// 	case
+// 		reflect.Bool,
+// 		reflect.Int,
+// 		reflect.Int8,
+// 		reflect.Int16,
+// 		reflect.Int32,
+// 		reflect.Int64,
+// 		reflect.Uint,
+// 		reflect.Uint8, // byte
+// 		reflect.Uint16,
+// 		reflect.Uint32,
+// 		reflect.Uint64,
+// 		reflect.Uintptr,
+// 		reflect.Float32,
+// 		reflect.Float64,
+// 		reflect.String:
+// 		return true
+// 	}
+// 	return false
+// }
 
-func hashable(v any) any {
-	var (
-		rval = reflect.Indirect(reflect.ValueOf(v))
-		rtyp = rval.Type()
-	)
-	if canhash(rtyp.Kind()) {
-		return rval.Interface()
-	}
-	// https://stackoverflow.com/questions/29175247/hash-with-key-as-an-array-type
-	// .. Array types (unlike slices) in Go are comparable ..
-	// .. you cannot use slices as keys in go ..
-	switch rtyp.Kind() {
-	case reflect.Array:
-		if etyp := rtyp.Elem(); canhash(etyp.Kind()) {
-			if htyp := reflect.ArrayOf(rval.Len(), etyp); rtyp != htyp {
-				rval = rval.Convert(htyp)
-			}
-			return rval.Interface()
-		}
-	case reflect.Slice:
-		if etyp := rtyp.Elem(); canhash(etyp.Kind()) {
-			htyp := reflect.ArrayOf(rval.Len(), etyp)
-			hval := reflect.New(htyp).Elem()
-			_ = reflect.Copy(hval, rval)
-			return hval.Interface()
-		}
-	}
-	return fmt.Sprintf("%v", v)
-}
+// func hashable(v any) any {
+// 	var (
+// 		rval = reflect.Indirect(reflect.ValueOf(v))
+// 		rtyp = rval.Type()
+// 	)
+// 	if canhash(rtyp.Kind()) {
+// 		return rval.Interface()
+// 	}
+// 	// https://stackoverflow.com/questions/29175247/hash-with-key-as-an-array-type
+// 	// .. Array types (unlike slices) in Go are comparable ..
+// 	// .. you cannot use slices as keys in go ..
+// 	switch rtyp.Kind() {
+// 	case reflect.Array:
+// 		if etyp := rtyp.Elem(); canhash(etyp.Kind()) {
+// 			if htyp := reflect.ArrayOf(rval.Len(), etyp); rtyp != htyp {
+// 				rval = rval.Convert(htyp)
+// 			}
+// 			return rval.Interface()
+// 		}
+// 	case reflect.Slice:
+// 		if etyp := rtyp.Elem(); canhash(etyp.Kind()) {
+// 			htyp := reflect.ArrayOf(rval.Len(), etyp)
+// 			hval := reflect.New(htyp).Elem()
+// 			_ = reflect.Copy(hval, rval)
+// 			return hval.Interface()
+// 		}
+// 	}
+// 	return fmt.Sprintf("%v", v)
+// }
 
-var _ ratelimit.Zone = (*memoryZone)(nil)
+var _ limitzone.Zone = (*memoryZone)(nil)
 
-func (c *memoryZone) Options() ratelimit.Options {
+func (c *memoryZone) Options() limitzone.Options {
 	return c.opts
 }
 
-func (c *memoryZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, err error) {
+func (c *memoryZone) LimitRequest(req *ratelimit.Request) (res *ratelimit.Status, err error) {
 
 	var (
 		// ctx = req.Context
 		date = req.Date
-		vkey = req.Get(c.opts.Key)
-		pkey = limitkey{
-			Path: c.opts.Name,
-			PKey: hashable(vkey),
-		}
+		// vkey = req.Get(c.opts.Key)
+		// pkey = limitkey{
+		// 	// Path: c.opts.Name,
+		// 	PKey: hashable(vkey),
+		// }
 		zone = &c.opts
+		vkey = limitzone.RequestKey(req, zone.Key)
 		algo = zone.Algo
 		// rate  = &zone.Rate
 		cost  = max(1, req.Cost)
 		burst = max(1, zone.Burst)
+		// key.Value(?) was determined ?
+		bypass = (vkey == ratelimit.Undefined)
 	)
 
 	defer func() {
 
 		level := slog.LevelDebug
+		if bypass {
+			vkey = "$bypass" // indicates: NO key.Value("") was determined !
+			level = slog.LevelWarn
+		}
 		if err != nil || !res.OK() {
 			level = slog.LevelError
 		}
 
 		req.Log(
 			// zone hit ..
-			level, "| ⌙ (local)",
+			// level, "└── (local)", // "| ⌙ (local)",
+			level, fmt.Sprintf("ZONE / %s / %s", zone.Name, vkey),
 			// args: deferred
 			"", ratelimit.LogValue(func() slog.Value {
 				return slog.GroupValue(
@@ -170,14 +178,21 @@ func (c *memoryZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, 
 						slog.String("rate", zone.Rate.String()),
 						// slog.Int64("burst", int64(burst)),
 					),
-					slog.Any("limit", &res),
+					slog.Any("status", res),
 				)
 			}),
 		)
 
 	}()
 
-	record, ok := c.table.Get(pkey)
+	if bypass {
+		// bypass: NO Key.Value("") to apply Limit for !
+		// Skip, NOT affected !..
+		return nil, nil
+		// return ratelimit.Allow(req), nil
+	}
+
+	record, ok := c.table.Get(vkey)
 	if !ok {
 		switch algo {
 		case ratelimit.AlgoTokenBucket:
@@ -193,17 +208,17 @@ func (c *memoryZone) LimitRequest(req ratelimit.Request) (res ratelimit.Status, 
 			// default:
 		}
 		if record != nil {
-			_ = c.table.Add(pkey, record)
+			_ = c.table.Add(vkey, record)
 		}
 	}
 
 	if record == nil {
-		res.Date = date
 		err = fmt.Errorf("local( algo: %s ); not implemented", algo)
-		return // res, err
+		// Not affected !
+		return nil, err
 	}
 
-	res = record.requestAt(date, cost)
-	res.Date = date
+	ret := record.requestAt(date, cost)
+	res = &ret
 	return // res, nil
 }

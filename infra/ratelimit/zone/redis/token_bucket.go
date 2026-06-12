@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"strconv"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/webitel/webitel-go-kit/infra/ratelimit"
@@ -21,10 +22,11 @@ var tokenBucketScript = redis.NewScript(
 func (rc *redisZone) tokenBucket(
 	ctx context.Context,
 	key string,
+	date time.Time,
 	rate ratelimit.Rate,
 	burst uint32,
 	cost uint32,
-) (ratelimit.Status, error) {
+) (*ratelimit.Status, error) {
 
 	cost = max(1, cost)   // default: (1)
 	burst = max(1, burst) // default: (1)
@@ -45,7 +47,7 @@ func (rc *redisZone) tokenBucket(
 	).Result()
 
 	if err != nil {
-		return ratelimit.Status{}, err
+		return nil, err
 	}
 
 	params = result.([]any)
@@ -54,22 +56,23 @@ func (rc *redisZone) tokenBucket(
 		params[2].(string), 64,
 	)
 	if err != nil {
-		return ratelimit.Status{}, err
+		return nil, err
 	}
 
 	resetAfter, err := strconv.ParseFloat(
 		params[3].(string), 64,
 	)
 	if err != nil {
-		return ratelimit.Status{}, err
+		return nil, err
 	}
 
-	stat := ratelimit.Status{
+	// Applied !
+	return &ratelimit.Status{
+		Date:       date,
 		Limit:      burst, // rate,
 		Allowed:    uint32(params[0].(int64)),
 		Remaining:  uint32(params[1].(int64)),
 		RetryAfter: duration(retryAfter),
 		ResetAfter: duration(resetAfter),
-	}
-	return stat, nil
+	}, nil
 }
