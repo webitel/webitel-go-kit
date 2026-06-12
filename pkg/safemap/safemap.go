@@ -2,6 +2,7 @@ package safemap
 
 import (
 	"errors"
+	"maps"
 	"sync"
 )
 
@@ -48,6 +49,22 @@ func (s *SafeMap[Key, Value]) Set(key Key, value Value) {
 	return
 }
 
+// Range iterates over all key-value pairs in the map, calling the callback function for each pair.
+// If the callback function returns an error, iteration stops and the error is returned.
+func (s *SafeMap[Key, Value]) Range(callback func(Key, Value) error) error {
+	if s == nil {
+		return errors.New("safeMap is nil")
+	}
+	s.RLock()
+	defer s.RUnlock()
+	for k, v := range s.store {
+		if err := callback(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Remove deletes a key-value pair from the map by key.
 func (s *SafeMap[Key, Value]) Remove(key Key) {
 	if s == nil {
@@ -66,9 +83,5 @@ func (s *SafeMap[Key, Value]) Copy() (map[Key]Value, error) {
 	}
 	s.Lock()
 	defer s.Unlock()
-	copied := make(map[Key]Value, len(s.store))
-	for k, v := range s.store {
-		copied[k] = v
-	}
-	return copied, nil
+	return maps.Clone(s.store), nil
 }
