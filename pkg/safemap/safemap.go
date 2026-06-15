@@ -85,3 +85,12 @@ func (s *SafeMap[Key, Value]) Copy() (map[Key]Value, error) {
 	defer s.Unlock()
 	return maps.Clone(s.store), nil
 }
+
+func (s *SafeMap[Key, Value]) Len() int {
+	if s == nil {
+		return 0
+	}
+	s.RLock()
+	defer s.RUnlock()
+	return len(s.store)
+}
