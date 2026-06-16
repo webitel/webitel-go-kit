@@ -1,7 +1,10 @@
 package depenlog
 
 import (
+	"bufio"
+	"errors"
 	stdlog "log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -44,7 +47,10 @@ func Middleware(l logger.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// statusRecorder captures the response status code for logging.
+// statusRecorder captures the response status code for logging. It forwards the
+// optional ResponseWriter interfaces (Flusher/Hijacker/Pusher) and exposes the
+// wrapped writer via Unwrap so middleware does not break streaming, WebSocket
+// upgrades, or HTTP/2 push.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -53,4 +59,34 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap exposes the wrapped writer to http.ResponseController and any other
+// middleware that unwraps the chain.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+// Flush forwards to the wrapped writer when it supports streaming; otherwise it
+// is a no-op, matching net/http's behavior for non-flushable writers.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack forwards to the wrapped writer so connection-upgrade handlers
+// (e.g. WebSocket) keep working; it errors if the writer is not a Hijacker.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := r.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, errors.New("depenlog: ResponseWriter does not support Hijack")
+}
+
+// Push forwards HTTP/2 server push to the wrapped writer, or reports that it is
+// unsupported.
+func (r *statusRecorder) Push(target string, opts *http.PushOptions) error {
+	if p, ok := r.ResponseWriter.(http.Pusher); ok {
+		return p.Push(target, opts)
+	}
+	return http.ErrNotSupported
 }

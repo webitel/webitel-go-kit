@@ -10,14 +10,11 @@ import (
 )
 
 func main() {
-	l, err := gokitlog.New(gokitlog.Config{
+	l := gokitlog.New(gokitlog.Config{
 		Level:   "debug",
 		JSON:    true,
 		Console: true,
 	})
-	if err != nil {
-		panic(err)
-	}
 
 	l.Info("service starting", "addr", ":8080")
 	l.Debug("verbose detail", "cache_size", 1024)

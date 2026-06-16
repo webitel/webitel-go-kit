@@ -18,10 +18,7 @@ func NewServer(l logger.Logger) *Server {
 }
 
 func main() {
-	l, err := gokitlog.New(gokitlog.Config{Level: "debug", JSON: true, Console: true})
-	if err != nil {
-		panic(err)
-	}
+	l := gokitlog.New(gokitlog.Config{Level: "debug", JSON: true, Console: true})
 
 	app := fx.New(
 		// Make the kit logger available to the graph (as the interface).

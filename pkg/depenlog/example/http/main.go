@@ -9,10 +9,7 @@ import (
 )
 
 func main() {
-	l, err := gokitlog.New(gokitlog.Config{Level: "info", JSON: true, Console: true})
-	if err != nil {
-		panic(err)
-	}
+	l := gokitlog.New(gokitlog.Config{Level: "info", JSON: true, Console: true})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/hello", func(w http.ResponseWriter, _ *http.Request) {

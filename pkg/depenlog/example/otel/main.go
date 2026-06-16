@@ -53,10 +53,7 @@ func main() {
 	// pkg/depenlog. New still installs slog default + grpc-go, so all of those now
 	// flow into the OTel pipeline too.
 	otelHandler := bridgeslog.New("log-otel-example").Handler()
-	l, err := gokitlog.New(gokitlog.Config{}, gokitlog.WithHandler(otelHandler))
-	if err != nil {
-		panic(err)
-	}
+	l := gokitlog.New(gokitlog.Config{}, gokitlog.WithHandler(otelHandler))
 
 	// A real span: its trace_id/span_id are emitted by the exporter with no
 	// manual plumbing, because we log via the *Context method.

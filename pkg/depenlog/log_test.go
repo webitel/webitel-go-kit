@@ -102,6 +102,44 @@ func TestTraceInjection(t *testing.T) {
 	}
 }
 
+// Even when the caller opens a group via WithGroup, trace_id/span_id stay at the
+// top level (so the cross-service trace_id query keeps working), while the
+// record's own attrs are nested under the group.
+func TestTraceInjection_WithGroup(t *testing.T) {
+	traceID, _ := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	spanID, _ := trace.SpanIDFromHex("0102030405060708")
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+
+	var buf bytes.Buffer
+	// WithGroup is exercised through raw slog: the kit logger.Logger has no
+	// WithGroup, but New installs this handler as slog's default.
+	sl := slog.New(buildPlainHandler(&buf, Config{JSON: true})).WithGroup("g")
+	sl.InfoContext(ctx, "with span", "k", "v")
+
+	m := decode(t, &buf)
+	if got := m[semconv.TraceIDKey]; got != traceID.String() {
+		t.Errorf("%s = %v, want top-level %s", semconv.TraceIDKey, got, traceID)
+	}
+	if got := m[semconv.SpanIDKey]; got != spanID.String() {
+		t.Errorf("%s = %v, want top-level %s", semconv.SpanIDKey, got, spanID)
+	}
+	group, ok := m["g"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected group object under %q, got %v", "g", m)
+	}
+	if got := group["k"]; got != "v" {
+		t.Errorf("g.k = %v, want v", got)
+	}
+	if _, ok := group[semconv.TraceIDKey]; ok {
+		t.Errorf("%s must not be nested under the group", semconv.TraceIDKey)
+	}
+}
+
 func TestWithComponent(t *testing.T) {
 	var buf bytes.Buffer
 	l := newTestLogger(t, &buf)

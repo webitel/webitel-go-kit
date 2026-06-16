@@ -56,7 +56,7 @@ func WithHandler(h slog.Handler) Option {
 //
 // The returned logger.Logger is the handle services inject. Per-app wiring for
 // fx and HTTP is explicit, through FxLogger / ErrorLog / Middleware.
-func New(cfg Config, opts ...Option) (logger.Logger, error) {
+func New(cfg Config, opts ...Option) logger.Logger {
 	var o options
 	for _, opt := range opts {
 		opt(&o)
@@ -72,7 +72,7 @@ func New(cfg Config, opts ...Option) (logger.Logger, error) {
 
 	l := logger.NewSlog(sl)
 	UseGRPC(l)
-	return l, nil
+	return l
 }
 
 // buildPlainHandler assembles the default handler chain: a JSON or text base
@@ -90,7 +90,7 @@ func buildPlainHandler(w io.Writer, cfg Config) slog.Handler {
 	} else {
 		base = slog.NewTextHandler(w, opts)
 	}
-	return traceHandler{Handler: base}
+	return traceHandler{base: base}
 }
 
 // writer resolves the output sink from cfg: stdout and/or a rotated file. It
