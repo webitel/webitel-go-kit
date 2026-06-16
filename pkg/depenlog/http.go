@@ -34,7 +34,7 @@ func Middleware(l logger.Logger) func(http.Handler) http.Handler {
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			start := time.Now()
 			next.ServeHTTP(rec, r)
-			l.Info("http request",
+			l.InfoContext(r.Context(), "http request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", rec.status,
