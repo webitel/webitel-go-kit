@@ -28,7 +28,7 @@ the `release-status` workflow from the Actions tab.
 | `pkg/filters` | `v0.1.0` | 0 | up to date |
 | `pkg/interceptors` | `v0.1.1` | 2 | needs release |
 | `pkg/logger` | `v0.1.1` | 0 | up to date |
-| `pkg/safemap` | `v0.1.0` | 2 | needs release |
+| `pkg/safemap` | `v0.1.0` | 3 | needs release |
 | `pkg/watcher` | `v0.1.0` | 0 | up to date |
 
 **How to release a module:** dispatch the `release` workflow from the
