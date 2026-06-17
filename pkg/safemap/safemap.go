@@ -7,13 +7,13 @@ import (
 )
 
 // New creates a new thread-safe map.
-func New[Key comparable, Value any](init map[Key]Value) (*SafeMap[Key, Value], error) {
+func New[Key comparable, Value any](init map[Key]Value) *SafeMap[Key, Value] {
 	if init == nil {
 		init = make(map[Key]Value)
 	}
 	return &SafeMap[Key, Value]{
 		store: init,
-	}, nil
+	}
 }
 
 // SafeMap is a thread-safe map implementation.
@@ -46,7 +46,6 @@ func (s *SafeMap[Key, Value]) Set(key Key, value Value) {
 		s.store = make(map[Key]Value)
 	}
 	s.store[key] = value
-	return
 }
 
 // Range iterates over all key-value pairs in the map, calling the callback function for each pair.
@@ -73,7 +72,6 @@ func (s *SafeMap[Key, Value]) Remove(key Key) {
 	s.Lock()
 	defer s.Unlock()
 	delete(s.store, key)
-	return
 }
 
 // Copy creates a shallow copy of the map.
