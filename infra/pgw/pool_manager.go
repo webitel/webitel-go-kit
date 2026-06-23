@@ -30,6 +30,8 @@ type PoolManager struct {
 	closeChan chan struct{}
 }
 
+// Primary returns the primary pool.
+// It returns an error if the primary pool is not connected.
 func (c *PoolManager) Primary() (*Pool, error) {
 	if c.master == nil || c.master.GetState() != HostStateConnected {
 		return nil, ErrUnreachable
@@ -38,6 +40,8 @@ func (c *PoolManager) Primary() (*Pool, error) {
 	return c.master, nil
 }
 
+// Standby returns the standby pool.
+// It returns an error if the standby pool is not connected.
 func (c *PoolManager) Standby() (*Pool, error) {
 	host := c.standbyManager.Pick()
 	if host == nil {
@@ -47,6 +51,8 @@ func (c *PoolManager) Standby() (*Pool, error) {
 	return host, nil
 }
 
+// StandbyPreferred returns the standby pool if it is connected, otherwise it returns the primary pool.
+// It returns an error if the primary pool is not connected.
 func (c *PoolManager) StandbyPreferred() (*Pool, error) {
 	host := c.standbyManager.Pick()
 	if host == nil {
@@ -56,22 +62,27 @@ func (c *PoolManager) StandbyPreferred() (*Pool, error) {
 	return host, nil
 }
 
+// RegisterUniqueViolation registers a unique violation error processor for the given constraint name.
 func (e *PoolManager) RegisterUniqueViolation(constraintName string, processor ErrorProcessor) error {
 	return e.errorsManager.RegisterUniqueViolation(constraintName, processor)
 }
 
+// RegisterForeignKeyViolation registers a foreign key violation error processor for the given constraint name.
 func (e *PoolManager) RegisterForeignKeyViolation(constraintName string, processor ErrorProcessor) error {
 	return e.errorsManager.RegisterForeignKeyViolation(constraintName, processor)
 }
 
+// RegisterCheckViolation registers a check violation error processor for the given constraint name.
 func (e *PoolManager) RegisterCheckViolation(constraintName string, processor ErrorProcessor) error {
 	return e.errorsManager.RegisterCheckViolation(constraintName, processor)
 }
 
+// RegisterNotNullViolation registers a not null violation error processor for the given table and column.
 func (e *PoolManager) RegisterNotNullViolation(table string, column string, processor ErrorProcessor) error {
 	return e.errorsManager.RegisterNotNullViolationProcessor(table, column, processor)
 }
 
+// Close closes the pool manager and all its pools.
 func (c *PoolManager) Close() {
 	close(c.closeChan)
 	if c.master != nil {
@@ -80,10 +91,10 @@ func (c *PoolManager) Close() {
 	c.standbyManager.Close()
 }
 
-func NewConnectionManager(ctx context.Context, options ...ConfigOption) (*PoolManager, error) {
+func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager, error) {
 	cfg := &Config{
-		PrimaryConfig: DefaultMasterPoolConfig,
-		StandbyConfig: DefaultReplicaPoolConfig,
+		PrimaryConfig: DefaultPrimaryPoolConfig,
+		StandbyConfig: DefaultStandbyPoolConfig,
 	}
 
 	for _, opt := range options {

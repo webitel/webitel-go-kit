@@ -36,25 +36,25 @@ type standbyManager struct {
 
 func (cfg *standbyManagerConfig) normalizeConfig() {
 	if cfg.PickStrategy == nil {
-		cfg.PickStrategy = DefaultReplicaPoolConfig.PickStrategy
+		cfg.PickStrategy = DefaultStandbyPoolConfig.PickStrategy
 	}
 	if cfg.UnhealthyStandbyRetryInterval == 0 {
-		cfg.UnhealthyStandbyRetryInterval = DefaultReplicaPoolConfig.UnhealthyReplicaRetryInterval
+		cfg.UnhealthyStandbyRetryInterval = DefaultStandbyPoolConfig.UnhealthyReplicaRetryInterval
 	}
 	if cfg.RetriesBeforeUnhealthy == 0 {
-		cfg.RetriesBeforeUnhealthy = DefaultReplicaPoolConfig.RetriesBeforeUnhealthy
+		cfg.RetriesBeforeUnhealthy = DefaultStandbyPoolConfig.RetriesBeforeUnhealthy
 	}
 	if cfg.RetryStrategy == nil {
-		cfg.RetryStrategy = DefaultReplicaPoolConfig.RetryStrategy
+		cfg.RetryStrategy = DefaultStandbyPoolConfig.RetryStrategy
 	}
 	if cfg.RetryStrategyBaseValue == 0 {
-		cfg.RetryStrategyBaseValue = DefaultReplicaPoolConfig.RetryStrategyBaseValue
+		cfg.RetryStrategyBaseValue = DefaultStandbyPoolConfig.RetryStrategyBaseValue
 	}
 	if cfg.HostHealthCheckInterval == 0 {
-		cfg.HostHealthCheckInterval = DefaultReplicaPoolConfig.HealthCheckInterval
+		cfg.HostHealthCheckInterval = DefaultStandbyPoolConfig.HealthCheckInterval
 	}
 	if cfg.HostHealthCheckTimeout == 0 {
-		cfg.HostHealthCheckTimeout = DefaultReplicaPoolConfig.HealthCheckTimeout
+		cfg.HostHealthCheckTimeout = DefaultStandbyPoolConfig.HealthCheckTimeout
 	}
 }
 

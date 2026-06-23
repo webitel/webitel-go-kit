@@ -117,7 +117,7 @@ var (
 )
 
 var (
-	DefaultMasterPoolConfig = PrimaryConfig{
+	DefaultPrimaryPoolConfig = PrimaryConfig{
 		HealthCheckInterval:    5 * time.Second,
 		HealthCheckTimeout:     3 * time.Second,
 		RetryAttempts:          5,
@@ -126,7 +126,7 @@ var (
 		RetryStrategyBaseValue: 2,
 	}
 
-	DefaultReplicaPoolConfig = StandbyConfig{
+	DefaultStandbyPoolConfig = StandbyConfig{
 		HealthCheckInterval:           5 * time.Second,
 		HealthCheckTimeout:            3 * time.Second,
 		PickStrategy:                  RandomPickStrategy,
@@ -145,11 +145,11 @@ func WithTracer(t Tracer) ConfigOption {
 	return func(c *Config) { c.Tracer = t }
 }
 
-func WithMasterPoolConfig(cfg PrimaryConfig) ConfigOption {
+func WithPrimaryConfig(cfg PrimaryConfig) ConfigOption {
 	return func(c *Config) { c.PrimaryConfig = cfg }
 }
 
-func WithReplicaPoolConfig(cfg StandbyConfig) ConfigOption {
+func WithStandbyConfig(cfg StandbyConfig) ConfigOption {
 	return func(c *Config) { c.StandbyConfig = cfg }
 }
 

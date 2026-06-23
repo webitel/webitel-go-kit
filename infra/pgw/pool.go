@@ -47,10 +47,10 @@ func newPool(pool *pgxpool.Pool, cfg PoolConfig) (*Pool, error) {
 		return nil, errors.New("pgw: ErrorParser must not be nil")
 	}
 	if cfg.HealthCheckInterval == 0 {
-		cfg.HealthCheckInterval = DefaultMasterPoolConfig.HealthCheckInterval
+		cfg.HealthCheckInterval = DefaultPrimaryPoolConfig.HealthCheckInterval
 	}
 	if cfg.HealthCheckTimeout == 0 {
-		cfg.HealthCheckTimeout = DefaultMasterPoolConfig.HealthCheckTimeout
+		cfg.HealthCheckTimeout = DefaultPrimaryPoolConfig.HealthCheckTimeout
 	}
 
 	mode := pool.Config().ConnConfig.RuntimeParams["target_session_attrs"]

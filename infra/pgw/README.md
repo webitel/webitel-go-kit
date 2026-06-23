@@ -13,12 +13,12 @@ go get github.com/webitel/webitel-go-kit/infra/pgw
 ## Quick start
 
 ```go
-manager, err := pgw.NewConnectionManager(ctx,
-    pgw.WithMasterPoolConfig(pgw.PrimaryConfig{
+manager, err := pgw.NewPoolManager(ctx,
+    pgw.WithPrimaryConfig(pgw.PrimaryConfig{
         DSN:      "postgres://user:pass@localhost:5432/mydb",
         MaxConns: 20,
         MinConns: 2,
-        pgw.DefaultMasterPoolConfig.HealthCheckInterval,  // embed defaults
+        pgw.DefaultPrimaryPoolConfig.HealthCheckInterval,  // embed defaults
     }),
 )
 if err != nil {
@@ -45,9 +45,9 @@ rows, err := primary.Query(ctx, "SELECT id, name FROM users WHERE active = $1", 
 ## Configuration
 
 ```go
-manager, err := pgw.NewConnectionManager(ctx,
+manager, err := pgw.NewPoolManager(ctx,
     pgw.WithApplicationName("my-service"),
-    pgw.WithMasterPoolConfig(pgw.PrimaryConfig{
+    pgw.WithPrimaryConfig(pgw.PrimaryConfig{
         DSN:                    "postgres://...",
         MaxConns:               20,
         MinConns:               2,
@@ -58,7 +58,7 @@ manager, err := pgw.NewConnectionManager(ctx,
         RetryStrategy:          pgw.RetryStrategyLinear,
         RetryStrategyBaseValue: 2,
     }),
-    pgw.WithReplicaPoolConfig(pgw.StandbyConfig{
+    pgw.WithStandbyConfig(pgw.StandbyConfig{
         DSN:                           []string{"postgres://replica1/...", "postgres://replica2/..."},
         MaxConns:                      10,
         HealthCheckInterval:           5 * time.Second,
@@ -72,7 +72,7 @@ manager, err := pgw.NewConnectionManager(ctx,
 )
 ```
 
-`DefaultMasterPoolConfig` and `DefaultReplicaPoolConfig` are applied automatically — only override the fields you need.
+`DefaultPrimaryPoolConfig` and `DefaultStandbyPoolConfig` are applied automatically — only override the fields you need.
 
 ## Retry strategies
 
