@@ -107,12 +107,12 @@ func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager,
 		errorsManager: newErrorsManager(),
 	}
 
-	err := conn.initMaster(ctx, cfg)
+	err := conn.initPrimary(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	err = conn.initReplicas(ctx, cfg)
+	err = conn.initStandby(ctx, cfg)
 	if err != nil {
 		conn.master.Close()
 		return nil, err
@@ -121,36 +121,20 @@ func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager,
 	return conn, nil
 }
 
-func (c *PoolManager) initMaster(ctx context.Context, config *Config) error {
-	initPoolConfig := config.PrimaryConfig
-	poolConfig, err := pgxpool.ParseConfig(initPoolConfig.DSN)
+func (c *PoolManager) initPrimary(ctx context.Context, config *Config) error {
+	if config == nil {
+		return errors.New("primary config is required to run pgw")
+	}
+
+	pool, err := c.buildPrimaryPgxPool(ctx, config)
 	if err != nil {
 		return err
 	}
-
-	c.setPoolApplicationName(poolConfig, config.ApplicationName)
-	if config.Tracer != nil {
-		poolConfig.ConnConfig.Tracer = &pgxTracerAdapter{t: config.Tracer}
-	}
-	if initPoolConfig.MaxConns > 0 {
-		poolConfig.MaxConns = int32(initPoolConfig.MaxConns)
-	}
-	if initPoolConfig.MinConns > 0 {
-		poolConfig.MinConns = int32(initPoolConfig.MinConns)
-	}
-	poolConfig.BeforeConnect = func(ctx context.Context, cfg *pgx.ConnConfig) error {
-		cfg.ValidateConnect = pgconn.ValidateConnectTargetSessionAttrsPrimary
-		return nil
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
-	if err != nil {
-		return err
-	}
+	mergedPoolConfig := c.mergePrimaryPoolConfigWithDefault(config.PrimaryConfig)
 
 	defaultPool, err := newPool(pool, PoolConfig{
-		HealthCheckInterval: initPoolConfig.HealthCheckInterval,
-		HealthCheckTimeout:  initPoolConfig.HealthCheckTimeout,
+		HealthCheckInterval: mergedPoolConfig.HealthCheckInterval,
+		HealthCheckTimeout:  mergedPoolConfig.HealthCheckTimeout,
 		ErrorParser:         c.errorsManager,
 		MigrationVerifier:   config.MigrationVerifier,
 	})
@@ -160,9 +144,9 @@ func (c *PoolManager) initMaster(ctx context.Context, config *Config) error {
 	}
 
 	err = defaultPool.ConnectWithRetry(
-		initPoolConfig.RetryAttempts,
-		initPoolConfig.RetryStrategy,
-		initPoolConfig.RetryStrategyBaseValue)
+		mergedPoolConfig.RetryAttempts,
+		mergedPoolConfig.RetryStrategy,
+		mergedPoolConfig.RetryStrategyBaseValue)
 
 	if err != nil {
 		defaultPool.Close()
@@ -173,6 +157,62 @@ func (c *PoolManager) initMaster(ctx context.Context, config *Config) error {
 	go c.startMasterMonitor()
 
 	return nil
+}
+
+func (*PoolManager) mergePrimaryPoolConfigWithDefault(primaryConfig PrimaryConfig) PrimaryConfig {
+	mergedPoolConfig := DefaultPrimaryPoolConfig
+	if primaryConfig.HealthCheckInterval > 0 {
+		mergedPoolConfig.HealthCheckInterval = primaryConfig.HealthCheckInterval
+	}
+	if primaryConfig.HealthCheckTimeout > 0 {
+		mergedPoolConfig.HealthCheckTimeout = primaryConfig.HealthCheckTimeout
+	}
+	if primaryConfig.RetryAttempts > 0 {
+		mergedPoolConfig.RetryAttempts = primaryConfig.RetryAttempts
+	}
+	if primaryConfig.RetryInterval > 0 {
+		mergedPoolConfig.RetryInterval = primaryConfig.RetryInterval
+	}
+	if primaryConfig.RetryStrategy != nil {
+		mergedPoolConfig.RetryStrategy = primaryConfig.RetryStrategy
+	}
+	if primaryConfig.RetryStrategyBaseValue > 0 {
+		mergedPoolConfig.RetryStrategyBaseValue = primaryConfig.RetryStrategyBaseValue
+	}
+	return mergedPoolConfig
+}
+
+func (c *PoolManager) buildPrimaryPgxPool(ctx context.Context, config *Config) (*pgxpool.Pool, error) {
+	primaryConfig := config.PrimaryConfig
+	if primaryConfig.DSN == "" {
+		return nil, errors.New("primary config DSN is required")
+	}
+
+	poolConfig, err := pgxpool.ParseConfig(primaryConfig.DSN)
+	if err != nil {
+		return nil, err
+	}
+
+	c.setPoolApplicationName(poolConfig, config.ApplicationName)
+	if config.Tracer != nil {
+		poolConfig.ConnConfig.Tracer = &pgxTracerAdapter{t: config.Tracer}
+	}
+	if primaryConfig.MaxConns > 0 {
+		poolConfig.MaxConns = int32(primaryConfig.MaxConns)
+	}
+	if primaryConfig.MinConns > 0 {
+		poolConfig.MinConns = int32(primaryConfig.MinConns)
+	}
+	poolConfig.BeforeConnect = func(ctx context.Context, cfg *pgx.ConnConfig) error {
+		cfg.ValidateConnect = pgconn.ValidateConnectTargetSessionAttrsPrimary
+		return nil
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		return nil, err
+	}
+	return pool, nil
 }
 
 func (c *PoolManager) startMasterMonitor() {
@@ -216,7 +256,7 @@ func (c *PoolManager) reconnectMasterLoop() {
 	}
 }
 
-func (c *PoolManager) initReplicas(ctx context.Context, config *Config) error {
+func (c *PoolManager) initStandby(ctx context.Context, config *Config) error {
 	var (
 		replicaConfig = config.StandbyConfig
 	)
