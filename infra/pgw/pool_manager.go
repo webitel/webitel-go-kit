@@ -100,6 +100,8 @@ func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager,
 	for _, opt := range options {
 		opt(cfg)
 	}
+	cfg.PrimaryConfig = mergePrimaryPoolConfigWithDefault(cfg.PrimaryConfig)
+	cfg.StandbyConfig = mergeStandbyPoolConfigWithDefault(cfg.StandbyConfig)
 
 	conn := &PoolManager{
 		config:        cfg,
@@ -107,16 +109,10 @@ func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager,
 		errorsManager: newErrorsManager(),
 	}
 
-	mergedPoolConfig := conn.mergePrimaryPoolConfigWithDefault(cfg.PrimaryConfig)
-	cfg.PrimaryConfig = mergedPoolConfig
-
 	err := conn.initPrimary(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-
-	mergedStandbyPoolConfig := conn.mergeStandbyPoolConfigWithDefault(cfg.StandbyConfig)
-	cfg.StandbyConfig = mergedStandbyPoolConfig
 
 	err = conn.initStandby(ctx, cfg)
 	if err != nil {
@@ -127,8 +123,11 @@ func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager,
 	return conn, nil
 }
 
-func (*PoolManager) mergePrimaryPoolConfigWithDefault(primaryConfig PrimaryConfig) PrimaryConfig {
+func mergePrimaryPoolConfigWithDefault(primaryConfig PrimaryConfig) PrimaryConfig {
 	mergedPoolConfig := DefaultPrimaryPoolConfig
+	if primaryConfig.DSN != "" {
+		mergedPoolConfig.DSN = primaryConfig.DSN
+	}
 	if primaryConfig.HealthCheckInterval > 0 {
 		mergedPoolConfig.HealthCheckInterval = primaryConfig.HealthCheckInterval
 	}
@@ -146,6 +145,41 @@ func (*PoolManager) mergePrimaryPoolConfigWithDefault(primaryConfig PrimaryConfi
 	}
 	if primaryConfig.RetryStrategyBaseValue > 0 {
 		mergedPoolConfig.RetryStrategyBaseValue = primaryConfig.RetryStrategyBaseValue
+	}
+	if primaryConfig.MaxConns > 0 {
+		mergedPoolConfig.MaxConns = primaryConfig.MaxConns
+	}
+	if primaryConfig.MinConns > 0 {
+		mergedPoolConfig.MinConns = primaryConfig.MinConns
+	}
+	return mergedPoolConfig
+}
+
+func mergeStandbyPoolConfigWithDefault(config StandbyConfig) StandbyConfig {
+	mergedPoolConfig := DefaultStandbyPoolConfig
+	if len(config.DSN) > 0 {
+		mergedPoolConfig.DSN = config.DSN
+	}
+	if config.HealthCheckInterval > 0 {
+		mergedPoolConfig.HealthCheckInterval = config.HealthCheckInterval
+	}
+	if config.HealthCheckTimeout > 0 {
+		mergedPoolConfig.HealthCheckTimeout = config.HealthCheckTimeout
+	}
+	if config.RetriesBeforeUnhealthy > 0 {
+		mergedPoolConfig.RetriesBeforeUnhealthy = config.RetriesBeforeUnhealthy
+	}
+	if config.RetryStrategy != nil {
+		mergedPoolConfig.RetryStrategy = config.RetryStrategy
+	}
+	if config.RetryStrategyBaseValue > 0 {
+		mergedPoolConfig.RetryStrategyBaseValue = config.RetryStrategyBaseValue
+	}
+	if config.MaxConns > 0 {
+		mergedPoolConfig.MaxConns = config.MaxConns
+	}
+	if config.MinConns > 0 {
+		mergedPoolConfig.MinConns = config.MinConns
 	}
 	return mergedPoolConfig
 }
@@ -220,32 +254,6 @@ func (c *PoolManager) buildPrimaryPgxPool(ctx context.Context, config *Config) (
 		return nil, err
 	}
 	return pool, nil
-}
-
-func (c *PoolManager) mergeStandbyPoolConfigWithDefault(config StandbyConfig) StandbyConfig {
-	mergedPoolConfig := DefaultStandbyPoolConfig
-	if config.HealthCheckInterval > 0 {
-		mergedPoolConfig.HealthCheckInterval = config.HealthCheckInterval
-	}
-	if config.HealthCheckTimeout > 0 {
-		mergedPoolConfig.HealthCheckTimeout = config.HealthCheckTimeout
-	}
-	if config.RetriesBeforeUnhealthy > 0 {
-		mergedPoolConfig.RetriesBeforeUnhealthy = config.RetriesBeforeUnhealthy
-	}
-	if config.RetryStrategy != nil {
-		mergedPoolConfig.RetryStrategy = config.RetryStrategy
-	}
-	if config.RetryStrategyBaseValue > 0 {
-		mergedPoolConfig.RetryStrategyBaseValue = config.RetryStrategyBaseValue
-	}
-	if config.MaxConns > 0 {
-		mergedPoolConfig.MaxConns = config.MaxConns
-	}
-	if config.MinConns > 0 {
-		mergedPoolConfig.MinConns = config.MinConns
-	}
-	return mergedPoolConfig
 }
 
 func (c *PoolManager) startMasterMonitor() {
