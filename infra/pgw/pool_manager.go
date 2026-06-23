@@ -107,10 +107,16 @@ func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager,
 		errorsManager: newErrorsManager(),
 	}
 
+	mergedPoolConfig := conn.mergePrimaryPoolConfigWithDefault(cfg.PrimaryConfig)
+	cfg.PrimaryConfig = mergedPoolConfig
+
 	err := conn.initPrimary(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
+
+	mergedStandbyPoolConfig := conn.mergeStandbyPoolConfigWithDefault(cfg.StandbyConfig)
+	cfg.StandbyConfig = mergedStandbyPoolConfig
 
 	err = conn.initStandby(ctx, cfg)
 	if err != nil {
@@ -119,44 +125,6 @@ func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager,
 	}
 
 	return conn, nil
-}
-
-func (c *PoolManager) initPrimary(ctx context.Context, config *Config) error {
-	if config == nil {
-		return errors.New("primary config is required to run pgw")
-	}
-
-	pool, err := c.buildPrimaryPgxPool(ctx, config)
-	if err != nil {
-		return err
-	}
-	mergedPoolConfig := c.mergePrimaryPoolConfigWithDefault(config.PrimaryConfig)
-
-	defaultPool, err := newPool(pool, PoolConfig{
-		HealthCheckInterval: mergedPoolConfig.HealthCheckInterval,
-		HealthCheckTimeout:  mergedPoolConfig.HealthCheckTimeout,
-		ErrorParser:         c.errorsManager,
-		MigrationVerifier:   config.MigrationVerifier,
-	})
-	if err != nil {
-		pool.Close()
-		return err
-	}
-
-	err = defaultPool.ConnectWithRetry(
-		mergedPoolConfig.RetryAttempts,
-		mergedPoolConfig.RetryStrategy,
-		mergedPoolConfig.RetryStrategyBaseValue)
-
-	if err != nil {
-		defaultPool.Close()
-		return err
-	}
-
-	c.master = defaultPool
-	go c.startMasterMonitor()
-
-	return nil
 }
 
 func (*PoolManager) mergePrimaryPoolConfigWithDefault(primaryConfig PrimaryConfig) PrimaryConfig {
@@ -180,6 +148,45 @@ func (*PoolManager) mergePrimaryPoolConfigWithDefault(primaryConfig PrimaryConfi
 		mergedPoolConfig.RetryStrategyBaseValue = primaryConfig.RetryStrategyBaseValue
 	}
 	return mergedPoolConfig
+}
+
+func (c *PoolManager) initPrimary(ctx context.Context, config *Config) error {
+	if config == nil {
+		return errors.New("primary config is required to run pgw")
+	}
+
+	primaryConfig := config.PrimaryConfig
+
+	pool, err := c.buildPrimaryPgxPool(ctx, config)
+	if err != nil {
+		return err
+	}
+
+	defaultPool, err := newPool(pool, PoolConfig{
+		HealthCheckInterval: primaryConfig.HealthCheckInterval,
+		HealthCheckTimeout:  primaryConfig.HealthCheckTimeout,
+		ErrorParser:         c.errorsManager,
+		MigrationVerifier:   config.MigrationVerifier,
+	})
+	if err != nil {
+		pool.Close()
+		return err
+	}
+
+	err = defaultPool.ConnectWithRetry(
+		primaryConfig.RetryAttempts,
+		primaryConfig.RetryStrategy,
+		primaryConfig.RetryStrategyBaseValue)
+
+	if err != nil {
+		defaultPool.Close()
+		return err
+	}
+
+	c.master = defaultPool
+	go c.startMasterMonitor()
+
+	return nil
 }
 
 func (c *PoolManager) buildPrimaryPgxPool(ctx context.Context, config *Config) (*pgxpool.Pool, error) {
@@ -213,6 +220,32 @@ func (c *PoolManager) buildPrimaryPgxPool(ctx context.Context, config *Config) (
 		return nil, err
 	}
 	return pool, nil
+}
+
+func (c *PoolManager) mergeStandbyPoolConfigWithDefault(config StandbyConfig) StandbyConfig {
+	mergedPoolConfig := DefaultStandbyPoolConfig
+	if config.HealthCheckInterval > 0 {
+		mergedPoolConfig.HealthCheckInterval = config.HealthCheckInterval
+	}
+	if config.HealthCheckTimeout > 0 {
+		mergedPoolConfig.HealthCheckTimeout = config.HealthCheckTimeout
+	}
+	if config.RetriesBeforeUnhealthy > 0 {
+		mergedPoolConfig.RetriesBeforeUnhealthy = config.RetriesBeforeUnhealthy
+	}
+	if config.RetryStrategy != nil {
+		mergedPoolConfig.RetryStrategy = config.RetryStrategy
+	}
+	if config.RetryStrategyBaseValue > 0 {
+		mergedPoolConfig.RetryStrategyBaseValue = config.RetryStrategyBaseValue
+	}
+	if config.MaxConns > 0 {
+		mergedPoolConfig.MaxConns = config.MaxConns
+	}
+	if config.MinConns > 0 {
+		mergedPoolConfig.MinConns = config.MinConns
+	}
+	return mergedPoolConfig
 }
 
 func (c *PoolManager) startMasterMonitor() {
