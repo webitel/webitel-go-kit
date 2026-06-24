@@ -1,6 +1,8 @@
 package logger
 
 import (
+	"context"
+
 	"github.com/webitel/wlog"
 )
 
@@ -30,6 +32,31 @@ func (a *WlogAdapter) Debug(msg string, args ...any) {
 // Warn logs warning messages with structured args.
 func (a *WlogAdapter) Warn(msg string, args ...any) {
 	a.log.Warn(msg, toWlogFields(args)...)
+}
+
+// wlog has no context-aware logging, so the *Context variants ignore ctx and
+// log identically to their plain counterparts. Trace correlation is delivered
+// through the slog adapter (NewSlog), which pkg/log wires by default.
+func (a *WlogAdapter) InfoContext(_ context.Context, msg string, args ...any) {
+	a.Info(msg, args...)
+}
+
+func (a *WlogAdapter) ErrorContext(_ context.Context, msg string, args ...any) {
+	a.Error(msg, args...)
+}
+
+func (a *WlogAdapter) DebugContext(_ context.Context, msg string, args ...any) {
+	a.Debug(msg, args...)
+}
+
+func (a *WlogAdapter) WarnContext(_ context.Context, msg string, args ...any) {
+	a.Warn(msg, args...)
+}
+
+// With returns a child logger that tags every record with args, given as
+// key/value pairs.
+func (a *WlogAdapter) With(args ...any) Logger {
+	return &WlogAdapter{log: a.log.With(toWlogFields(args)...)}
 }
 
 // toWlogFields converts key-value pairs to wlog.Field.
