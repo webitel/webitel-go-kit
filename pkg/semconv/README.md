@@ -55,6 +55,16 @@ telemetry.
 | `ServiceInstanceIDKey` | `service.instance.id` |
 | `ServiceNamespaceKey`  | `service.namespace` |
 
+### gRPC framework attributes — `grpc.go`
+grpc-go's global logger (`grpclog.LoggerV2`) is context-free and hands the adapter
+either fmt operands or a printf format+args. `pkg/depenlog` renders the readable
+message and attaches the originals under these keys so they stay queryable.
+
+| Constant | Value |
+|----------|-------|
+| `GRPCFormatKey` | `grpc.format` |
+| `GRPCArgsKey`   | `grpc.args` |
+
 ## Usage
 
 As structured-log attribute keys:

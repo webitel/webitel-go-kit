@@ -14,6 +14,7 @@ Loki/ELK query works across all services.
 | Dir | Run | Shows |
 |-----|-----|-------|
 | `basic/` | `go run ./basic` | `New`, structured logging with canonical keys, `WithComponent`, `trace_id` correlation via `*Context`, `err`→`error` normalization, grpc-go logs joining the schema |
+| `grpc/`  | `go run ./grpc`  | grpc-go framework logs as `component=grpc`, with the original operands/format attached as `grpc.args`/`grpc.format`; the `V` verbosity gate |
 | `fx/`    | `go run ./fx`    | `fx.WithLogger(FxLogger(l))` — fx's lifecycle events logged as `component=fx`; injecting `logger.Logger` into constructors |
 | `http/`  | `go run ./http`  | `Middleware` (per-request access log with `trace_id`) and `ErrorLog` (net/http internal errors) |
 | `otel/`  | `cd otel && go run .` | OTel-pipeline mode: `WithHandler` plugs the otelslog bridge so all logs flow through the OTel `LoggerProvider`/exporter, with `trace_id`/`span_id` from real spans (separate module — see below) |

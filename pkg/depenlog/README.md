@@ -142,6 +142,7 @@ Runnable, self-terminating examples live in [`example/`](./example):
 | Run | Shows |
 |-----|-------|
 | `go run ./example/basic` | `New`, canonical keys, `WithComponent`, `trace_id` via `*Context`, `err`→`error`, grpc-go logs |
+| `go run ./example/grpc`  | grpc-go framework logs as `component=grpc` with `grpc.args`/`grpc.format`; the `V` gate |
 | `go run ./example/fx`    | `fx.WithLogger(FxLogger(l))`; injecting `logger.Logger` |
 | `go run ./example/http`  | `Middleware` + `ErrorLog` |
 | `cd example/otel && go run .` | OTel-pipeline mode via `WithHandler` (separate module) |

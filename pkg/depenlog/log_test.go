@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
+	"reflect"
 	"testing"
 
 	"github.com/webitel/webitel-go-kit/pkg/logger"
@@ -172,21 +174,87 @@ func TestFxLoggerError(t *testing.T) {
 	}
 }
 
-// The grpc adapter routes through the unified handler tagged component=grpc.
+// The grpc adapter routes through the unified handler tagged component=grpc,
+// preserving the readable message and attaching the original format/args as
+// structured fields. grpclog.LoggerV2 is context-free, so no trace correlation is
+// possible here — that comes from interceptors.
 func TestGRPCLogger(t *testing.T) {
-	var buf bytes.Buffer
-	l := newTestLogger(t, &buf)
-	g := &grpcLogger{log: WithComponent(l, "grpc")}
-	g.Error("boom")
+	newGRPC := func(buf *bytes.Buffer) *grpcLogger {
+		return &grpcLogger{log: WithComponent(newTestLogger(t, buf), "grpc")}
+	}
 
-	m := decode(t, &buf)
-	if got := m[semconv.LevelKey]; got != "ERROR" {
-		t.Errorf("%s = %v, want ERROR", semconv.LevelKey, got)
-	}
-	if got := m[semconv.ComponentKey]; got != "grpc" {
-		t.Errorf("%s = %v, want grpc", semconv.ComponentKey, got)
-	}
-	if g.V(0) != true || g.V(1) != false {
-		t.Errorf("V gate: want V(0)=true V(1)=false, got V(0)=%v V(1)=%v", g.V(0), g.V(1))
-	}
+	// fmt-style operands: the message is the rendered operands, and the raw
+	// operands are attached under grpc.args.
+	t.Run("args", func(t *testing.T) {
+		var buf bytes.Buffer
+		newGRPC(&buf).Info("parsed scheme: ", "dns")
+
+		m := decode(t, &buf)
+		if got := m[semconv.LevelKey]; got != "INFO" {
+			t.Errorf("%s = %v, want INFO", semconv.LevelKey, got)
+		}
+		if got := m[semconv.ComponentKey]; got != "grpc" {
+			t.Errorf("%s = %v, want grpc", semconv.ComponentKey, got)
+		}
+		if got := m[semconv.MessageKey]; got != "parsed scheme: dns" {
+			t.Errorf("%s = %v, want %q", semconv.MessageKey, got, "parsed scheme: dns")
+		}
+		want := []any{"parsed scheme: ", "dns"}
+		if got := m[semconv.GRPCArgsKey]; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s = %v, want %v", semconv.GRPCArgsKey, got, want)
+		}
+	})
+
+	// printf-style logs keep the rendered message plus the format string and args
+	// as structured fields; error args normalize to their message (not "{}").
+	t.Run("formatted", func(t *testing.T) {
+		var buf bytes.Buffer
+		newGRPC(&buf).Warningf("transport: authentication handshake failed: %v", io.EOF)
+
+		m := decode(t, &buf)
+		if got := m[semconv.LevelKey]; got != "WARN" {
+			t.Errorf("%s = %v, want WARN", semconv.LevelKey, got)
+		}
+		if got := m[semconv.MessageKey]; got != "transport: authentication handshake failed: EOF" {
+			t.Errorf("%s = %v, want rendered message", semconv.MessageKey, got)
+		}
+		if got := m[semconv.GRPCFormatKey]; got != "transport: authentication handshake failed: %v" {
+			t.Errorf("%s = %v, want format string", semconv.GRPCFormatKey, got)
+		}
+		want := []any{"EOF"}
+		if got := m[semconv.GRPCArgsKey]; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s = %v, want %v", semconv.GRPCArgsKey, got, want)
+		}
+	})
+
+	// Each grpc level maps to the matching unified level.
+	t.Run("levels", func(t *testing.T) {
+		cases := []struct {
+			name string
+			log  func(*grpcLogger)
+			want string
+		}{
+			{"Error", func(g *grpcLogger) { g.Error("boom") }, "ERROR"},
+			{"Errorln", func(g *grpcLogger) { g.Errorln("boom") }, "ERROR"},
+			{"Warning", func(g *grpcLogger) { g.Warning("careful") }, "WARN"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				var buf bytes.Buffer
+				tc.log(newGRPC(&buf))
+				if got := decode(t, &buf)[semconv.LevelKey]; got != tc.want {
+					t.Errorf("%s = %v, want %v", semconv.LevelKey, got, tc.want)
+				}
+			})
+		}
+	})
+
+	// V mirrors grpc-go's verbosity-0 gate: level 0 passes, higher is suppressed.
+	t.Run("verbosity", func(t *testing.T) {
+		var buf bytes.Buffer
+		g := newGRPC(&buf)
+		if g.V(0) != true || g.V(1) != false {
+			t.Errorf("V gate: want V(0)=true V(1)=false, got V(0)=%v V(1)=%v", g.V(0), g.V(1))
+		}
+	})
 }

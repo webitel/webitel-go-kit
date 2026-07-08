@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/webitel/webitel-go-kit/pkg/logger"
+	"github.com/webitel/webitel-go-kit/pkg/semconv"
 	"google.golang.org/grpc/grpclog"
 )
 
@@ -22,53 +23,73 @@ type grpcLogger struct {
 
 var _ grpclog.LoggerV2 = (*grpcLogger)(nil)
 
+type logFunc = func(msg string, args ...any)
+
+func (g *grpcLogger) logArgs(log logFunc, args ...any) {
+	log(fmt.Sprint(args...), semconv.GRPCArgsKey, normalizeArgs(args))
+}
+
+func (g *grpcLogger) logf(log logFunc, format string, args ...any) {
+	log(fmt.Sprintf(format, args...),
+		semconv.GRPCFormatKey, format,
+		semconv.GRPCArgsKey, normalizeArgs(args))
+}
+
+func (g *grpcLogger) fatal() { os.Exit(1) }
+
+func normalizeArgs(args []any) []any {
+	out := make([]any, len(args))
+	for i, a := range args {
+		if err, ok := a.(error); ok {
+			out[i] = err.Error()
+			continue
+		}
+		out[i] = a
+	}
+	return out
+}
+
 func (g *grpcLogger) Info(args ...any) {
-	g.log.Info(fmt.Sprint(args...))
+	g.logArgs(g.log.Info, args...)
 }
-
 func (g *grpcLogger) Infoln(args ...any) {
-	g.log.Info(fmt.Sprint(args...))
+	g.logArgs(g.log.Info, args...)
 }
-
 func (g *grpcLogger) Infof(format string, args ...any) {
-	g.log.Info(fmt.Sprintf(format, args...))
+	g.logf(g.log.Info, format, args...)
 }
 
 func (g *grpcLogger) Warning(args ...any) {
-	g.log.Warn(fmt.Sprint(args...))
+	g.logArgs(g.log.Warn, args...)
 }
-
 func (g *grpcLogger) Warningln(args ...any) {
-	g.log.Warn(fmt.Sprint(args...))
+	g.logArgs(g.log.Warn, args...)
 }
-
 func (g *grpcLogger) Warningf(format string, args ...any) {
-	g.log.Warn(fmt.Sprintf(format, args...))
+	g.logf(g.log.Warn, format, args...)
 }
 
 func (g *grpcLogger) Error(args ...any) {
-	g.log.Error(fmt.Sprint(args...))
+	g.logArgs(g.log.Error, args...)
 }
-
 func (g *grpcLogger) Errorln(args ...any) {
-	g.log.Error(fmt.Sprint(args...))
+	g.logArgs(g.log.Error, args...)
 }
-
 func (g *grpcLogger) Errorf(format string, args ...any) {
-	g.log.Error(fmt.Sprintf(format, args...))
+	g.logf(g.log.Error, format, args...)
 }
 
 func (g *grpcLogger) Fatal(args ...any) {
-	g.log.Error(fmt.Sprint(args...))
-	os.Exit(1)
+	g.logArgs(g.log.Error, args...)
+	g.fatal()
 }
 func (g *grpcLogger) Fatalln(args ...any) {
-	g.log.Error(fmt.Sprint(args...))
-	os.Exit(1)
+	g.logArgs(g.log.Error, args...)
+	g.fatal()
 }
 func (g *grpcLogger) Fatalf(format string, args ...any) {
-	g.log.Error(fmt.Sprintf(format, args...))
-	os.Exit(1)
+	g.logf(g.log.Error, format, args...)
+	g.fatal()
 }
 
 // V mirrors grpc-go's default verbosity gate (verbosity 0): level 0 logs pass,
