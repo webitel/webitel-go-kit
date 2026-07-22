@@ -55,6 +55,8 @@ func (dw *DefaultWatcher) OnEvent(et EventType, entity WatchMarshaller) error {
 		return dw.Notify(EventTypeUpdate, entity)
 	case EventTypeResolutionTime:
 		return dw.Notify(EventTypeResolutionTime, entity)
+	case EventTypeRecordCall:
+		return dw.Notify(EventTypeRecordCall, entity)
 	default:
 		return ErrUnknownType
 	}
