@@ -27,6 +27,7 @@ var _ Publisher = (*MessagePublisher)(nil)
 type PublisherConfig struct {
 	MaxRetries          int
 	ConfirmationTimeout time.Duration
+	Confirmation        bool
 }
 
 // PublisherOption defines a function to modify PublisherConfig.
@@ -38,6 +39,7 @@ func NewPublisherConfig(opts ...PublisherOption) (*PublisherConfig, error) {
 	cfg := &PublisherConfig{
 		MaxRetries:          3,               // default 3 retries
 		ConfirmationTimeout: 5 * time.Second, // default 5s timeout
+		Confirmation:        true,
 	}
 
 	for _, opt := range opts {
@@ -68,6 +70,13 @@ func WithPublisherConfirmationTimeout(timeout time.Duration) PublisherOption {
 	}
 }
 
+// WithConfirmation sets need to use confirmation mode.
+func WithConfirmation(conf bool) PublisherOption {
+	return func(c *PublisherConfig) {
+		c.Confirmation = conf
+	}
+}
+
 type MessagePublisher struct {
 	broker    *Connection
 	config    *PublisherConfig
@@ -82,22 +91,17 @@ func NewPublisher(
 	config *PublisherConfig,
 	logger Logger,
 ) (*MessagePublisher, error) {
-	ch, err := broker.Channel(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("create channel: %w", err)
+	p := &MessagePublisher{
+		broker: broker,
+		config: config,
+		logger: logger,
 	}
 
-	if err := ch.Confirm(false); err != nil {
-		return nil, fmt.Errorf("enable confirm mode: %w", err)
+	if err := p.ensureChannel(); err != nil {
+		return nil, fmt.Errorf("init channel: %w", err)
 	}
 
-	return &MessagePublisher{
-		broker:    broker,
-		config:    config,
-		channel:   ch,
-		confirmCh: ch.NotifyPublish(make(chan amqp.Confirmation, 1)),
-		logger:    logger,
-	}, nil
+	return p, nil
 }
 
 func (p *MessagePublisher) Publish(
@@ -107,61 +111,90 @@ func (p *MessagePublisher) Publish(
 	body []byte,
 	headers amqp.Table,
 ) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	for attempt := 0; attempt < p.config.MaxRetries; attempt++ {
-		err := p.publishWithConfirmation(ctx, exchange, routingKey, body, headers)
+		err := p.doPublish(ctx, exchange, routingKey, body, headers)
 		if err == nil {
 			return nil
 		}
 
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+
 		p.logger.Warn("publish attempt failed", "attempt", attempt+1, "error", err)
 
+		backoff := time.Duration(attempt+1) * time.Second
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(time.Duration(attempt+1) * time.Second):
+		case <-time.After(backoff):
 		}
 	}
 
 	return fmt.Errorf("%w after %d attempts", ErrPublishFailed, p.config.MaxRetries)
 }
 
-func (p *MessagePublisher) publishWithConfirmation(
+func (p *MessagePublisher) doPublish(
 	ctx context.Context,
 	exchange string,
 	routingKey string,
 	body []byte,
 	headers amqp.Table,
 ) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if err := p.ensureChannel(); err != nil {
 		return fmt.Errorf("ensure channel: %w", err)
 	}
 
-	err := p.channel.Publish(
+	msg := amqp.Publishing{
+		ContentType: "application/json",
+		Body:        body,
+		Headers:     headers,
+		Timestamp:   time.Now(),
+	}
+
+	err := p.channel.PublishWithContext(
+		ctx,
 		exchange,
 		routingKey,
 		false, // mandatory
 		false, // immediate
-		amqp.Publishing{
-			ContentType: "application/json",
-			Body:        body,
-			Headers:     headers,
-			Timestamp:   time.Now(),
-		},
+		msg,
 	)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrPublishFailed, err)
 	}
 
+	if !p.config.Confirmation {
+		return nil
+	}
+
+	var timeoutCh <-chan time.Time
+	if p.config.ConfirmationTimeout > 0 {
+		timer := time.NewTimer(p.config.ConfirmationTimeout)
+		defer func() {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		}()
+		timeoutCh = timer.C
+	}
+
 	select {
-	case confirm := <-p.confirmCh:
+	case confirm, ok := <-p.confirmCh:
+		if !ok {
+			return errors.New("confirm channel closed")
+		}
 		if !confirm.Ack {
 			return ErrMessageNacked
 		}
 		return nil
-	case <-time.After(p.config.ConfirmationTimeout):
+	case <-timeoutCh:
 		return ErrPublishTimeout
 	case <-ctx.Done():
 		return ctx.Err()
@@ -178,15 +211,29 @@ func (p *MessagePublisher) ensureChannel() error {
 		return fmt.Errorf("recreate channel: %w", err)
 	}
 
-	if err := ch.Confirm(false); err != nil {
-		return fmt.Errorf("enable confirm mode: %w", err)
+	if p.config.Confirmation {
+		if err := ch.Confirm(false); err != nil {
+			_ = ch.Close()
+			return fmt.Errorf("enable confirm mode: %w", err)
+		}
+
+		p.confirmCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+	} else {
+		p.confirmCh = nil
 	}
 
 	p.channel = ch
-	p.confirmCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+
 	return nil
 }
 
 func (p *MessagePublisher) Close() error {
-	return p.channel.Close()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.channel != nil && !p.channel.IsClosed() {
+		return p.channel.Close()
+	}
+
+	return nil
 }

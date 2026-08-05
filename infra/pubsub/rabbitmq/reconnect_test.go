@@ -22,7 +22,7 @@ func TestRabbitMQReconnect(t *testing.T) {
 	conn, err := NewConnection(cfg, logger)
 	require.NoError(t, err)
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		conn.mu.RLock()
 		amqpConn := conn.conn
 		conn.mu.RUnlock()
