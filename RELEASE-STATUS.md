@@ -20,7 +20,7 @@ the `release-status` workflow from the Actions tab.
 | `infra/otel` | `v0.1.0` | 0 | up to date |
 | `infra/pgw` | `(none)` | 6 | never released |
 | `infra/profiler` | `v0.1.0` | 0 | up to date |
-| `infra/pubsub/rabbitmq` | `(none)` | 20 | never released |
+| `infra/pubsub/rabbitmq` | `(none)` | 21 | never released |
 | `infra/ratelimit` | `v0.2.0` | 1 | needs release |
 | `infra/ratelimit/mux` | `v0.2.0` | 0 | up to date |
 | `infra/sqldb` | `(none)` | 2 | never released |
