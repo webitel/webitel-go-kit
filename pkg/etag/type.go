@@ -20,9 +20,14 @@ const (
 	EtagCaseCommunication                 // Case Related case type
 )
 
-// **maxWellKnownType** is updated after the case types to track the highest value.
+// Knowledge-base ETag types.
+const (
+	EtagKbArticle EtagType = iota + EtagCaseCommunication + 1 // KB Article type
+)
+
+// **maxWellKnownType** is updated after the latest block to track the highest value.
 // Future blocks for other business entities will start counting from this value.
-const maxWellKnownType = EtagCaseCommunication
+const maxWellKnownType = EtagKbArticle
 
 // validType checks if the provided type is valid.
 func validType(typ EtagType) bool {

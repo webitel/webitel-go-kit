@@ -14,15 +14,17 @@ func _() {
 	_ = x[EtagCaseLink-3]
 	_ = x[EtagRelatedCase-4]
 	_ = x[EtagCaseCommunication-5]
+	_ = x[EtagKbArticle-6]
 }
 
-const _EtagType_name = "NoTypeEtagCaseEtagCaseCommentEtagCaseLinkEtagRelatedCaseEtagCaseCommunication"
+const _EtagType_name = "NoTypeEtagCaseEtagCaseCommentEtagCaseLinkEtagRelatedCaseEtagCaseCommunicationEtagKbArticle"
 
-var _EtagType_index = [...]uint8{0, 6, 14, 29, 41, 56, 77}
+var _EtagType_index = [...]uint8{0, 6, 14, 29, 41, 56, 77, 90}
 
 func (i EtagType) String() string {
-	if i >= EtagType(len(_EtagType_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_EtagType_index)-1 {
 		return "EtagType(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _EtagType_name[_EtagType_index[i]:_EtagType_index[i+1]]
+	return _EtagType_name[_EtagType_index[idx]:_EtagType_index[idx+1]]
 }
