@@ -378,6 +378,10 @@ func TestStartTimeoutFallbackRestatesTruth(t *testing.T) {
 	}
 
 	got := recvAll(t, ln, 200*time.Millisecond, 3*time.Second)
+	if len(got) == 0 {
+		t.Fatal("no datagrams arrived")
+	}
+
 	want := "STATUS=" + health.NameNotReady + ": failing [db]"
 	if last := got[len(got)-1]; last != want {
 		t.Fatalf("last datagram = %q, want %q; got %q", last, want, got)

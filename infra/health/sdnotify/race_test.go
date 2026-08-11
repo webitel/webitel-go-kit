@@ -252,6 +252,23 @@ func TestNoReadyWithOnlyInformationalChecks(t *testing.T) {
 
 	reg := health.New(fastConfig(), nil)
 	reg.Informational("rabbit", func(context.Context) error { return nil })
+	if err := reg.Start(context.Background()); err != nil {
+		t.Fatalf("registry Start: %v", err)
+	}
+	stopAtCleanup(t, reg)
+
+	// The registry must actually run the check first. Without this the state is
+	// unknown only because nothing has run, and the assertion below would hold
+	// for a critical check too — proving nothing about the informational rule.
+	waitFor(t, "the informational check to pass", func() bool {
+		for _, c := range reg.Snapshot().Checks {
+			if c.Name == "rabbit" && c.Status == health.StatusOK {
+				return true
+			}
+		}
+
+		return false
+	})
 
 	n := newNotifier(t, reg, addr, WithPollInterval(time.Millisecond))
 	if err := n.Start(context.Background()); err != nil {

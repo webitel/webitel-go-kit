@@ -155,8 +155,9 @@ func TestSlowRunsAreStillSpacedByAnInterval(t *testing.T) {
 	for i := 1; i < 3; i++ {
 		// Every gap must be at least run duration + Interval; a buffered
 		// tick would make it just the run duration.
-		if gap := starts[i].Sub(starts[i-1]); gap < sleep+cfg.Interval/2 {
-			t.Fatalf("runs %d and %d started %s apart, want at least %s", i-1, i, gap, sleep+cfg.Interval)
+		if want := sleep + cfg.Interval/2; starts[i].Sub(starts[i-1]) < want {
+			t.Fatalf("runs %d and %d started %s apart, want at least %s",
+				i-1, i, starts[i].Sub(starts[i-1]), want)
 		}
 	}
 }
