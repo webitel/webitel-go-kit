@@ -21,7 +21,7 @@ func WithLogger(log *slog.Logger) Option {
 }
 
 // newOptions applies opts over a discarding logger: a library must not write to
-// stderr uninvited, so the default is never slog.Default.
+// stderr uninvited.
 func newOptions(opts []Option) options {
 	o := options{log: slog.New(slog.DiscardHandler)}
 	for _, opt := range opts {

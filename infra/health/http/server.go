@@ -39,7 +39,7 @@ func NewServer(r *health.Registry, addr string, opts ...Option) *Server {
 		h: h,
 		srv: &http.Server{
 			Handler:           h,
-			ReadHeaderTimeout: 5 * time.Second, // Slowloris; the repo has no linter to remind us
+			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       10 * time.Second,
 			WriteTimeout:      10 * time.Second,
 			IdleTimeout:       60 * time.Second,
@@ -58,8 +58,7 @@ func (s *Server) Start() error {
 		return nil
 	}
 
-	// Listen synchronously: ListenAndServe in a goroutine returns nil on a taken
-	// port and surfaces the bind error only later, in a log line.
+	// Listen synchronously so a bind error is returned, not just logged.
 	l, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("health/http: listen %s: %w", s.addr, err)
@@ -104,8 +103,7 @@ func (s *Server) serve(l net.Listener) error {
 	return nil
 }
 
-// Stop shuts the server down, bounded by ctx and by its own timeout. Stopping a
-// server that was never started is a no-op, not an error.
+// Stop shuts the server down, bounded by ctx. Never started is a no-op.
 func (s *Server) Stop(ctx context.Context) error {
 	if s == nil {
 		return nil
@@ -144,9 +142,7 @@ func (s *Server) Addr() string {
 }
 
 // loopbackOnly decides from the bound listener, never from the configured
-// string: net.Listen has already resolved it, so the address is a concrete IP.
-// No name is resolved here — a lookup would be both a side effect and a TOCTOU
-// window, which is why example.com is not loopback to this rule.
+// string, and resolves no names.
 func loopbackOnly(a net.Addr) bool {
 	host, _, err := net.SplitHostPort(a.String())
 	if err != nil {

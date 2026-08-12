@@ -16,8 +16,7 @@ const (
 	epHealthz = "healthz"
 )
 
-// allowedMethods is the Allow header on a 405. Method gating is ours to do:
-// gorilla/mux forwards every method to the handler it matched.
+// allowedMethods is the Allow header on a 405; gorilla/mux does not gate.
 const allowedMethods = "GET, HEAD"
 
 type handler struct {
@@ -25,7 +24,7 @@ type handler struct {
 	log   *slog.Logger
 	fixed string // one endpoint only; empty means route on the path
 
-	// Atomic: Server.serve grants it, every request reads it.
+	// Atomic: serve grants it, every request reads it.
 	verboseAllowed atomic.Bool
 }
 
@@ -57,7 +56,6 @@ func HealthHandler(r *health.Registry, opts ...Option) http.Handler {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Set once, before any branch, so no response can forget them.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
@@ -78,8 +76,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Exactly one snapshot: a second one could straddle a state change and pair
-	// a 200 with a not_ready body.
+	// Exactly one snapshot, or a 200 could carry a not_ready body.
 	s := h.reg.Snapshot()
 
 	code, token := readyVerdict(s)
@@ -106,8 +103,7 @@ func readyVerdict(s health.Snapshot) (int, string) {
 }
 
 // liveVerdict is deliberately not derived from s.State: a draining process is
-// stopping but not wedged, and an empty registry is unknown but alive. A
-// liveness check at StatusUnknown is not-ready either, and still not wedged.
+// stopping but not wedged, and an empty registry is unknown but alive.
 func liveVerdict(s health.Snapshot) (int, string) {
 	wedged := !s.SchedulerAlive
 	for _, c := range s.Checks {

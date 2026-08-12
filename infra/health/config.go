@@ -2,8 +2,7 @@ package health
 
 import "time"
 
-// Config holds the registry's timings. Fields left at zero fall back to
-// DefaultConfig.
+// Config holds the registry's timings. A zero field falls back to DefaultConfig.
 type Config struct {
 	Interval      time.Duration // how often each check runs
 	Timeout       time.Duration // bounds one run; must be smaller than Interval
@@ -13,9 +12,7 @@ type Config struct {
 	DrainHold     time.Duration // how long Stop waits after Drain before letting go
 }
 
-// DefaultConfig returns the WTEL-10088 timings. They are a set, pinned to
-// engine's 7.5s Consul ping — APP_SERVICE_TTL halved twice
-// (engine/pkg/discovery/consul.go:121,157) — not to the 30s TTL itself.
+// DefaultConfig returns a coherent set of timings, tuned together.
 func DefaultConfig() Config {
 	return Config{
 		Interval:      5 * time.Second,

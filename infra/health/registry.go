@@ -10,15 +10,13 @@ import (
 	"time"
 )
 
-// Registry runs checks in the background, one goroutine per check, and caches
-// the last result. Every method is safe for concurrent use and on a nil
-// *Registry. The zero value is not usable; use New.
+// Registry runs checks in the background and caches the last result. Every
+// method is safe for concurrent use and on a nil *Registry. Use New.
 type Registry struct {
 	cfg Config
 	log *slog.Logger
 
-	// mu guards everything below, including every checkState, and is never
-	// held while a check runs.
+	// mu guards everything below and is never held while a check runs.
 	mu        sync.Mutex
 	checks    map[string]*checkState
 	ctx       context.Context // nil until Start
@@ -62,8 +60,7 @@ func (r *Registry) Critical(name string, fn Check) { r.register(name, GroupCriti
 // Informational registers a check whose failure only degrades the node.
 func (r *Registry) Informational(name string, fn Check) { r.register(name, GroupInformational, fn) }
 
-// register adds a check, starting its goroutine at once when called after Start.
-// Bad input is logged and dropped: registration has no error to return.
+// register adds a check, starting its goroutine at once when already running.
 func (r *Registry) register(name string, group Group, fn Check) {
 	if r == nil {
 		return
@@ -91,7 +88,6 @@ func (r *Registry) register(name string, group Group, fn Check) {
 	cs := &checkState{name: name, group: group, fn: fn}
 	r.checks[name] = cs
 
-	// Engine brings dependencies up one at a time, so this must work after Start.
 	if r.started {
 		r.wg.Add(1)
 		go r.run(r.ctx, cs)
@@ -128,8 +124,7 @@ func (r *Registry) Start(ctx context.Context) error {
 	return nil
 }
 
-// Drain switches to not-ready, one way. It returns at once; the DrainHold wait
-// happens in Stop.
+// Drain switches to not-ready, one way. The DrainHold wait happens in Stop.
 func (r *Registry) Drain() {
 	if r == nil {
 		return
@@ -147,8 +142,7 @@ func (r *Registry) Drain() {
 	r.log.Info("health: draining", "hold", r.cfg.DrainHold)
 }
 
-// Stop halts the scheduler, bounded by ctx. After Drain it first waits out the
-// rest of DrainHold so service discovery sees us as not-ready.
+// Stop halts the scheduler, bounded by ctx, after waiting out any DrainHold.
 func (r *Registry) Stop(ctx context.Context) error {
 	if r == nil {
 		return nil
@@ -159,7 +153,6 @@ func (r *Registry) Stop(ctx context.Context) error {
 		done := r.stopDone
 		r.mu.Unlock()
 
-		// Another Stop got there first; wait for it, bounded by our ctx.
 		select {
 		case <-done:
 			return nil
@@ -173,8 +166,7 @@ func (r *Registry) Stop(ctx context.Context) error {
 
 	defer close(r.stopDone)
 
-	// The hold only matters if checks actually ran: a never-started registry
-	// was never ready, so there is nothing for service discovery to notice.
+	// A never-started registry was never ready, so there is nothing to hold for.
 	if draining && started {
 		if err := wait(ctx, r.cfg.DrainHold-time.Since(drainAt)); err != nil {
 			r.log.Warn("health: drain hold cut short", "err", err)
@@ -196,8 +188,8 @@ func (r *Registry) results() []CheckResult {
 	return r.Snapshot().Checks
 }
 
-// run is one check's whole life: run, wait one Interval, repeat. The wait starts
-// after the run, so a slow check is not re-run back to back as a Ticker would.
+// run is one check's whole life. The wait starts after the run, so a slow check
+// is not re-run back to back as a Ticker would.
 func (r *Registry) run(ctx context.Context, cs *checkState) {
 	defer r.wg.Done()
 
@@ -226,7 +218,7 @@ func (r *Registry) runOnce(ctx context.Context, cs *checkState) {
 		return // shutting down, not the check's fault
 	}
 	if err == nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		// Ignored its context and finished late. Late is not passing.
+		// Finished late: that is not passing.
 		err = fmt.Errorf("check %q passed only after its %s timeout", cs.name, r.cfg.Timeout)
 	}
 

@@ -37,8 +37,7 @@ type loopState struct {
 	lastState  health.State
 }
 
-// New builds a Notifier, or nil when NOTIFY_SOCKET is unset. The environment is
-// read once, here.
+// New builds a Notifier, or nil when NOTIFY_SOCKET is unset.
 func New(r *health.Registry, opts ...Option) *Notifier {
 	addr := os.Getenv("NOTIFY_SOCKET")
 	if addr == "" {
@@ -65,8 +64,7 @@ func New(r *health.Registry, opts ...Option) *Notifier {
 }
 
 // Start begins notifying. It does not block and a second call is a no-op. The
-// error is always nil — sd_notify(3) says to ignore notify failures — and the
-// signature keeps symmetry with health.Registry.Start.
+// error is always nil: sd_notify(3) says to ignore notify failures.
 func (n *Notifier) Start(ctx context.Context) error {
 	if n == nil {
 		return nil
@@ -89,23 +87,17 @@ func (n *Notifier) Start(ctx context.Context) error {
 }
 
 // Stop sends STOPPING=1 and halts the loop. Only the loop wait is bounded by
-// ctx; the STOPPING=1 write happens first regardless, bounded by
-// WithWriteTimeout — budget it on top of ctx. A second call repeats the first
-// verdict. It does not Drain: the consumer Drains first, then Stops.
+// ctx. It does not Drain: the consumer Drains first, then Stops.
 func (n *Notifier) Stop(ctx context.Context) error {
 	if n == nil {
 		return nil
 	}
 
 	n.stopOnce.Do(func() {
-		// Burning the start once makes a Start after Stop a no-op, and orders a
-		// concurrent Start against this Stop: sync.Once supplies the
-		// happens-before edge that lets cancel and done be read without a mutex.
+		// Burning the start once orders a concurrent Start against this Stop.
 		n.startOnce.Do(func() {})
 
 		// Before the cancel, so a signal handler with a dead ctx still notifies.
-		// A poll tick racing this can emit one more STATUS=, byte-identical to
-		// this one, because the consumer has already Drained.
 		n.send(notifyStopping + "\nSTATUS=" + health.NameStopping)
 
 		if n.cancel == nil {
@@ -119,7 +111,7 @@ func (n *Notifier) Stop(ctx context.Context) error {
 	return n.stopErr
 }
 
-// loop is the only goroutine; each of its three timers is a distinct trigger.
+// loop is the only goroutine.
 func (n *Notifier) loop(ctx context.Context) {
 	defer close(n.done)
 
@@ -128,7 +120,7 @@ func (n *Notifier) loop(ctx context.Context) {
 	poll := time.NewTicker(n.poll)
 	defer poll.Stop()
 
-	// A nil channel blocks forever in select, which is exactly "disabled".
+	// A nil channel blocks forever in select: that is "disabled".
 	var wdC <-chan time.Time
 	if n.wdPeriod > 0 {
 		wd := time.NewTicker(n.wdPeriod)
@@ -143,7 +135,6 @@ func (n *Notifier) loop(ctx context.Context) {
 		startC = st.C
 	}
 
-	// Announcing readiness on an already-dead context is a lie to systemd.
 	if ctx.Err() != nil {
 		return
 	}
@@ -165,8 +156,7 @@ func (n *Notifier) loop(ctx context.Context) {
 }
 
 // sync emits READY=1 once and STATUS= on a state change, from the one snapshot
-// it is given — a second Snapshot() could straddle a change and pair the two
-// from different instants. State.Ready() is the trigger, as in ReadyFunc.
+// it is given.
 func (n *Notifier) sync(ls *loopState, s health.Snapshot) {
 	text := statusText(s)
 
@@ -177,7 +167,7 @@ func (n *Notifier) sync(ls *loopState, s health.Snapshot) {
 		return
 	}
 
-	// haveStatus, not a zero lastState: State(0) is the real value StateUnknown.
+	// haveStatus, not a zero lastState: State(0) is a real value.
 	if !ls.haveStatus || s.State != ls.lastState {
 		n.send("STATUS=" + text)
 		ls.haveStatus, ls.lastState = true, s.State
@@ -185,7 +175,7 @@ func (n *Notifier) sync(ls *loopState, s health.Snapshot) {
 }
 
 // ping proves the process is not wedged. SchedulerAlive is the sole gate, so a
-// dependency outage degrades readiness without restarting the whole fleet.
+// dependency outage cannot restart the fleet.
 func (n *Notifier) ping() {
 	if !n.reg.Snapshot().SchedulerAlive {
 		n.log.Debug("health/sdnotify: skipping the watchdog ping, the scheduler is not turning")
@@ -196,8 +186,8 @@ func (n *Notifier) ping() {
 	n.send(notifyWatchdog)
 }
 
-// forceReady is the WithStartTimeout fallback: better to come up visibly degraded
-// than hang in activating. Clearing haveStatus makes the next poll restate the truth.
+// forceReady is the WithStartTimeout fallback. Clearing haveStatus makes the
+// next poll restate the truth.
 func (n *Notifier) forceReady(ls *loopState) {
 	if ls.readySent {
 		return
@@ -207,9 +197,7 @@ func (n *Notifier) forceReady(ls *loopState) {
 	ls.readySent, ls.haveStatus = true, false
 }
 
-// send writes one datagram, dialling afresh. Failures are logged and swallowed:
-// the next tick retries, and a genuinely broken socket means systemd kills us
-// anyway, which is the correct outcome.
+// send writes one datagram, dialling afresh. Failures are logged, not returned.
 func (n *Notifier) send(state string) {
 	if err := notify(n.addr, state, n.writeTimeout); err != nil {
 		n.log.Warn("health/sdnotify: sending a notification failed", "err", err, "state", state)
@@ -218,8 +206,7 @@ func (n *Notifier) send(state string) {
 
 // join waits for the loop goroutine, bounded by ctx.
 func (n *Notifier) join(ctx context.Context) error {
-	// A non-blocking first look: with both ready, select picks at random, and an
-	// already-exited loop is never a failure.
+	// A non-blocking first look: an already-exited loop is never a failure.
 	select {
 	case <-n.done:
 		n.log.Info("health/sdnotify: stopped")

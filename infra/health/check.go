@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Names as they appear in logs and in the /healthz body.
+// Names used in logs and in the /healthz body.
 const (
 	NameUnknown       = "unknown"
 	NameOK            = "ok"
@@ -20,8 +20,7 @@ const (
 	NameStopping      = "stopping"
 )
 
-// Check is a health check. It must respect ctx: a Check that ignores it delays
-// its own next run.
+// Check is a health check. It must respect ctx.
 type Check func(context.Context) error
 
 // Group is what a check was registered as.
@@ -33,7 +32,6 @@ const (
 	GroupInformational              // only degrades; the node stays in rotation
 )
 
-// Indexed by Group.
 var groupNames = [...]string{NameLiveness, NameCritical, NameInformational}
 
 func (g Group) String() string {
@@ -57,7 +55,6 @@ const (
 	StatusFail
 )
 
-// Indexed by Status.
 var statusNames = [...]string{NameUnknown, NameOK, NameFail}
 
 func (s Status) String() string {
@@ -72,23 +69,13 @@ func (s Status) String() string {
 type State uint8
 
 const (
-	// StateUnknown means no verdict: no checks, or a counting check without a usable result.
-	StateUnknown State = iota
-
-	// StateNotReady means a liveness or critical check is failing.
-	StateNotReady
-
-	// StateDegraded means only informational checks are not OK; the node stays in rotation.
-	StateDegraded
-
-	// StateReady means every check is OK.
-	StateReady
-
-	// StateStopping means Drain or Stop was called. It is one-way.
-	StateStopping
+	StateUnknown  State = iota // no checks, or a counting check without a usable result
+	StateNotReady              // a liveness or critical check is failing
+	StateDegraded              // only informational checks are not OK; stays in rotation
+	StateReady                 // every check is OK
+	StateStopping              // Drain or Stop was called; one-way
 )
 
-// Indexed by State.
 var stateNames = [...]string{NameUnknown, NameNotReady, NameDegraded, NameReady, NameStopping}
 
 func (s State) String() string {
@@ -99,13 +86,13 @@ func (s State) String() string {
 	return stateNames[s]
 }
 
-// Ready is the verdict bool: degraded still counts as ready.
+// Ready reports whether the state serves traffic; degraded still counts.
 func (s State) Ready() bool {
 	return s == StateReady || s == StateDegraded
 }
 
 // CheckResult is one check's state when a snapshot was taken. Err is non-nil
-// whenever Status is not StatusOK, and is for logs only — never a response body.
+// whenever Status is not StatusOK, and is for logs only.
 type CheckResult struct {
 	Name    string
 	Group   Group
@@ -115,7 +102,7 @@ type CheckResult struct {
 	Err     error
 }
 
-// checkState is the live state behind a CheckResult, guarded by the registry's mutex.
+// checkState is guarded by the registry's mutex.
 type checkState struct {
 	name  string
 	group Group
@@ -129,8 +116,7 @@ type checkState struct {
 	ran     bool
 }
 
-// record folds one run's outcome in: down after FailThreshold consecutive
-// failures, up on the first success but not before MinUnready.
+// record folds one run's outcome in, applying hysteresis.
 func (cs *checkState) record(now time.Time, err error, cfg Config) (Status, bool) {
 	was := cs.status
 	cs.ran = true
@@ -144,7 +130,6 @@ func (cs *checkState) record(now time.Time, err error, cfg Config) (Status, bool
 		}
 	} else {
 		cs.fails = 0
-		// Held in StatusFail by MinUnready keeps the error that justified it.
 		if cs.status != StatusFail || now.Sub(cs.since) >= cfg.MinUnready {
 			cs.set(StatusOK, now)
 			cs.lastErr = nil
@@ -174,7 +159,6 @@ func (cs *checkState) result(now time.Time, cfg Config) CheckResult {
 		Err:     cs.lastErr,
 	}
 
-	// Forced unknown synthesizes an error: a not-OK result always explains itself.
 	switch {
 	case !cs.ran:
 		res.Status = StatusUnknown

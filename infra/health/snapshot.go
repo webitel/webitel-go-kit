@@ -17,7 +17,7 @@ type Snapshot struct {
 	Time           time.Time     // the single now used for staleness, grace, and this stamp
 }
 
-// Snapshot returns one consistent view of the registry, taken at a single instant.
+// Snapshot returns that view, taken at a single instant.
 func (r *Registry) Snapshot() Snapshot {
 	if r == nil {
 		return Snapshot{State: StateUnknown, Time: time.Now()}
@@ -44,9 +44,8 @@ func (r *Registry) Snapshot() Snapshot {
 	}
 }
 
-// ReadyFunc returns the readiness verdict for service discovery. A false verdict
-// always carries a non-nil error: engine's Consul loop calls err.Error()
-// unconditionally on the not-ok branch.
+// ReadyFunc returns the readiness verdict for service discovery. A false
+// verdict always carries a non-nil error.
 func (r *Registry) ReadyFunc() func() (bool, error) {
 	return func() (bool, error) {
 		s := r.Snapshot()
@@ -58,8 +57,7 @@ func (r *Registry) ReadyFunc() func() (bool, error) {
 	}
 }
 
-// readyErr synthesizes the verdict error from state tokens and check names only;
-// error texts stay in the logs. The string becomes the Consul TTL check note.
+// readyErr builds the verdict error from state tokens and check names only.
 func readyErr(s Snapshot) error {
 	if s.State == StateStopping {
 		return errors.New("health: stopping: shutting down")
@@ -89,7 +87,6 @@ func readyErr(s Snapshot) error {
 		parts = append(parts, fmt.Sprintf("unknown [%s]", strings.Join(unknown, " ")))
 	}
 
-	// Only informational checks: nothing to list, so give the verdict a reason.
 	if len(parts) == 0 {
 		return errors.New("health: unknown: no liveness or critical checks registered")
 	}
@@ -97,9 +94,7 @@ func readyErr(s Snapshot) error {
 	return fmt.Errorf("health: %s: %s", s.State, strings.Join(parts, "; "))
 }
 
-// deriveState is the readiness verdict, ordered and first-match-wins. A stopped
-// registry is Stopping even without a Drain, so it never reports Ready while
-// shutting down.
+// deriveState is the readiness verdict, ordered and first-match-wins.
 func deriveState(checks []CheckResult, draining, stopped bool) State {
 	if draining || stopped {
 		return StateStopping
@@ -119,8 +114,7 @@ func deriveState(checks []CheckResult, draining, stopped bool) State {
 		}
 	}
 
-	// Nothing answers "can this node take traffic?", so no verdict is earned —
-	// the same rule as an empty registry.
+	// Nothing answers "can this node take traffic?", so no verdict is earned.
 	if !counting {
 		return StateUnknown
 	}
@@ -137,9 +131,7 @@ func deriveState(checks []CheckResult, draining, stopped bool) State {
 	return StateReady
 }
 
-// schedulerAlive says whether the scheduler is still turning: no checks means
-// nothing to observe, a fresh Start gets one StaleAfter of grace, then at least
-// one check must have completed a run within StaleAfter.
+// schedulerAlive says whether the scheduler is still turning.
 func schedulerAlive(now time.Time, checks []CheckResult, started bool, startedAt time.Time, staleAfter time.Duration) bool {
 	if len(checks) == 0 {
 		return true

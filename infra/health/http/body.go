@@ -10,17 +10,13 @@ import (
 	"github.com/webitel/webitel-go-kit/infra/health"
 )
 
-// The /livez one-word bodies. Liveness has its own vocabulary because the state
-// token contradicts the status line: a draining process is stopping, and alive.
+// The /livez bodies; liveness has its own vocabulary.
 const (
-	// NameAlive is the /livez body on 200.
-	NameAlive = "alive"
-
-	// NameWedged is the /livez body on 503.
+	NameAlive  = "alive"
 	NameWedged = "wedged"
 )
 
-// checkJSON is one check on the wire; declaration order is wire order.
+// checkJSON is one check on the wire.
 type checkJSON struct {
 	Name   string `json:"name"`
 	Group  string `json:"group"`
@@ -33,10 +29,8 @@ type bodyJSON struct {
 	Checks []checkJSON `json:"checks"`
 }
 
-// detail is the only place that decides what a health response looks like. The
-// status it reports is always the readiness state, never the /livez verdict.
-//
-// CheckResult.Err is never read here: check.go says it is for logs only.
+// detail is the only place that shapes a health response. CheckResult.Err is
+// never read here: it is for logs only.
 func detail(s health.Snapshot) bodyJSON {
 	out := bodyJSON{
 		Status: s.State.String(),
@@ -46,9 +40,8 @@ func detail(s health.Snapshot) bodyJSON {
 	for _, c := range s.Checks {
 		cj := checkJSON{Name: c.Name, Group: c.Group.String(), Status: c.Status.String()}
 
-		// since tracks the hysteresis status, not the rendered one: a stale
-		// check renders unknown while carrying the time it went ok. It is zero
-		// for the whole cold start and below FailThreshold, and omitted then.
+		// since tracks the hysteresis status, not the rendered one, and is
+		// zero until the first transition.
 		if !c.Since.IsZero() {
 			cj.Since = c.Since.UTC().Format(time.RFC3339)
 		}
@@ -65,8 +58,7 @@ func writeText(w http.ResponseWriter, code int, token string) {
 	_, _ = io.WriteString(w, token+"\n") // net/http drops this for HEAD
 }
 
-// writeJSON marshals before writing: an encoder failing mid-stream would leave
-// a truncated body behind an already-sent status line.
+// writeJSON marshals before writing, so a failure cannot truncate the body.
 func writeJSON(w http.ResponseWriter, code int, s health.Snapshot, log *slog.Logger) {
 	buf, err := json.Marshal(detail(s))
 	if err != nil {
