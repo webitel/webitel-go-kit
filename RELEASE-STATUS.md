@@ -28,7 +28,7 @@ the `release-status` workflow from the Actions tab.
 | `infra/transport` | `(none)` | 1 | never released |
 | `pkg/cache` | `(none)` | 1 | never released |
 | `pkg/errors` | `v0.1.0` | 0 | up to date |
-| `pkg/etag` | `v0.1.0` | 1 | needs release |
+| `pkg/etag` | `v0.2.0` | 0 | up to date |
 | `pkg/filters` | `v0.1.0` | 0 | up to date |
 | `pkg/interceptors` | `v0.1.1` | 2 | needs release |
 | `pkg/logger` | `v0.1.1` | 0 | up to date |
