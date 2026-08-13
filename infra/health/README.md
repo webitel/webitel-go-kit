@@ -51,13 +51,20 @@ earned.
 ```go
 h := health.New(health.DefaultConfig(), log)
 
-h.Critical("grpc", func(ctx context.Context) error { return srv.Ping(ctx) })
+h.Critical("grpc", health.ListenerCheck(lis))
 h.Informational("postgres", store.Ping)
 
 if err := h.Start(ctx); err != nil {
     return err
 }
 ```
+
+`ListenerCheck` dials a listener to prove it still accepts connections. It uses
+the listener's own address, not the one advertised to service discovery — a host
+often cannot reach itself that way, and the dial would be testing the network
+rather than the socket. A wildcard bind is rewritten to loopback in the
+listener's own address family — `::1` for `[::]`, `127.0.0.1` for `0.0.0.0` —
+since a `tcp6` listener refuses an IPv4 probe.
 
 Hand the verdict to service discovery:
 
@@ -68,8 +75,20 @@ discovery.NewServiceDiscovery(nodeID, url, h.ReadyFunc())
 `ReadyFunc` reads the cached snapshot and returns instantly. **When the verdict
 is `false` the error is never nil**, so a caller may use it without a nil check.
 
-Shut down in this order — `Drain()` returns immediately and the `DrainHold` wait
-happens inside `Stop`, so leave at least `DrainHold` of budget in its context:
+Shut down with `Shutdown`, which runs the sequence in the order the registry
+requires. `ctx` must carry at least `DrainHold` of budget: `Drain` returns
+immediately and the hold is absorbed inside `Stop`, so a shorter context cuts
+the hold short and service discovery may never see the node leave rotation.
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+defer cancel()
+
+err := health.Shutdown(ctx, h, notifier) // any number of transports, nil ones skipped
+```
+
+Every transport is stopped even if an earlier one fails, and the errors are
+joined. The equivalent by hand, if you need to interleave something:
 
 ```go
 h.Drain()          // not ready from here on, one way
