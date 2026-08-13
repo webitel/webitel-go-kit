@@ -38,8 +38,15 @@ func ListenerCheck(ln net.Listener) Check {
 				return fmt.Errorf("health: listener address %q: %w", target, err)
 			}
 
+			// Loopback has to match the listener's address family: a tcp6
+			// listener on "[::]" is IPv6-only and refuses 127.0.0.1, which
+			// would report a healthy listener as dead.
 			if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
-				host = "127.0.0.1"
+				if ip != nil && ip.To4() == nil {
+					host = "::1"
+				} else {
+					host = "127.0.0.1"
+				}
 			}
 
 			target = net.JoinHostPort(host, port)

@@ -62,7 +62,9 @@ if err := h.Start(ctx); err != nil {
 `ListenerCheck` dials a listener to prove it still accepts connections. It uses
 the listener's own address, not the one advertised to service discovery — a host
 often cannot reach itself that way, and the dial would be testing the network
-rather than the socket. A wildcard bind is rewritten to loopback.
+rather than the socket. A wildcard bind is rewritten to loopback in the
+listener's own address family — `::1` for `[::]`, `127.0.0.1` for `0.0.0.0` —
+since a `tcp6` listener refuses an IPv4 probe.
 
 Hand the verdict to service discovery:
 

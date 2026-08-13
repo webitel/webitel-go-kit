@@ -122,3 +122,28 @@ func TestShutdownOnNilRegistryIsSafe(t *testing.T) {
 		t.Errorf("nil registry: %v", err)
 	}
 }
+
+type nilableStopper struct{}
+
+func (n *nilableStopper) Stop(context.Context) error {
+	// A Stopper from outside this package need not tolerate a nil receiver.
+	panic("Stop called on a nil *nilableStopper")
+}
+
+// sdnotify.New returns a typed nil *Notifier, and callers pass it straight
+// through. A typed nil in an interface is not == nil.
+func TestShutdownSkipsTypedNilTransports(t *testing.T) {
+	reg := New(testConfig(), nil)
+
+	var typedNil *nilableStopper
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Shutdown called Stop on a typed nil: %v", r)
+		}
+	}()
+
+	if err := Shutdown(context.Background(), reg, typedNil); err != nil {
+		t.Errorf("typed nil transport should be skipped, got %v", err)
+	}
+}

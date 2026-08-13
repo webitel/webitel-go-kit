@@ -108,3 +108,20 @@ func TestListenerCheckHonoursContext(t *testing.T) {
 		t.Error("a cancelled context should abort the dial")
 	}
 }
+
+// A tcp6 listener is IPv6-only: rewriting its wildcard to 127.0.0.1 would
+// report a healthy listener as dead.
+func TestListenerCheckIPv6WildcardUsesIPv6Loopback(t *testing.T) {
+	ln, err := net.Listen("tcp6", "[::]:0")
+	if err != nil {
+		t.Skipf("no IPv6 on this host: %v", err)
+	}
+
+	defer ln.Close()
+
+	go acceptLoop(ln)
+
+	if err := ListenerCheck(ln)(context.Background()); err != nil {
+		t.Errorf("tcp6 wildcard should dial [::1]: %v", err)
+	}
+}
