@@ -1,0 +1,48 @@
+# Generator config. Rules and rationale are in README.md.
+
+params:
+  # The prefix for conventions that stay ours. The only place it is written;
+  # change it with ./generate.sh --set-namespace.
+  namespace: webitel
+
+  # Boundaries are in SECONDS, and every metric listed here is second-based.
+  # Upstream sets boundaries for four http/rpc metrics only, so DB operation
+  # duration is ours to write. Do not add rpc.client.duration or
+  # rpc.server.duration here — they are still `ms` upstream at v1.30.0.
+  histogram_boundaries:
+    db.client.operation.duration:
+      [0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+
+    # Call setup is dominated by carrier and endpoint latency.
+    webitel.voice.operation.duration:
+      [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 120]
+
+    # A fixed-period heartbeat; what matters is drift from the period.
+    webitel.consul.ttl.cycle.duration:
+      [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]
+
+  # Enum members to emit. Upstream defines 41 database systems and 5 RPC
+  # systems; we generate only the ones this fleet actually speaks. Add a value
+  # here when a service starts using it.
+  enum_values:
+    db.system.name: [postgresql]
+    rpc.system: [grpc]
+
+acronyms: ["DB", "RPC", "GRPC", "SQL", "ID", "URL", "HTTP", "TTL", "IP"]
+
+templates:
+  - template: attribute.go.j2
+    # Only Webitel's own groups reach the template; upstream names already come
+    # from otelgrpc and the upstream Go package.
+    #
+    # Selected on display_name, NOT on the group id. Group ids contain the
+    # namespace, and --set-namespace rewrites them; a filter keyed on the id
+    # would silently match nothing after a flip and emit an empty package.
+    #
+    # `// ""` guards imported upstream groups, which carry no display_name.
+    # registry.* groups are excluded: they DEFINE attributes, the others
+    # REFERENCE them with a requirement level. Emitting both would duplicate
+    # every one of our own constants.
+    filter: >
+      { groups: [.groups[] | select((.display_name // "") | startswith("Webitel")) | select((.id | startswith("registry.")) | not)] }
+    application_mode: single

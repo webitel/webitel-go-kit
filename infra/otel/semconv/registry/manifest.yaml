@@ -1,0 +1,9 @@
+name: webitel
+description: Webitel telemetry semantic conventions.
+schema_url: https://webitel.com/schemas/0.1.0
+
+# The upstream pin. v1.30.0 is the minimum: db.response.status_code needs
+# >= v1.28.0, db.response.returned_rows >= v1.30.0.
+dependencies:
+  - schema_url: https://opentelemetry.io/schemas/1.30.0
+    registry_path: https://github.com/open-telemetry/semantic-conventions@v1.30.0[model]

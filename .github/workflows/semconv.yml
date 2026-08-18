@@ -1,0 +1,50 @@
+name: Semconv
+
+# Fails if the registry is invalid, or if attribute.go was hand-edited or not
+# regenerated after a registry change. modules-ci.yml builds and tests the
+# module itself.
+
+on:
+  pull_request:
+    paths:
+      - 'infra/otel/semconv/**'
+      - '.github/workflows/semconv.yml'
+
+  push:
+    branches: [main]
+    paths:
+      - 'infra/otel/semconv/**'
+      - '.github/workflows/semconv.yml'
+
+concurrency:
+  group: semconv-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generated:
+    name: Registry is valid and attribute.go is current
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: infra/otel/go.mod
+          cache-dependency-path: infra/otel/go.sum
+
+      - name: Cache weaver
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/webitel-weaver
+          key: weaver-${{ runner.os }}-${{ hashFiles('infra/otel/semconv/generate.sh') }}
+
+      - name: Check registry and regenerate
+        working-directory: infra/otel/semconv
+        run: ./generate.sh --check
+
+      - name: Show the drift if there is any
+        if: failure()
+        run: git --no-pager diff -- infra/otel/semconv

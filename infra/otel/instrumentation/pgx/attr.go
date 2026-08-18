@@ -43,12 +43,14 @@ func FromNamedValue(arg driver.NamedValue) attribute.KeyValue {
 func KeyFromNamedValue(arg driver.NamedValue) attribute.Key {
 	var sb strings.Builder
 
-	sb.WriteString(string(semconv.DBQueryParametersKey))
+	sb.WriteString(string(semconv.DBOperationParameterKey))
 	sb.WriteString(".")
 	if arg.Name != "" {
 		sb.WriteString(arg.Name)
 	} else {
-		sb.WriteString(strconv.Itoa(arg.Ordinal))
+		// db.operation.parameter uses a 0-based index for unnamed parameters,
+		// while driver.NamedValue.Ordinal starts at one.
+		sb.WriteString(strconv.Itoa(arg.Ordinal - 1))
 	}
 
 	return attribute.Key(sb.String())
