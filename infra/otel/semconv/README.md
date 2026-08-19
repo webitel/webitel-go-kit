@@ -151,14 +151,23 @@ upstream analog existed; moving them was our decision, not a deprecation.
 |---|---|---|
 | `db.statement` | `db.query.text` | genuine upstream rename |
 | `db.sql_state` | `db.response.status_code` | needs semconv ≥ v1.28.0 |
-| `db.rows_affected` | `db.response.returned_rows` | needs semconv ≥ v1.30.0 |
+| `db.rows_affected` | `db.response.returned_rows` **on SELECT only** | needs semconv ≥ v1.30.0 |
+| `db.rows_affected` | `com.webitel.db.rows_affected` on writes and COPY | see below |
 | `db.sql_table` | `db.collection.name` | permitted — see below |
 | `db.batch.size` | `db.operation.batch.size` | upstream analog exists |
 | `db.query.parameters` | `db.operation.parameter.<key>` | template attribute |
-| `db.prepare_stmt.name` | `webitel.db.prepare_stmt.name` | stays ours |
-| `db.user` | `webitel.db.user` | stays ours; upstream removed its own |
+| `db.prepare_stmt.name` | `com.webitel.db.prepare_stmt.name` | stays ours |
+| `db.user` | `com.webitel.db.user` | stays ours; upstream removed its own |
 | `message.*` | `rpc.message.*` | upstream already defines all four |
 | `name` | *dropped* | only ever held the constant `"message"` |
+
+The `db.rows_affected` row is a deliberate deviation from the ticket, which
+asked for a straight move to `db.response.returned_rows`. Upstream defines that
+as *rows the operation returned*, and pgx reports one number for everything —
+rows returned for `SELECT`, rows changed for a write, rows copied for `COPY`.
+Labelling an `UPDATE` that touched 500 rows as having *returned* 500 rows is
+simply false, and upstream has no attribute for rows affected. So `SELECT` maps
+to the upstream key and everything else keeps a Webitel one.
 
 `db.collection.name` is only permitted when the value is not extracted from
 query text. Webitel sets it on `CopyFrom` spans only, where the value comes from

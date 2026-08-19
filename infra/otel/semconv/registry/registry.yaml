@@ -15,6 +15,16 @@ groups:
         brief: The name of the prepared statement.
         examples: ["stmt_find_user_by_id", "lrupsc_1_0"]
 
+      - id: com.webitel.db.rows_affected
+        type: int
+        stability: development
+        brief: Rows changed by a write, or copied by a COPY operation.
+        note: >
+          NOT db.response.returned_rows, which upstream defines as rows the
+          operation returned. Upstream has no attribute for rows affected, so
+          this one stays ours.
+        examples: [1, 42]
+
       - id: com.webitel.db.user
         type: string
         stability: development
@@ -51,15 +61,20 @@ groups:
       - ref: db.operation.parameter
         requirement_level: opt_in
         note: Template attribute; parameters can carry personal data.
-      - ref: client.address
+      # The remote PostgreSQL endpoint. server.*, not client.* — on a client
+      # span the client.* pair describes the caller, not the database.
+      - ref: server.address
         requirement_level: recommended
-      - ref: client.port
+      - ref: server.port
         requirement_level: recommended
 
       # Ours. Referenced here so they carry an explicit requirement level —
       # a definition alone silently inherits weaver's default.
       - ref: com.webitel.db.user
         requirement_level: recommended
+      - ref: com.webitel.db.rows_affected
+        requirement_level:
+          conditionally_required: On writes and COPY, where no rows are returned.
       - ref: com.webitel.db.prepare_stmt.name
         requirement_level:
           conditionally_required: On prepared-statement spans.

@@ -16,12 +16,10 @@ const (
 
 // Webitel Database Client.
 const (
-	// Client address - domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name.
-	ClientAddressKey = attribute.Key("client.address")
-	// Client port number.
-	ClientPortKey = attribute.Key("client.port")
 	// The name of the prepared statement.
 	WebitelDBPrepareStmtNameKey = attribute.Key("com.webitel.db.prepare_stmt.name")
+	// Rows changed by a write, or copied by a COPY operation.
+	WebitelDBRowsAffectedKey = attribute.Key("com.webitel.db.rows_affected")
 	// The database user the connection authenticates as.
 	WebitelDBUserKey = attribute.Key("com.webitel.db.user")
 	// The name of a collection (table, container) within the database.
@@ -38,6 +36,10 @@ const (
 	DBResponseStatusCodeKey = attribute.Key("db.response.status_code")
 	// The database management system (DBMS) product as identified by the client instrumentation.
 	DBSystemNameKey = attribute.Key("db.system.name")
+	// Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name.
+	ServerAddressKey = attribute.Key("server.address")
+	// Server port number.
+	ServerPortKey = attribute.Key("server.port")
 )
 
 // Webitel Resource.
