@@ -44,8 +44,9 @@ release ships prebuilt binaries, and `generate.sh` picks the one for the host.
 ## Rules the registry enforces
 
 - **Names are OTel-native**, not Prometheus-style. Ten services already run
-  `otelgrpc`, which emits upstream names and is outside our control. Our own
-  naming style alongside it would put two dictionaries in one pipeline.
+  `otelgrpc`, which emits upstream names, and a second naming style beside it
+  would put two dictionaries in one pipeline. This holds even once we emit the
+  names ourselves — see below.
 - **Our own durations are seconds.** Upstream moved at semconv v1.21.0. Two
   places in this fleet still emit milliseconds and are *not* the example to
   copy: the vendored `otelhttp` copy in `webitel.go`, frozen at semconv v1.20.0,
@@ -66,6 +67,14 @@ release ships prebuilt binaries, and `generate.sh` picks the one for the host.
   guarantees nothing.
 - **Nothing of ours goes in an upstream namespace.** This is the rule the old
   package broke.
+
+### Our own instrumentation is the direction of travel
+
+The RPC conventions here are declared as a **contract**, not as a description of
+what `otelgrpc` happens to emit. Webitel intends to write its own instrumentation
+rather than depend on a third party for naming decisions (WTEL-10157). That work
+is explicitly future — this registry is what it will implement, which is why the
+RPC group is spelled out in full even though nothing of ours emits it yet.
 
 Cross-cutting conventions — RPC, SQL, HTTP, runtime — are taken from upstream
 unchanged and referenced, never redefined. `db.client.connection.*` already
@@ -90,16 +99,23 @@ enum_values:
   db.system.name: [postgresql, redis]
 ```
 
-## The namespace is not settled yet
+## The namespace: `com.webitel.*`
 
-Conventions that stay ours currently use `webitel.*`. Whether that becomes
-`com.webitel.*` is open in
-[WTEL-10156](https://webitel.atlassian.net/browse/WTEL-10156): the spec
-recommends reverse-domain for names that may be seen outside the company, which
-is where Webitel runs, but Prometheus turns dots into underscores, so
-`com.webitel.db.user` becomes `com_webitel_db_user`. That cost lands on
-[WTEL-10159](https://webitel.atlassian.net/browse/WTEL-10159), so the two should
-agree before either freezes.
+Conventions that stay ours use **reverse-domain** `com.webitel.*`, decided on
+WTEL-10157 — follow the OTel spec directly so we stay consistent with it, and
+say so explicitly here.
+
+The [naming spec](https://opentelemetry.io/docs/specs/semconv/general/naming/)
+recommends reverse-domain for names that may be seen outside the company, and
+permits a plain application-name prefix only for purely internal systems.
+Webitel runs on customers' machines beside other vendors' software, so the
+reverse-domain form is the one the spec is actually pointing at.
+
+The cost is real and worth stating: Prometheus turns dots into underscores, so
+`com.webitel.db.user` is scraped as `com_webitel_db_user`. That is longer than
+`webitel_db_user` and it lands on
+[WTEL-10159](https://webitel.atlassian.net/browse/WTEL-10159), which adds the
+Prometheus exporter. It is accepted, not overlooked.
 
 The prefix is written in exactly one place, `templates/go/weaver.yaml`, and the
 generated package exposes it as `semconv.Namespace`. To change it everywhere:

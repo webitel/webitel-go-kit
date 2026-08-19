@@ -1,21 +1,21 @@
 # Webitel conventions. Migration table and rules are in README.md.
 #
-# registry.webitel.* groups define attributes that stay ours.
-# webitel.* groups reference upstream attributes we standardise on.
+# registry.com.webitel.* groups define attributes that stay ours.
+# com.webitel.* groups reference upstream attributes we standardise on.
 
 groups:
-  - id: registry.webitel.db
+  - id: registry.com.webitel.db
     type: attribute_group
     display_name: Webitel Database Attributes
     brief: Database attributes with no upstream analog at the pinned version.
     attributes:
-      - id: webitel.db.prepare_stmt.name
+      - id: com.webitel.db.prepare_stmt.name
         type: string
         stability: development
         brief: The name of the prepared statement.
         examples: ["stmt_find_user_by_id", "lrupsc_1_0"]
 
-      - id: webitel.db.user
+      - id: com.webitel.db.user
         type: string
         stability: development
         brief: The database user the connection authenticates as.
@@ -24,7 +24,7 @@ groups:
           be used as a metric attribute.
         examples: ["opensips", "webitel"]
 
-  - id: webitel.db.client
+  - id: com.webitel.db.client
     type: attribute_group
     display_name: Webitel Database Client
     brief: Upstream attributes Webitel database instrumentation emits.
@@ -58,16 +58,18 @@ groups:
 
       # Ours. Referenced here so they carry an explicit requirement level —
       # a definition alone silently inherits weaver's default.
-      - ref: webitel.db.user
+      - ref: com.webitel.db.user
         requirement_level: recommended
-      - ref: webitel.db.prepare_stmt.name
+      - ref: com.webitel.db.prepare_stmt.name
         requirement_level:
           conditionally_required: On prepared-statement spans.
 
-  - id: webitel.rpc.client
+  - id: com.webitel.rpc.client
     type: attribute_group
     display_name: Webitel RPC
-    brief: Upstream RPC attributes Webitel services emit.
+    brief: >
+      RPC attributes Webitel services emit — emitted by otelgrpc today, and the
+      contract Webitel's own instrumentation will implement when it replaces it.
     attributes:
       - ref: rpc.system
         requirement_level: required
@@ -87,7 +89,7 @@ groups:
       - ref: rpc.message.uncompressed_size
         requirement_level: opt_in
 
-  - id: webitel.resource
+  - id: com.webitel.resource
     type: attribute_group
     display_name: Webitel Resource
     brief: >

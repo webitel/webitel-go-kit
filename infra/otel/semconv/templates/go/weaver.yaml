@@ -3,7 +3,7 @@
 params:
   # The prefix for conventions that stay ours. The only place it is written;
   # change it with ./generate.sh --set-namespace.
-  namespace: webitel
+  namespace: com.webitel
 
   # Boundaries are in SECONDS, and every metric listed here is second-based.
   # Upstream sets boundaries for four http/rpc metrics only, so DB operation
@@ -14,11 +14,11 @@ params:
       [0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
 
     # Call setup is dominated by carrier and endpoint latency.
-    webitel.voice.operation.duration:
+    com.webitel.voice.operation.duration:
       [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 120]
 
     # A fixed-period heartbeat; what matters is drift from the period.
-    webitel.consul.ttl.cycle.duration:
+    com.webitel.consul.ttl.cycle.duration:
       [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30]
 
   # Enum members to emit. Upstream defines 41 database systems and 5 RPC
