@@ -26,7 +26,6 @@ func TestKeyValues(t *testing.T) {
 	}{
 		{WebitelDBPrepareStmtNameKey, ourNamespace + "db.prepare_stmt.name"},
 		{WebitelDBUserKey, ourNamespace + "db.user"},
-		{WebitelDBRowsAffectedKey, ourNamespace + "db.rows_affected"},
 
 		{DBQueryTextKey, "db.query.text"},                        // was db.statement
 		{DBResponseStatusCodeKey, "db.response.status_code"},     // was db.sql_state
@@ -69,7 +68,6 @@ func TestOurKeysAreNotInUpstreamNamespaces(t *testing.T) {
 	ours := []attribute.Key{
 		WebitelDBPrepareStmtNameKey,
 		WebitelDBUserKey,
-		WebitelDBRowsAffectedKey,
 	}
 
 	for _, k := range ours {

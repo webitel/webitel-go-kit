@@ -147,7 +147,7 @@ func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQ
 	recordError(span, data.Err)
 
 	if data.Err == nil {
-		span.SetAttributes(rowCountAttribute(data.CommandTag))
+		span.SetAttributes(semconv2.DBResponseReturnedRowsKey.Int64(data.CommandTag.RowsAffected()))
 	}
 
 	span.End()
@@ -182,8 +182,7 @@ func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.Tra
 	recordError(span, data.Err)
 
 	if data.Err == nil {
-		// COPY reports rows copied, never rows returned.
-		span.SetAttributes(semconv2.WebitelDBRowsAffectedKey.Int64(data.CommandTag.RowsAffected()))
+		span.SetAttributes(semconv2.DBResponseReturnedRowsKey.Int64(data.CommandTag.RowsAffected()))
 	}
 
 	span.End()
@@ -348,18 +347,6 @@ func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.Trac
 
 // db.operation.parameter is a template attribute: one attribute per parameter,
 // keyed by name — or by 0-based index when the parameters are positional.
-// rowCountAttribute picks the right attribute for a command tag. TraceQueryEnd
-// covers Query, QueryRow and Exec, and pgx reports one number for all of them:
-// rows returned for SELECT, rows changed for a write. Only the first is what
-// db.response.returned_rows means.
-func rowCountAttribute(tag pgconn.CommandTag) attribute.KeyValue {
-	if tag.Select() {
-		return semconv2.DBResponseReturnedRowsKey.Int64(tag.RowsAffected())
-	}
-
-	return semconv2.WebitelDBRowsAffectedKey.Int64(tag.RowsAffected())
-}
-
 func makeParamsAttributes(args []any) []attribute.KeyValue {
 	attrs := make([]attribute.KeyValue, len(args))
 	for i := range args {

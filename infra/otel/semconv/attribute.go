@@ -18,8 +18,6 @@ const (
 const (
 	// The name of the prepared statement.
 	WebitelDBPrepareStmtNameKey = attribute.Key("com.webitel.db.prepare_stmt.name")
-	// Rows changed by a write, or copied by a COPY operation.
-	WebitelDBRowsAffectedKey = attribute.Key("com.webitel.db.rows_affected")
 	// The database user the connection authenticates as.
 	WebitelDBUserKey = attribute.Key("com.webitel.db.user")
 	// The name of a collection (table, container) within the database.
