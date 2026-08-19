@@ -123,3 +123,6 @@ imports:
     - db.client.connection.*
     - rpc.client.*
     - rpc.server.*
+    # Go runtime. WTEL-10158 wires up contrib/instrumentation/runtime, which
+    # emits exactly these names.
+    - go.*
