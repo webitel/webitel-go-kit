@@ -19,6 +19,7 @@ import (
 	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/log/otlp"
 	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout"
 	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/metric/otlp"
+	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/metric/prometheus"
 	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/metric/stdout"
 	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/trace/otlp"
 	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/trace/stdout"

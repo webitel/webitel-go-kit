@@ -299,6 +299,18 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 	// Read ENV configuration ...
 	setup := newOptions(ctx, opts...)
 	if errs != nil {
+		// An exporter's option constructor may already have acquired an OS
+		// resource: the prometheus metrics exporter opens its own listener
+		// while building options, because that is the only place a bind error
+		// can still be reported. On this path the MeterProvider below is never
+		// constructed, so nothing owns that reader and nothing ever closes it
+		// -- and because ANY signal's bad exporter lands here, a misconfigured
+		// OTEL_LOGS_EXPORTER would strand the metrics port for the life of the
+		// process. Give the readers an owner so the returned ShutdownFunc can
+		// release them.
+		if len(setup.Metrics) > 0 {
+			setup.OnShutdown(sdkmetric.NewMeterProvider(setup.Metrics...).Shutdown)
+		}
 		// USE: otel.Handle(err)
 		return setup.Shutdown, errs
 	}

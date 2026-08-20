@@ -17,7 +17,7 @@
 |[Exporter Selection](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#exporter-selection)|||`file:` exporter(s) use rotation mechanism.</br>See undelying [lumberjack.v2.Logger](https://pkg.go.dev/gopkg.in/natefinch/lumberjack.v2#Logger) for details.</br>Defaults: `;max-size=100` `;max-age=30` `;backups=3` `;localtime=true` `;compress=false`|
 |`OTEL_LOGS_EXPORTER`|Logs exporter to be used</br>`otlp`, `console`, `none`||`otlpgrpc`, `otlphttp`,</br>`stdout`, `stderr`, `file:/path/logs.otel`|
 |`OTEL_TRACES_EXPORTER`|Trace exporter to be used</br>`otlp`, `zipkin`, `console`, `none`||`otlpgrpc`, `otlphttp`,</br>`stdout`, `stderr`, `file:/path/traces.otel`|
-|`OTEL_METRICS_EXPORTER`|Metrics exporter to be used</br>`otlp`, `prometheus`, `console`, `none`||`otlpgrpc`, `otlphttp`,</br>`stdout`, `stderr`, `file:/path/metrics.otel`|
+|`OTEL_METRICS_EXPORTER`|Metrics exporter to be used</br>`otlp`, `prometheus`, `console`, `none`||`otlpgrpc`, `otlphttp`, `prometheus`,</br>`stdout`, `stderr`, `file:/path/metrics.otel`|
 |||||
 |[Attribute Limits](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#attribute-limits)||||
 |`OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`|Maximum allowed attribute value size||no limit|
@@ -57,7 +57,7 @@
 |`OTEL_EXPORTER_ZIPKIN_ENDPOINT`|Endpoint for Zipkin traces|`http://localhost:9411/api/v2/spans`||
 |`OTEL_EXPORTER_ZIPKIN_TIMEOUT`|Maximum time (in milliseconds) the Zipkin exporter will wait for each batch export|`10000`||
 |||||
-| <s>[Prometheus Exporter](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#prometheus-exporter)</s>||||
+| [Prometheus Exporter](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#prometheus-exporter)||||The exporter runs its OWN listener on these two variables — nothing else needs mounting. Serves `/metrics`. Loopback by spec: exposing it off-host is a deliberate deployment act, and the endpoint is unauthenticated, with `target_info` carrying every resource attribute. Name translation strategy is `UnderscoreEscapingWithSuffixes` (dots become underscores, unit/counter suffixes appended). Scope info is on by default, so every series also carries `otel_scope_name`, `otel_scope_version` and `otel_scope_schema_url` labels — a cardinality fact for WTEL-10157/10158. OpenMetrics exposition is enabled, which is what allows exemplars through. An invalid port value is an error, never a silent fallback; a blank one is treated as unset. Note `localhost` resolves to one address family only (`127.0.0.1` or `::1`, whichever comes first), so a scraper configured for the other family gets connection-refused; set the variable explicitly if that matters.|
 |`OTEL_EXPORTER_PROMETHEUS_HOST`|Host used by the Prometheus exporter|`localhost`||
 |`OTEL_EXPORTER_PROMETHEUS_PORT`|Port used by the Prometheus exporter|`9464`||
 |||||
