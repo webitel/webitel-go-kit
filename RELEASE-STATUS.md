@@ -18,7 +18,7 @@ the `release-status` workflow from the Actions tab.
 | `infra/health` | `(none)` | 5 | never released |
 | `infra/httpproxy` | `(none)` | 1 | never released |
 | `infra/logger_client` | `(none)` | 5 | never released |
-| `infra/otel` | `v0.1.0` | 0 | up to date |
+| `infra/otel` | `v0.1.0` | 1 | needs release |
 | `infra/pgw` | `(none)` | 6 | never released |
 | `infra/profiler` | `v0.1.0` | 0 | up to date |
 | `infra/pubsub/rabbitmq` | `(none)` | 21 | never released |
