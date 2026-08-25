@@ -467,6 +467,46 @@ func TestNilRegistryIsSafe(t *testing.T) {
 	}
 }
 
+func TestTransitionsSurviveAFlap(t *testing.T) {
+	reg := start(t, testConfig())
+
+	var down atomic.Bool
+	var runs atomic.Int64
+	reg.Critical("flappy", func(context.Context) error {
+		runs.Add(1)
+		time.Sleep(time.Millisecond)
+		if down.Load() {
+			return errBoom
+		}
+
+		return nil
+	})
+
+	waitFor(t, "the first pass", func() bool { return find(reg, "flappy").Status == StatusOK })
+	if got := find(reg, "flappy"); got.Transitions != (Transitions{OK: 1}) || got.LastDuration < time.Millisecond {
+		t.Fatalf("after the first pass got %+v, want one transition into ok and a measured duration", got)
+	}
+
+	// Transitions count status changes, not runs.
+	at := runs.Load()
+	waitFor(t, "three more runs", func() bool { return runs.Load() >= at+3 })
+	if got := find(reg, "flappy").Transitions; got != (Transitions{OK: 1}) {
+		t.Fatalf("a stable check accrued transitions: %+v", got)
+	}
+
+	down.Store(true)
+	waitFor(t, "the failure", func() bool { return find(reg, "flappy").Status == StatusFail })
+	if got := find(reg, "flappy").Transitions; got != (Transitions{OK: 1, Fail: 1}) {
+		t.Fatalf("after failing Transitions = %+v", got)
+	}
+
+	down.Store(false)
+	waitFor(t, "the recovery", func() bool { return find(reg, "flappy").Status == StatusOK })
+	if got := find(reg, "flappy").Transitions; got != (Transitions{OK: 2, Fail: 1}) {
+		t.Fatalf("after recovery Transitions = %+v", got)
+	}
+}
+
 func TestPartialConfigIsFilledIn(t *testing.T) {
 	got := Config{Interval: time.Second}.withDefaults()
 	def := DefaultConfig()

@@ -100,6 +100,17 @@ type CheckResult struct {
 	Since   time.Time // when Status last changed
 	LastRun time.Time // when the last run completed
 	Err     error
+
+	LastDuration time.Duration // elapsed time of the last completed run; zero until then
+	Transitions  Transitions
+}
+
+// Transitions counts how many times a check's status changed to each value
+// since the process started. Staleness is applied when a result is read and
+// never counted.
+type Transitions struct {
+	OK   uint64
+	Fail uint64
 }
 
 // checkState is guarded by the registry's mutex.
@@ -108,19 +119,22 @@ type checkState struct {
 	group Group
 	fn    Check
 
-	status  Status
-	since   time.Time
-	lastRun time.Time
-	lastErr error
-	fails   int
-	ran     bool
+	status       Status
+	since        time.Time
+	lastRun      time.Time
+	lastErr      error
+	fails        int
+	ran          bool
+	lastDuration time.Duration
+	transitions  Transitions
 }
 
 // record folds one run's outcome in, applying hysteresis.
-func (cs *checkState) record(now time.Time, err error, cfg Config) (Status, bool) {
+func (cs *checkState) record(now time.Time, elapsed time.Duration, err error, cfg Config) (Status, bool) {
 	was := cs.status
 	cs.ran = true
 	cs.lastRun = now
+	cs.lastDuration = elapsed
 
 	if err != nil {
 		cs.lastErr = err
@@ -146,17 +160,26 @@ func (cs *checkState) set(status Status, now time.Time) {
 
 	cs.status = status
 	cs.since = now
+
+	switch status {
+	case StatusOK:
+		cs.transitions.OK++
+	case StatusFail:
+		cs.transitions.Fail++
+	}
 }
 
 // result reads the check's state, applying staleness at read time.
 func (cs *checkState) result(now time.Time, cfg Config) CheckResult {
 	res := CheckResult{
-		Name:    cs.name,
-		Group:   cs.group,
-		Status:  cs.status,
-		Since:   cs.since,
-		LastRun: cs.lastRun,
-		Err:     cs.lastErr,
+		Name:         cs.name,
+		Group:        cs.group,
+		Status:       cs.status,
+		Since:        cs.since,
+		LastRun:      cs.lastRun,
+		Err:          cs.lastErr,
+		LastDuration: cs.lastDuration,
+		Transitions:  cs.transitions,
 	}
 
 	switch {

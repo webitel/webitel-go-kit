@@ -212,7 +212,9 @@ func (r *Registry) runOnce(ctx context.Context, cs *checkState) {
 	runCtx, cancel := context.WithTimeout(ctx, r.cfg.Timeout)
 	defer cancel()
 
+	start := time.Now()
 	err := r.call(runCtx, cs)
+	elapsed := time.Since(start)
 
 	if ctx.Err() != nil {
 		return // shutting down, not the check's fault
@@ -222,7 +224,7 @@ func (r *Registry) runOnce(ctx context.Context, cs *checkState) {
 		err = fmt.Errorf("check %q passed only after its %s timeout", cs.name, r.cfg.Timeout)
 	}
 
-	r.record(cs, err)
+	r.record(cs, elapsed, err)
 }
 
 // call runs the check; a panic becomes that check's error.
@@ -238,9 +240,9 @@ func (r *Registry) call(ctx context.Context, cs *checkState) (err error) {
 	return cs.fn(ctx)
 }
 
-func (r *Registry) record(cs *checkState, err error) {
+func (r *Registry) record(cs *checkState, elapsed time.Duration, err error) {
 	r.mu.Lock()
-	status, changed := cs.record(time.Now(), err, r.cfg)
+	status, changed := cs.record(time.Now(), elapsed, err, r.cfg)
 	r.mu.Unlock()
 
 	if !changed {
