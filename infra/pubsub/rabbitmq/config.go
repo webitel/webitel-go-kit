@@ -19,6 +19,8 @@ const (
 type Config struct {
 	URL            string
 	ConnectTimeout time.Duration
+	WriteTimeout   time.Duration
+	LazyConnect    bool
 }
 
 // NewConfig creates a new Config with URL and connect timeout validation.
@@ -44,6 +46,22 @@ type ConfigOption func(config *Config)
 func WithConnectTimeout(timeout time.Duration) ConfigOption {
 	return func(config *Config) {
 		config.ConnectTimeout = timeout
+	}
+}
+
+// WithWriteTimeout bounds every socket write after the handshake; zero leaves
+// writes unbounded.
+func WithWriteTimeout(timeout time.Duration) ConfigOption {
+	return func(config *Config) {
+		config.WriteTimeout = timeout
+	}
+}
+
+// WithLazyConnect keeps an unavailable broker from failing construction: the
+// connection is retried in the background instead.
+func WithLazyConnect(lazy bool) ConfigOption {
+	return func(config *Config) {
+		config.LazyConnect = lazy
 	}
 }
 
