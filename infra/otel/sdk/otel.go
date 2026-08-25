@@ -15,6 +15,7 @@ import (
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/metric"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/trace"
 
+	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	// "go.opentelemetry.io/contrib/processors/minsev"
 	"go.opentelemetry.io/otel"
 	otelog "go.opentelemetry.io/otel/log"
@@ -52,6 +53,8 @@ type options struct {
 	Traces   []trace.Option
 	Metrics  []metric.Option
 	Resource *resource.Resource
+	// RuntimeMetrics enables the standard Go runtime metric set.
+	RuntimeMetrics bool
 	// option used to set[build] level[logger] for SDK internals
 	// https://pkg.go.dev/go.opentelemetry.io/otel#SetLogger
 	// https://github.com/open-telemetry/opentelemetry-go/blob/v1.29.0/internal/global/internal_logging.go#L20
@@ -166,6 +169,27 @@ func WithMetricOptions(opts ...metric.Option) Option {
 	})
 }
 
+// WithRuntimeMetrics option enables the standard Go runtime metric set:
+// heap use, allocations, the GC goal, goroutine count, GOMAXPROCS and GOGC.
+// Default is off. Note there is no CPU-utilisation metric in this set --
+// go.processor.limit reports GOMAXPROCS, not load.
+//
+// Has no effect unless a metrics exporter is also configured: the instruments
+// are registered on the MeterProvider that OTEL_METRICS_EXPORTER builds, so
+// with no exporter there is nothing to register them on. Likewise suppressed
+// entirely by OTEL_SDK_DISABLED=true.
+//
+// Because newOptions applies environment configuration first and explicit
+// Options last, WithRuntimeMetrics(false) overrides OTEL_METRICS_RUNTIME=true.
+// Prefer passing an operator-controlled value over a hardcoded false: a
+// constant false permanently defeats OTEL_METRICS_RUNTIME for that service,
+// and that variable is the only lever a fleet-wide rollout has.
+func WithRuntimeMetrics(enable bool) Option {
+	return option(func(conf *options) {
+		conf.RuntimeMetrics = enable
+	})
+}
+
 func newOptions(ctx context.Context, opts ...Option) (conf options) {
 	// var level slog.LevelVar
 	// level.Set(slog.LevelError + 4) // [MIN]: ERROR4, e.g. FATAL
@@ -238,6 +262,27 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 				return // err
 			}
 			WithMetricOptions(opts...).apply(&conf)
+		}),
+		internal.EnvString("METRICS_RUNTIME", func(input string) {
+			// Never route this parse error through otel.Handle. Sibling
+			// callbacks do, but their handler joins into Configure's local
+			// errs, which is gated BEFORE resource, logs, traces and metrics
+			// are built -- so one mistyped value here would fail Configure and
+			// blind the whole process. Fall back to "off", as SDK_DISABLED
+			// does below.
+			//
+			// slog is safe where otel.Handle is not: it never touches errs.
+			// Warn rather than fail, because ParseBool rejects values an
+			// operator may try ("yes", "on", "TrUe") and this variable is
+			// Webitel-local, so silence leaves them nothing to search for.
+			enable, err := strconv.ParseBool(input)
+			if err != nil {
+				slog.Warn(
+					"otel: invalid OTEL_METRICS_RUNTIME value, runtime metrics stay disabled",
+					"value", input,
+				)
+			}
+			WithRuntimeMetrics(enable).apply(&conf)
 		}),
 	)
 	// Apply custom after, to be able to override defaults
@@ -412,6 +457,26 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 		)
 		setup.OnShutdown(provider.Shutdown)
 		otel.SetMeterProvider(provider)
+
+		if setup.RuntimeMetrics {
+			// The interval overrides an upstream default of 15s that caches
+			// samples between collections -- a fossil of the deprecated
+			// implementation's runtime.ReadMemStats, where the current path
+			// calls runtime/metrics.Read for well under a microsecond. Left at
+			// 15s, the pull-based Prometheus exporter (where the scrape IS the
+			// collection) serves identical stale values for up to 15s. Must be
+			// a small POSITIVE duration: newConfig maps <= 0 back to 15s.
+			//
+			// errs is already gated above and never read again, so otel.Handle
+			// here only logs -- deliberately: failing to register runtime
+			// metrics must not tear down logs and traces.
+			if err := otelruntime.Start(
+				otelruntime.WithMeterProvider(provider),
+				otelruntime.WithMinimumReadMemStatsInterval(time.Second),
+			); err != nil {
+				otel.Handle(fmt.Errorf("otel/sdk: runtime metrics: %w", err))
+			}
+		}
 	}
 
 	return setup.Shutdown, nil

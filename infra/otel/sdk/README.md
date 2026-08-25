@@ -63,6 +63,7 @@
 |||||
 | [Metrics SDK Configuration](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#metrics-sdk-configuration)||||
 |`OTEL_METRICS_EXEMPLAR_FILTER`|Filter for which measurements can become Exemplars|`trace_based`||
+|`OTEL_METRICS_RUNTIME`|Enable the standard Go runtime metric set: heap use, allocations, GC goal, goroutine count, GOMAXPROCS, GOGC|`false`|Webitel-local — the OTel spec defines no runtime-metrics toggle. Boolean value; `true`/`TRUE`/`t`/`1` enable, anything else logs a warning and leaves the set disabled (note `yes` and `on` do **not** enable it). Has no effect unless a metrics exporter is also configured. An explicit `WithRuntimeMetrics(false)` in code overrides this variable. Adds 8 series under a single instrumentation scope; `otel_scope_version` carries the contrib version, so bumping the pin replaces those series. There is no CPU-utilisation metric — `go.processor.limit` is `GOMAXPROCS`, not load, and `go.memory.limit` appears only when a memory limit is set.|
 |||||
 |[Periodic exporting MetricReader](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#periodic-exporting-metricreader)||||
 |`OTEL_METRIC_EXPORT_INTERVAL`|The time interval (in milliseconds) between the start of two export attempts.|`60000`||
