@@ -1,6 +1,6 @@
 module github.com/webitel/webitel-go-kit/infra/otel
 
-go 1.25.0
+go 1.25.4
 
 require (
 	github.com/go-logr/logr v1.4.3
@@ -11,6 +11,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/otlptranslator v1.0.0
 	github.com/stretchr/testify v1.11.1
+	github.com/webitel/webitel-go-kit/infra/health v0.0.0-20260901055328-5b5fab1ddeca
 	go.opentelemetry.io/contrib/bridges/otelslog v0.17.0
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.68.0
 	go.opentelemetry.io/otel v1.43.0
