@@ -11,10 +11,15 @@ import (
 )
 
 var (
-	ErrPublishFailed  = errors.New("rabbitmq message publish failed")
-	ErrPublishTimeout = errors.New("rabbitmq publish confirmation timeout")
-	ErrMessageNacked  = errors.New("rabbitmq message nacked by broker")
+	ErrPublishFailed     = errors.New("rabbitmq message publish failed")
+	ErrPublishTimeout    = errors.New("rabbitmq publish confirmation timeout")
+	ErrMessageNacked     = errors.New("rabbitmq message nacked by broker")
+	ErrMessageUnroutable = errors.New("rabbitmq message matched no queue")
 )
+
+// confirmBuffer holds confirmations and returns that arrive while a publish is
+// still being accounted for.
+const confirmBuffer = 16
 
 type Publisher interface {
 	Publish(ctx context.Context, exchange string, routingKey string, body []byte, headers amqp.Table) error
@@ -28,6 +33,8 @@ type PublisherConfig struct {
 	MaxRetries          int
 	ConfirmationTimeout time.Duration
 	Confirmation        bool
+	Persistent          bool
+	Mandatory           bool
 }
 
 // PublisherOption defines a function to modify PublisherConfig.
@@ -77,11 +84,28 @@ func WithConfirmation(conf bool) PublisherOption {
 	}
 }
 
+// WithPersistentDelivery marks messages persistent, so a durable queue keeps
+// them across a broker restart.
+func WithPersistentDelivery(persistent bool) PublisherOption {
+	return func(c *PublisherConfig) {
+		c.Persistent = persistent
+	}
+}
+
+// WithMandatory reports a message that matched no queue as an error instead of
+// letting the broker discard it silently.
+func WithMandatory(mandatory bool) PublisherOption {
+	return func(c *PublisherConfig) {
+		c.Mandatory = mandatory
+	}
+}
+
 type MessagePublisher struct {
 	broker    *Connection
 	config    *PublisherConfig
 	channel   *amqp.Channel
 	confirmCh <-chan amqp.Confirmation
+	returnCh  <-chan amqp.Return
 	mu        sync.Mutex
 	logger    Logger
 }
@@ -97,7 +121,7 @@ func NewPublisher(
 		logger: logger,
 	}
 
-	if err := p.ensureChannel(); err != nil {
+	if err := p.ensureChannel(); err != nil && !broker.cfg.LazyConnect {
 		return nil, fmt.Errorf("init channel: %w", err)
 	}
 
@@ -111,6 +135,8 @@ func (p *MessagePublisher) Publish(
 	body []byte,
 	headers amqp.Table,
 ) error {
+	var lastErr error
+
 	for attempt := 0; attempt < p.config.MaxRetries; attempt++ {
 		err := p.doPublish(ctx, exchange, routingKey, body, headers)
 		if err == nil {
@@ -120,6 +146,12 @@ func (p *MessagePublisher) Publish(
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
+
+		if errors.Is(err, ErrMessageUnroutable) {
+			return err
+		}
+
+		lastErr = err
 
 		p.logger.Warn("publish attempt failed", "attempt", attempt+1, "error", err)
 
@@ -131,7 +163,7 @@ func (p *MessagePublisher) Publish(
 		}
 	}
 
-	return fmt.Errorf("%w after %d attempts", ErrPublishFailed, p.config.MaxRetries)
+	return fmt.Errorf("%w after %d attempts: %w", ErrPublishFailed, p.config.MaxRetries, lastErr)
 }
 
 func (p *MessagePublisher) doPublish(
@@ -155,11 +187,17 @@ func (p *MessagePublisher) doPublish(
 		Timestamp:   time.Now(),
 	}
 
+	if p.config.Persistent {
+		msg.DeliveryMode = amqp.Persistent
+	}
+
+	tag := p.channel.GetNextPublishSeqNo()
+
 	err := p.channel.PublishWithContext(
 		ctx,
 		exchange,
 		routingKey,
-		false, // mandatory
+		p.config.Mandatory,
 		false, // immediate
 		msg,
 	)
@@ -185,19 +223,48 @@ func (p *MessagePublisher) doPublish(
 		timeoutCh = timer.C
 	}
 
-	select {
-	case confirm, ok := <-p.confirmCh:
-		if !ok {
-			return errors.New("confirm channel closed")
+	return p.awaitConfirm(ctx, tag, timeoutCh)
+}
+
+// awaitConfirm waits for the broker to confirm the publish carrying tag,
+// skipping confirmations left over by an earlier publish that gave up.
+func (p *MessagePublisher) awaitConfirm(ctx context.Context, tag uint64, timeoutCh <-chan time.Time) error {
+	for {
+		select {
+		case confirm, ok := <-p.confirmCh:
+			if !ok {
+				return errors.New("confirm channel closed")
+			}
+
+			if confirm.DeliveryTag < tag {
+				continue
+			}
+
+			if !confirm.Ack {
+				return ErrMessageNacked
+			}
+
+			return p.routed()
+		case <-timeoutCh:
+			return ErrPublishTimeout
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		if !confirm.Ack {
-			return ErrMessageNacked
-		}
+	}
+}
+
+// routed reports an unroutable publish. The broker sends the return before the
+// confirmation of the same message, so by now it is already buffered.
+func (p *MessagePublisher) routed() error {
+	if !p.config.Mandatory {
 		return nil
-	case <-timeoutCh:
-		return ErrPublishTimeout
-	case <-ctx.Done():
-		return ctx.Err()
+	}
+
+	select {
+	case ret := <-p.returnCh:
+		return fmt.Errorf("%w: %s (%d)", ErrMessageUnroutable, ret.ReplyText, ret.ReplyCode)
+	default:
+		return nil
 	}
 }
 
@@ -206,7 +273,7 @@ func (p *MessagePublisher) ensureChannel() error {
 		return nil
 	}
 
-	ch, err := p.broker.Channel(context.Background())
+	ch, err := p.broker.NewChannel(context.Background())
 	if err != nil {
 		return fmt.Errorf("recreate channel: %w", err)
 	}
@@ -217,9 +284,15 @@ func (p *MessagePublisher) ensureChannel() error {
 			return fmt.Errorf("enable confirm mode: %w", err)
 		}
 
-		p.confirmCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+		p.confirmCh = ch.NotifyPublish(make(chan amqp.Confirmation, confirmBuffer))
 	} else {
 		p.confirmCh = nil
+	}
+
+	if p.config.Mandatory {
+		p.returnCh = ch.NotifyReturn(make(chan amqp.Return, confirmBuffer))
+	} else {
+		p.returnCh = nil
 	}
 
 	p.channel = ch
