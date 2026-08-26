@@ -35,6 +35,10 @@ func TestKeyValues(t *testing.T) {
 		{DBOperationParameterKey, "db.operation.parameter"},      // was db.query.parameters
 		{DBSystemNameKey, "db.system.name"},
 
+		// The remote PostgreSQL endpoint, set by the pgx instrumentation.
+		{ServerAddressKey, "server.address"},
+		{ServerPortKey, "server.port"},
+
 		{RPCMessageTypeKey, "rpc.message.type"},
 		{RPCMessageIDKey, "rpc.message.id"},
 		{RPCMessageCompressedSizeKey, "rpc.message.compressed_size"},

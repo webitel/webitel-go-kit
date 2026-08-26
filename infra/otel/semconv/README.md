@@ -20,9 +20,7 @@ and a top-level `message.*` block.
 | Path | What it is |
 |---|---|
 | `registry/manifest.yaml` | Registry metadata, **and the upstream version pin** |
-| `registry/db.yaml` | Database conventions, and the WTEL-10157 migration table |
-| `registry/rpc.yaml` | RPC conventions |
-| `registry/resource.yaml` | Resource attributes every service must set |
+| `registry/registry.yaml` | Every group: database, RPC, resource, and the imported upstream metrics |
 | `templates/go/weaver.yaml` | Generator config: namespace, histogram boundaries, acronyms |
 | `templates/go/attribute.go.j2` | The Go template |
 | `attribute.go` | **Generated. Do not edit.** |
