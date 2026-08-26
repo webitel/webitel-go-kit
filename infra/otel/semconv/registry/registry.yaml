@@ -1,21 +1,16 @@
-# Webitel conventions. Migration table and rules are in README.md.
-#
-# registry.com.webitel.* groups define attributes that stay ours.
-# com.webitel.* groups reference upstream attributes we standardise on.
-
 groups:
-  - id: registry.com.webitel.db
+  - id: registry.webitel.db
     type: attribute_group
     display_name: Webitel Database Attributes
-    brief: Database attributes with no upstream analog at the pinned version.
+    brief: Database attributes with no upstream equivalent.
     attributes:
-      - id: com.webitel.db.prepare_stmt.name
+      - id: webitel.db.prepare_stmt.name
         type: string
         stability: development
         brief: The name of the prepared statement.
         examples: ["stmt_find_user_by_id", "lrupsc_1_0"]
 
-      - id: com.webitel.db.user
+      - id: webitel.db.user
         type: string
         stability: development
         brief: The database user the connection authenticates as.
@@ -23,106 +18,3 @@ groups:
           A connection property, not a tenant or end-user identifier. MUST NOT
           be used as a metric attribute.
         examples: ["opensips", "webitel"]
-
-  - id: com.webitel.db.client
-    type: attribute_group
-    display_name: Webitel Database Client
-    brief: Upstream attributes Webitel database instrumentation emits.
-    attributes:
-      - ref: db.system.name
-        requirement_level: required
-      - ref: db.query.text
-        requirement_level: recommended
-      - ref: db.collection.name
-        requirement_level:
-          conditionally_required: >
-            When the table name is supplied as a structured identifier by the
-            caller, never parsed out of query text. Webitel sets it on CopyFrom
-            spans only.
-      - ref: db.response.status_code
-        requirement_level:
-          conditionally_required: When the database returned an error code.
-        note: For PostgreSQL this is the SQLSTATE code, e.g. 08P01.
-      - ref: db.response.returned_rows
-        requirement_level: recommended
-      - ref: db.operation.batch.size
-        requirement_level:
-          conditionally_required: When the operation batches two or more queries.
-      - ref: db.operation.parameter
-        requirement_level: opt_in
-        note: Template attribute; parameters can carry personal data.
-      # The remote PostgreSQL endpoint. server.*, not client.* — on a client
-      # span the client.* pair describes the caller, not the database.
-      - ref: server.address
-        requirement_level: recommended
-      - ref: server.port
-        requirement_level: recommended
-
-      # Ours. Referenced here so they carry an explicit requirement level —
-      # a definition alone silently inherits weaver's default.
-      - ref: com.webitel.db.user
-        requirement_level: recommended
-      - ref: com.webitel.db.prepare_stmt.name
-        requirement_level:
-          conditionally_required: On prepared-statement spans.
-
-  - id: com.webitel.rpc.client
-    type: attribute_group
-    display_name: Webitel RPC
-    brief: >
-      RPC attributes Webitel services emit — emitted by otelgrpc today, and the
-      contract Webitel's own instrumentation will implement when it replaces it.
-    attributes:
-      - ref: rpc.system
-        requirement_level: required
-      - ref: rpc.method
-        requirement_level: recommended
-      - ref: rpc.service
-        requirement_level: recommended
-      - ref: rpc.grpc.status_code
-        requirement_level:
-          conditionally_required: When the RPC uses gRPC.
-      - ref: rpc.message.type
-        requirement_level: opt_in
-      - ref: rpc.message.id
-        requirement_level: opt_in
-      - ref: rpc.message.compressed_size
-        requirement_level: opt_in
-      - ref: rpc.message.uncompressed_size
-        requirement_level: opt_in
-
-  - id: com.webitel.resource
-    type: attribute_group
-    display_name: Webitel Resource
-    brief: >
-      Resource attributes every Webitel service MUST set. Bringing the services
-      into compliance is a separate task.
-    attributes:
-      - ref: service.name
-        requirement_level: required
-      - ref: service.instance.id
-        requirement_level: required
-        note: Unique per running instance, stable for that instance's lifetime.
-      - ref: service.namespace
-        requirement_level: required
-      - ref: service.version
-        requirement_level: recommended
-
-# Cross-cutting metrics are taken from upstream unchanged rather than redefined.
-# Importing them puts them under the registry's control: weaver validates these
-# names exist at the pinned version, so a typo or an upstream rename fails the
-# build instead of producing a metric nobody graphs.
-#
-# CAUTION: rpc.client.duration and rpc.server.duration are still `ms` upstream
-# at v1.30.0, unlike db.* which moved to `s`. We take upstream unchanged, so
-# those two stay milliseconds — do NOT give them the second-based boundaries in
-# templates/go/weaver.yaml. Our own conventions are always seconds.
-imports:
-  metrics:
-    - db.client.operation.duration
-    - db.client.connection.*
-    - rpc.client.*
-    - rpc.server.*
-    # Go runtime. WTEL-10158 wires up contrib/instrumentation/runtime, which
-    # emits exactly these names.
-    - go.*

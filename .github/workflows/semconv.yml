@@ -1,8 +1,8 @@
 name: Semconv
 
-# Fails if the registry is invalid, or if attribute.go was hand-edited or not
-# regenerated after a registry change. modules-ci.yml builds and tests the
-# module itself.
+# Fails if the registry is invalid, or if the generated Go package was
+# hand-edited or not regenerated after a registry change. modules-ci.yml builds
+# and tests the module itself.
 
 on:
   pull_request:
@@ -22,8 +22,10 @@ concurrency:
 
 jobs:
   generated:
-    name: Registry is valid and attribute.go is current
+    name: Registry is valid and the generated package is current
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       GOWORK: "off"
 
@@ -38,11 +40,14 @@ jobs:
           go-version-file: infra/otel/go.mod
           cache-dependency-path: infra/otel/go.sum
 
-      - name: Cache weaver
+      # Only the binary is cacheable. Weaver names each template checkout
+      # randomly under ~/.weaver and deletes it on exit, so caching that path
+      # saves nothing and would never be restored.
+      - name: Cache the weaver binary
         uses: actions/cache@v4
         with:
           path: ~/.cache/webitel-weaver
-          key: weaver-${{ runner.os }}-${{ hashFiles('infra/otel/semconv/generate.sh') }}
+          key: weaver-${{ runner.os }}-v0.25.1
 
       - name: Check registry and regenerate
         working-directory: infra/otel/semconv
@@ -50,4 +55,7 @@ jobs:
 
       - name: Show the drift if there is any
         if: failure()
-        run: git --no-pager diff -- infra/otel/semconv
+        run: |
+          # -N so a newly generated file shows up; git diff ignores untracked paths.
+          git add -A -N -- infra/otel/semconv
+          git --no-pager diff -- infra/otel/semconv
