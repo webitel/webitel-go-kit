@@ -9,13 +9,11 @@ never redefined, so this package stays small and cannot drift from upstream.
 ## Regenerating
 
 ```sh
-./generate.sh            # regenerate attribute_group.go and docs/
+./generate.sh            # regenerate attribute_group.go and webitelconv/
 ./generate.sh --check    # fail if the committed output is stale (this is what CI runs)
 ```
 
-`docs/` is the generated attribute reference, rendered with OpenTelemetry's own
-markdown templates. Both it and the Go package are committed, so nothing
-downstream needs Weaver.
+The generated Go is committed, so nothing downstream needs Weaver.
 
 ## Adding an attribute
 
@@ -38,7 +36,28 @@ one signal and optional for another. See the
 
 ## Adding a metric
 
-Not yet possible. The Go templates are opentelemetry-go's own, and their metric
-template imports `go.opentelemetry.io/otel/semconv/internal/metricpool`, which
-Go forbids this module from importing. `generate.sh` fails with that diagnosis
-rather than emitting a package that cannot build.
+Add a `type: metric` group to `registry/registry.yaml`. Its attributes are
+`ref`s into a `registry.webitel.*` group, and this is where their requirement
+level is set. Run `./generate.sh` and commit the result.
+
+```yaml
+- id: metric.webitel.health.check.duration
+  type: metric
+  metric_name: webitel.health.check.duration
+  stability: development
+  brief: Elapsed time of a check's last completed run.
+  instrument: gauge
+  unit: s
+  attributes:
+    - ref: webitel.health.check.name
+      requirement_level: required
+```
+
+Metrics land in `webitelconv/`, one constructor per metric with a typed method
+per attribute:
+
+```go
+duration, err := webitelconv.NewHealthCheckDuration(meter)
+// ...
+o.ObserveFloat64(duration.Inst(), secs, metric.WithAttributes(duration.AttrHealthCheckName(name)))
+```

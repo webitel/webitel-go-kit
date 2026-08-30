@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
 # Regenerate the Go package from the registry.
 #
-#   ./generate.sh            regenerate
+#   ./generate.sh            regenerate attribute_group.go and webitelconv/
 #   ./generate.sh --check    fail if the committed output is stale (CI runs this)
 #
 # Downloads a pinned Weaver release; no Rust toolchain needed. The Go templates
-# are the ones opentelemetry-go generates its own semconv packages with, pulled
-# from that repo at a pinned commit.
+# under ./templates are a vendored copy of the ones opentelemetry-go generates
+# its own semconv packages with.
 set -euo pipefail
 
 WEAVER_VERSION="v0.25.1"
 
-# opentelemetry-go v1.46.0. Pinned by commit, not tag: a tag can be moved, and
-# nothing downstream would notice the generated code changing underneath us.
-TEMPLATES="https://github.com/open-telemetry/opentelemetry-go.git@58db4c898f5b5594f8ba78f156475bf48486e2f2[semconv/templates]"
-
-# opentelemetry-weaver-packages main @ 2026-08-26. Same reasoning: main moves.
-DOC_TEMPLATES="https://github.com/open-telemetry/opentelemetry-weaver-packages.git@12218f8c4dcc9c104d5b37cc5f0314f3a399ae1b[templates/docs]"
+# Vendored from opentelemetry-go@58db4c898f5b5594f8ba78f156475bf48486e2f2
+# (v1.46.0), semconv/templates/registry/go. Local changes: in metric.go.j2 the
+# metricpool import path (upstream's is internal to its module, so
+# ./internal/metricpool carries a copy) and a guard so a namespace with only
+# observable metrics does not import context/metricpool unused; in weaver.yaml
+# our metrics in the instrument map.
+TEMPLATES="./templates"
 
 # Every attribute we generate must carry this prefix. Putting a Webitel name in
 # an upstream namespace is the mistake this registry exists to prevent.
@@ -83,7 +84,6 @@ render() {
 
   "$WEAVER" registry check -r ./registry --quiet
   "$WEAVER" registry generate -r ./registry -t "$TEMPLATES" --quiet go "$out"
-  "$WEAVER" registry generate -r ./registry --v2 -t "$DOC_TEMPLATES" --quiet markdown "$out/docs"
   gofmt -w "$out"
 
   # The templates come from opentelemetry-go, the conventions in them do not.
@@ -99,25 +99,24 @@ render() {
     exit 1
   fi
 
-  # Upstream's metric template reaches for go.opentelemetry.io/otel/semconv/
-  # internal/metricpool, which Go forbids any package outside that module from
-  # importing. Catch it here rather than letting CI fail on a generated file.
+  # A template edit that reintroduces an upstream-internal import would only
+  # fail later, at go build. Catch it here.
   local internal
   internal="$(grep -rho --include='*.go' '"go\.opentelemetry\.io/otel/[^"]*internal/[^"]*"' "$out" || true)"
   if [ -n "$internal" ]; then
     echo "generated code imports an internal upstream package:" >&2
     echo "$internal" | sort -u | sed 's/^/  /' >&2
-    echo "Go will not let this module import it. The upstream metric template" >&2
-    echo "cannot be used as-is outside opentelemetry-go — raise it upstream or" >&2
-    echo "carry a local template for metrics only." >&2
+    echo "Go forbids that from here; point the template at ./internal instead." >&2
     exit 1
   fi
 
   local stray
-  stray="$(grep -rho --include='*.go' 'attribute\.Key("[^"]*"' "$out" | sed 's/.*"\(.*\)"/\1/' \
-    | grep -v "^${NAMESPACE}" || true)"
+  stray="$({
+      grep -rho --include='*.go' 'attribute\.Key("[^"]*"' "$out" | sed 's/.*"\(.*\)"/\1/'
+      grep -rhA1 --include='*.go' 'Name() string {' "$out" | grep -o 'return "[^"]*"' | sed 's/return "//;s/"$//'
+    } | grep -v "^${NAMESPACE}" || true)"
   if [ -n "$stray" ]; then
-    echo "these generated attributes are not in the ${NAMESPACE%.} namespace:" >&2
+    echo "these generated names are not in the ${NAMESPACE%.} namespace:" >&2
     echo "$stray" | sed 's/^/  /' >&2
     echo "upstream conventions belong to go.opentelemetry.io/otel/semconv, not here" >&2
     exit 1
@@ -129,7 +128,6 @@ render() {
 collect_current() {
   local dst="$1" d
   [ -f attribute_group.go ] && cp attribute_group.go "$dst/"
-  [ -d docs ] && cp -R docs "$dst/"
   for d in ./*conv; do
     [ -d "$d" ] && cp -R "$d" "$dst/"
   done
@@ -155,10 +153,9 @@ case "${1:-}" in
   "")
     render "$out"
     rm -f attribute_group.go
-    rm -rf docs
     for d in ./*conv; do [ -d "$d" ] && rm -rf "$d"; done
     (cd "$out" && tar cf - .) | tar xf -
-    echo "generated attribute_group.go and docs/"
+    echo "generated attribute_group.go and webitelconv/"
     ;;
   *) echo "unknown option: $1" >&2; exit 1 ;;
 esac
