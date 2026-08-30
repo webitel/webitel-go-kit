@@ -2,6 +2,5 @@ name: webitel
 description: Webitel telemetry semantic conventions.
 schema_url: https://webitel.com/schemas/0.1.0
 
-# No `dependencies:` entry. Nothing here references an upstream convention, so
-# an upstream pin would resolve nothing and only slow generation down. Add one
-# back — at the then-current release — when a signal group first uses a `ref:`.
+# No `dependencies:`: nothing here refs an upstream attribute. Add one when a
+# group first does.

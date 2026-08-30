@@ -19,14 +19,14 @@ import (
 type HealthCheckGroupAttr string
 
 var (
-	// HealthCheckGroupLiveness is the is this process wedged; counts towards
+	// HealthCheckGroupLiveness is the liveness probe; a failure also fails
 	// readiness.
 	HealthCheckGroupLiveness HealthCheckGroupAttr = "liveness"
-	// HealthCheckGroupCritical is a node-local failure that takes the node out of
-	// rotation.
+	// HealthCheckGroupCritical is the node-local dependency; a failure takes the
+	// node out of rotation.
 	HealthCheckGroupCritical HealthCheckGroupAttr = "critical"
-	// HealthCheckGroupInformational is the only degrades; the node stays in
-	// rotation.
+	// HealthCheckGroupInformational is the dependency whose failure only degrades;
+	// the node stays in rotation.
 	HealthCheckGroupInformational HealthCheckGroupAttr = "informational"
 )
 
@@ -36,9 +36,9 @@ var (
 type HealthCheckStatusAttr string
 
 var (
-	// HealthCheckStatusOk is the check is passing.
+	// HealthCheckStatusOk is the passing check.
 	HealthCheckStatusOk HealthCheckStatusAttr = "ok"
-	// HealthCheckStatusFail is the check has failed its threshold.
+	// HealthCheckStatusFail is the check that failed past its threshold.
 	HealthCheckStatusFail HealthCheckStatusAttr = "fail"
 )
 
@@ -125,7 +125,7 @@ type HealthCheckState struct {
 
 var newHealthCheckStateOpts = []metric.Int64ObservableGaugeOption{
 	metric.WithDescription("1 when a check's current status is ok, 0 otherwise; a stale result is not healthy."),
-	metric.WithUnit("1"),
+	metric.WithUnit("{check}"),
 }
 
 // NewHealthCheckState returns a new HealthCheckState instrument.
@@ -166,7 +166,7 @@ func (HealthCheckState) Name() string {
 
 // Unit returns the semantic convention unit of the instrument
 func (HealthCheckState) Unit() string {
-	return "1"
+	return "{check}"
 }
 
 // Description returns the semantic convention description of the instrument
@@ -277,7 +277,7 @@ type HealthReady struct {
 
 var newHealthReadyOpts = []metric.Int64ObservableGaugeOption{
 	metric.WithDescription("1 when the registry reports the node ready to serve traffic, 0 otherwise."),
-	metric.WithUnit("1"),
+	metric.WithUnit("{node}"),
 }
 
 // NewHealthReady returns a new HealthReady instrument.
@@ -318,7 +318,7 @@ func (HealthReady) Name() string {
 
 // Unit returns the semantic convention unit of the instrument
 func (HealthReady) Unit() string {
-	return "1"
+	return "{node}"
 }
 
 // Description returns the semantic convention description of the instrument

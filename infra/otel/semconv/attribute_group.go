@@ -92,23 +92,23 @@ func WebitelHealthCheckName(val string) attribute.KeyValue {
 
 // Enum values for webitel.health.check.group
 var (
-	// Is this process wedged; counts towards readiness.
+	// liveness probe; a failure also fails readiness.
 	// Stability: development
 	WebitelHealthCheckGroupLiveness = WebitelHealthCheckGroupKey.String("liveness")
-	// A node-local failure that takes the node out of rotation.
+	// node-local dependency; a failure takes the node out of rotation.
 	// Stability: development
 	WebitelHealthCheckGroupCritical = WebitelHealthCheckGroupKey.String("critical")
-	// Only degrades; the node stays in rotation.
+	// dependency whose failure only degrades; the node stays in rotation.
 	// Stability: development
 	WebitelHealthCheckGroupInformational = WebitelHealthCheckGroupKey.String("informational")
 )
 
 // Enum values for webitel.health.check.status
 var (
-	// The check is passing.
+	// passing check.
 	// Stability: development
 	WebitelHealthCheckStatusOk = WebitelHealthCheckStatusKey.String("ok")
-	// The check has failed its threshold.
+	// check that failed past its threshold.
 	// Stability: development
 	WebitelHealthCheckStatusFail = WebitelHealthCheckStatusKey.String("fail")
 )

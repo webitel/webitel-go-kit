@@ -14,14 +14,14 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.opentelemetry.io/otel/trace"
 
-	webitelconv "github.com/webitel/webitel-go-kit/infra/otel/semconv"
+	wsemconv "github.com/webitel/webitel-go-kit/infra/otel/semconv"
 )
 
 const (
 	scopeName = "github.com/webitel/webitel-go-kit/infra/otel/instrumentation/pgx"
 )
 
-// Version is the current release version of the gRPC instrumentation.
+// Version is the current release version of the pgx instrumentation.
 func Version() string {
 	return "0.0.0"
 }
@@ -97,7 +97,7 @@ func connectionAttributesFromConfig(config *pgx.ConnConfig) []trace.SpanStartOpt
 			trace.WithAttributes(
 				semconv.ServerAddressKey.String(config.Host),
 				semconv.ServerPortKey.Int(int(config.Port)),
-				webitelconv.WebitelDBUserKey.String(config.User),
+				wsemconv.WebitelDBUserKey.String(config.User),
 			),
 		}
 	}
@@ -313,7 +313,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 	}
 
 	if data.Name != "" {
-		opts = append(opts, trace.WithAttributes(webitelconv.WebitelDBPrepareStmtNameKey.String(data.Name)))
+		opts = append(opts, trace.WithAttributes(wsemconv.WebitelDBPrepareStmtNameKey.String(data.Name)))
 	}
 
 	if conn != nil {

@@ -19,8 +19,7 @@ WEAVER_VERSION="v0.25.1"
 # our metrics in the instrument map.
 TEMPLATES="./templates"
 
-# Every attribute we generate must carry this prefix. Putting a Webitel name in
-# an upstream namespace is the mistake this registry exists to prevent.
+# Every generated name must carry this prefix.
 NAMESPACE="webitel."
 
 cd "$(dirname "$0")"
@@ -28,9 +27,7 @@ cd "$(dirname "$0")"
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/webitel-weaver/${WEAVER_VERSION}"
 WEAVER="${CACHE}/weaver"
 
-# Digests recorded from the v0.25.1 release. Fetching the .sha256 from the same
-# URL as the tarball only proves the download was not truncated; pinning here
-# means a re-published asset fails instead of being silently trusted.
+# Pinned so a re-published asset fails instead of being trusted.
 weaver_digest() {
   case "$1" in
     aarch64-apple-darwin)      echo d9e0c301077648c83c22bd17d0bfc7688ec134085ec5f673c0db69f3052a9ec5 ;;
@@ -92,8 +89,7 @@ render() {
     -e 's|^// SPDX-License-Identifier: Apache-2.0$|// SPDX-License-Identifier: MIT|' {} +
   find "$out" -name '*.bak' -delete
 
-  # A filter that matches nothing still exits 0, and the stale committed file
-  # would then pass every check below it.
+  # An empty filter exits 0; the stale committed file would pass every check below.
   if [ ! -s "$out/attribute_group.go" ]; then
     echo "weaver produced no attribute_group.go — the registry is not resolving" >&2
     exit 1

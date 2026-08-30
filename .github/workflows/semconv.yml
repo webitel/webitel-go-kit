@@ -1,8 +1,6 @@
 name: Semconv
 
-# Fails if the registry is invalid, or if the generated Go package was
-# hand-edited or not regenerated after a registry change. modules-ci.yml builds
-# and tests the module itself.
+# Fails if the registry is invalid or the generated package is stale.
 
 on:
   pull_request:
@@ -22,7 +20,7 @@ concurrency:
 
 jobs:
   generated:
-    name: Registry is valid and the generated package is current
+    name: Generated package is current
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -32,15 +30,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # This job only reads the tree; it never pushes.
           persist-credentials: false
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: infra/otel/go.mod
-          cache-dependency-path: infra/otel/go.sum
+          cache: false
 
-      # Keyed on generate.sh, which pins the Weaver version.
       - name: Cache the weaver binary
         uses: actions/cache@v4
         with:

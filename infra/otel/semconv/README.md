@@ -3,8 +3,7 @@
 Webitel's own semantic conventions, and the Go package generated from them.
 
 Only conventions with no upstream equivalent live here. Anything OpenTelemetry
-already defines is imported from `go.opentelemetry.io/otel/semconv` directly and
-never redefined, so this package stays small and cannot drift from upstream.
+already defines is imported from `go.opentelemetry.io/otel/semconv` directly.
 
 ## Regenerating
 
@@ -51,6 +50,8 @@ level is set. Run `./generate.sh` and commit the result.
   attributes:
     - ref: webitel.health.check.name
       requirement_level: required
+    - ref: webitel.health.check.group
+      requirement_level: required
 ```
 
 Metrics land in `webitelconv/`, one constructor per metric with a typed method
@@ -59,5 +60,8 @@ per attribute:
 ```go
 duration, err := webitelconv.NewHealthCheckDuration(meter)
 // ...
-o.ObserveFloat64(duration.Inst(), secs, metric.WithAttributes(duration.AttrHealthCheckName(name)))
+o.ObserveFloat64(duration.Inst(), secs, metric.WithAttributes(
+	duration.AttrHealthCheckName(name),
+	duration.AttrHealthCheckGroup(webitelconv.HealthCheckGroupCritical),
+))
 ```

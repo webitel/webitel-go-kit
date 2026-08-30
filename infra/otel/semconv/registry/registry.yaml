@@ -35,15 +35,15 @@ groups:
           members:
             - id: liveness
               value: "liveness"
-              brief: Is this process wedged; counts towards readiness.
+              brief: liveness probe; a failure also fails readiness.
               stability: development
             - id: critical
               value: "critical"
-              brief: A node-local failure that takes the node out of rotation.
+              brief: node-local dependency; a failure takes the node out of rotation.
               stability: development
             - id: informational
               value: "informational"
-              brief: Only degrades; the node stays in rotation.
+              brief: dependency whose failure only degrades; the node stays in rotation.
               stability: development
         stability: development
         brief: The group the check belongs to, which decides how a failure affects readiness.
@@ -53,11 +53,11 @@ groups:
           members:
             - id: ok
               value: "ok"
-              brief: The check is passing.
+              brief: passing check.
               stability: development
             - id: fail
               value: "fail"
-              brief: The check has failed its threshold.
+              brief: check that failed past its threshold.
               stability: development
         stability: development
         brief: The status a check transitioned into.
@@ -71,7 +71,7 @@ groups:
     stability: development
     brief: 1 when the registry reports the node ready to serve traffic, 0 otherwise.
     instrument: gauge
-    unit: "1"
+    unit: "{node}"
 
   - id: metric.webitel.health.check.state
     type: metric
@@ -79,7 +79,7 @@ groups:
     stability: development
     brief: 1 when a check's current status is ok, 0 otherwise; a stale result is not healthy.
     instrument: gauge
-    unit: "1"
+    unit: "{check}"
     attributes:
       - ref: webitel.health.check.name
         requirement_level: required
