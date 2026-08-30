@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Webitel
+// Copyright (c) 2026 Webitel
 // SPDX-License-Identifier: MIT
 
 // Code generated from semantic convention specification. DO NOT EDIT.

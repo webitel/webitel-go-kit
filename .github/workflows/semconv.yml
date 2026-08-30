@@ -40,14 +40,12 @@ jobs:
           go-version-file: infra/otel/go.mod
           cache-dependency-path: infra/otel/go.sum
 
-      # Only the binary is cacheable. Weaver names each template checkout
-      # randomly under ~/.weaver and deletes it on exit, so caching that path
-      # saves nothing and would never be restored.
+      # Keyed on generate.sh, which pins the Weaver version.
       - name: Cache the weaver binary
         uses: actions/cache@v4
         with:
           path: ~/.cache/webitel-weaver
-          key: weaver-${{ runner.os }}-v0.25.1
+          key: weaver-${{ runner.os }}-${{ hashFiles('infra/otel/semconv/generate.sh') }}
 
       - name: Check registry and regenerate
         working-directory: infra/otel/semconv

@@ -88,7 +88,7 @@ render() {
 
   # The templates come from opentelemetry-go, the conventions in them do not.
   find "$out" -name '*.go' -exec sed -i.bak \
-    -e 's|^// Copyright The OpenTelemetry Authors$|// Copyright (c) 2024 Webitel|' \
+    -e 's|^// Copyright The OpenTelemetry Authors$|// Copyright (c) 2026 Webitel|' \
     -e 's|^// SPDX-License-Identifier: Apache-2.0$|// SPDX-License-Identifier: MIT|' {} +
   find "$out" -name '*.bak' -delete
 

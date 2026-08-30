@@ -1,6 +1,6 @@
 // Code generated from semantic convention specification. DO NOT EDIT.
 
-// Copyright (c) 2024 Webitel
+// Copyright (c) 2026 Webitel
 // SPDX-License-Identifier: MIT
 
 // Package webitelconv provides types and functionality for OpenTelemetry semantic
