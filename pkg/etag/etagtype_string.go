@@ -15,11 +15,26 @@ func _() {
 	_ = x[EtagRelatedCase-4]
 	_ = x[EtagCaseCommunication-5]
 	_ = x[EtagKbArticle-6]
+	_ = x[EtagContact-7]
+	_ = x[EtagContactName-8]
+	_ = x[EtagContactLabel-9]
+	_ = x[EtagContactEmail-10]
+	_ = x[EtagContactPhone-11]
+	_ = x[EtagContactGroup-12]
+	_ = x[EtagContactAddress-13]
+	_ = x[EtagContactManager-14]
+	_ = x[EtagContactComment-15]
+	_ = x[EtagContactVariable-16]
+	_ = x[EtagContactLanguage-17]
+	_ = x[EtagContactTimezone-18]
+	_ = x[EtagContactIMClient-19]
+	_ = x[EtagSpace-20]
+	_ = x[EtagArticle-21]
 }
 
-const _EtagType_name = "NoTypeEtagCaseEtagCaseCommentEtagCaseLinkEtagRelatedCaseEtagCaseCommunicationEtagKbArticle"
+const _EtagType_name = "NoTypeEtagCaseEtagCaseCommentEtagCaseLinkEtagRelatedCaseEtagCaseCommunicationEtagKbArticleEtagContactEtagContactNameEtagContactLabelEtagContactEmailEtagContactPhoneEtagContactGroupEtagContactAddressEtagContactManagerEtagContactCommentEtagContactVariableEtagContactLanguageEtagContactTimezoneEtagContactIMClientEtagSpaceEtagArticle"
 
-var _EtagType_index = [...]uint8{0, 6, 14, 29, 41, 56, 77, 90}
+var _EtagType_index = [...]uint16{0, 6, 14, 29, 41, 56, 77, 90, 101, 116, 132, 148, 164, 180, 198, 216, 234, 253, 272, 291, 310, 319, 330}
 
 func (i EtagType) String() string {
 	idx := int(i) - 0

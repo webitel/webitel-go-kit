@@ -25,9 +25,32 @@ const (
 	EtagKbArticle EtagType = iota + EtagCaseCommunication + 1 // KB Article type
 )
 
+// Contact-related ETag types.
+const (
+	EtagContact         EtagType = iota + EtagKbArticle + 1 // Contact type
+	EtagContactName                                         // Contact Name type
+	EtagContactLabel                                        // Contact Label type
+	EtagContactEmail                                        // Contact Email type
+	EtagContactPhone                                        // Contact Phone type
+	EtagContactGroup                                        // Contact Group type
+	EtagContactAddress                                      // Contact Address type
+	EtagContactManager                                      // Contact Manager type
+	EtagContactComment                                      // Contact Comment type
+	EtagContactVariable                                     // Contact Variable type
+	EtagContactLanguage                                     // Contact Language type
+	EtagContactTimezone                                     // Contact Timezone type
+	EtagContactIMClient                                     // Contact IM Client type
+)
+
+// Knowledge-base ETag types of the webitel.go service.
+const (
+	EtagSpace   EtagType = iota + EtagContactIMClient + 1 // Space type
+	EtagArticle                                           // Article type
+)
+
 // **maxWellKnownType** is updated after the latest block to track the highest value.
 // Future blocks for other business entities will start counting from this value.
-const maxWellKnownType = EtagKbArticle
+const maxWellKnownType = EtagArticle
 
 // validType checks if the provided type is valid.
 func validType(typ EtagType) bool {
