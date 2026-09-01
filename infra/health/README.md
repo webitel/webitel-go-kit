@@ -46,6 +46,18 @@ A registry with no checks — or with only informational ones — is **not ready
 nothing registered answers "can this node take traffic?", so no verdict has been
 earned.
 
+Each `CheckResult` also carries `LastDuration` (elapsed time of the last
+completed run; zero until the first) and `Transitions` (how many times the
+check changed to `ok` and to `fail` since the process started). Both come from
+`Snapshot()`. The first completed run counts as one transition, since a check
+starts `unknown`.
+
+Staleness is applied when a result is read, never stored: a stale check reads
+`unknown` but `Transitions` does not move. The counter answers "how often did
+the verdict flip", not "is this check healthy now" — `Status` answers that.
+
+`infra/otel/instrumentation/health` exports these as OpenTelemetry metrics.
+
 ## Quick start
 
 ```go
