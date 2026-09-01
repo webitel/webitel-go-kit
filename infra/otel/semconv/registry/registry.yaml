@@ -1,0 +1,115 @@
+groups:
+  - id: registry.webitel.db
+    type: attribute_group
+    display_name: Webitel Database Attributes
+    brief: Database attributes with no upstream equivalent.
+    attributes:
+      - id: webitel.db.prepare_stmt.name
+        type: string
+        stability: development
+        brief: The name of the prepared statement.
+        examples: ["stmt_find_user_by_id", "lrupsc_1_0"]
+
+      - id: webitel.db.user
+        type: string
+        stability: development
+        brief: The database user the connection authenticates as.
+        note: >
+          A connection property, not a tenant or end-user identifier. MUST NOT
+          be used as a metric attribute.
+        examples: ["opensips", "webitel"]
+
+  - id: registry.webitel.health
+    type: attribute_group
+    display_name: Webitel Health Check Attributes
+    brief: Attributes describing one registered health check.
+    attributes:
+      - id: webitel.health.check.name
+        type: string
+        stability: development
+        brief: The name the check was registered under.
+        examples: ["postgres", "rabbitmq", "consul"]
+
+      - id: webitel.health.check.group
+        type:
+          members:
+            - id: liveness
+              value: "liveness"
+              brief: liveness probe; a failure also fails readiness.
+              stability: development
+            - id: critical
+              value: "critical"
+              brief: node-local dependency; a failure takes the node out of rotation.
+              stability: development
+            - id: informational
+              value: "informational"
+              brief: dependency whose failure only degrades; the node stays in rotation.
+              stability: development
+        stability: development
+        brief: The group the check belongs to, which decides how a failure affects readiness.
+
+      - id: webitel.health.check.status
+        type:
+          members:
+            - id: ok
+              value: "ok"
+              brief: passing check.
+              stability: development
+            - id: fail
+              value: "fail"
+              brief: check that failed past its threshold.
+              stability: development
+        stability: development
+        brief: The status a check transitioned into.
+        note: >
+          `unknown` is never a stored status, so it is never a transition
+          target and has no member here.
+
+  - id: metric.webitel.health.ready
+    type: metric
+    metric_name: webitel.health.ready
+    stability: development
+    brief: 1 when the registry reports the node ready to serve traffic, 0 otherwise.
+    instrument: gauge
+    unit: "{node}"
+
+  - id: metric.webitel.health.check.state
+    type: metric
+    metric_name: webitel.health.check.state
+    stability: development
+    brief: 1 when a check's current status is ok, 0 otherwise; a stale result is not healthy.
+    instrument: gauge
+    unit: "{check}"
+    attributes:
+      - ref: webitel.health.check.name
+        requirement_level: required
+      - ref: webitel.health.check.group
+        requirement_level: required
+
+  - id: metric.webitel.health.check.transitions
+    type: metric
+    metric_name: webitel.health.check.transitions
+    stability: development
+    brief: Cumulative count of a check's status transitions, by the status transitioned into.
+    instrument: counter
+    unit: "{transition}"
+    attributes:
+      - ref: webitel.health.check.name
+        requirement_level: required
+      - ref: webitel.health.check.group
+        requirement_level: required
+      - ref: webitel.health.check.status
+        requirement_level: required
+
+  - id: metric.webitel.health.check.duration
+    type: metric
+    metric_name: webitel.health.check.duration
+    stability: development
+    brief: Elapsed time of a check's last completed run; absent until the first run lands.
+    instrument: gauge
+    unit: s
+    attributes:
+      - ref: webitel.health.check.name
+        requirement_level: required
+      - ref: webitel.health.check.group
+        requirement_level: required

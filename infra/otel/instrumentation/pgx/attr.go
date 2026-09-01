@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
-
-	"github.com/webitel/webitel-go-kit/infra/otel/semconv"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 )
 
 const (
@@ -41,17 +40,17 @@ func FromNamedValue(arg driver.NamedValue) attribute.KeyValue {
 
 // KeyFromNamedValue returns an attribute.Key from a given driver.NamedValue.
 func KeyFromNamedValue(arg driver.NamedValue) attribute.Key {
-	var sb strings.Builder
-
-	sb.WriteString(string(semconv.DBQueryParametersKey))
-	sb.WriteString(".")
-	if arg.Name != "" {
-		sb.WriteString(arg.Name)
-	} else {
-		sb.WriteString(strconv.Itoa(arg.Ordinal))
+	name := arg.Name
+	if name == "" {
+		// db.operation.parameter uses a 0-based index for unnamed parameters,
+		// while driver.NamedValue.Ordinal starts at one.
+		name = strconv.Itoa(arg.Ordinal - 1)
 	}
 
-	return attribute.Key(sb.String())
+	// db.operation.parameter is a template attribute, so upstream exports a
+	// constructor rather than a Key. The empty value is discarded — KeyValue
+	// below types the real one.
+	return semconv.DBOperationParameter(name, "").Key
 }
 
 // KeyValue returns an attribute.KeyValue from a given value.

@@ -1,0 +1,6 @@
+name: webitel
+description: Webitel telemetry semantic conventions.
+schema_url: https://webitel.com/schemas/0.1.0
+
+# No `dependencies:`: nothing here refs an upstream attribute. Add one when a
+# group first does.
