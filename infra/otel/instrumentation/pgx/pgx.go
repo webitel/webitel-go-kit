@@ -11,10 +11,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
-
-	wsemconv "github.com/webitel/webitel-go-kit/infra/otel/semconv"
 )
 
 const (
@@ -97,7 +95,6 @@ func connectionAttributesFromConfig(config *pgx.ConnConfig) []trace.SpanStartOpt
 			trace.WithAttributes(
 				semconv.ServerAddressKey.String(config.Host),
 				semconv.ServerPortKey.Int(int(config.Port)),
-				wsemconv.WebitelDBUserKey.String(config.User),
 			),
 		}
 	}
@@ -310,10 +307,6 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.attrs...),
-	}
-
-	if data.Name != "" {
-		opts = append(opts, trace.WithAttributes(wsemconv.WebitelDBPrepareStmtNameKey.String(data.Name)))
 	}
 
 	if conn != nil {
