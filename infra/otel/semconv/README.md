@@ -26,11 +26,6 @@ healthconv.NewCheckDurationObservable(meter) // webitel.health.check.duration
 make generate TAG=v0.2.0
 ```
 
-To move to a new release, bump `TAG` in the `Makefile` and run `make generate`.
-It creates a new version directory next to the existing ones; delete an old
-one once nothing imports it. CI fails if the committed code differs from what
-`make generate` produces.
-
 ### Unreleased conventions
 
 To try a convention change before it is released, generate into `dev/` from a

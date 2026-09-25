@@ -3,7 +3,6 @@ DOCKER_USER=$(shell id -u):$(shell id -g)
 # The weaver docker image to use for generate.
 WEAVER_IMAGE := otel/weaver:v0.26.1@sha256:9094862c0ab261bdbcb079bb981f9a573b3659b130a6d2ab8616eca6ba37aaec
 
-TAG ?= v0.2.0
 REGISTRY ?= https://github.com/webitel/opentelemetry-semantic-conventions/archive/refs/tags/$(TAG).zip[model]
 
 # A local registry directory is mounted into the container.
@@ -16,6 +15,7 @@ endif
 
 .PHONY: generate
 generate:
+	[ "$(TAG)" ] || ( echo "TAG unset: missing webitel semantic-conventions tag"; exit 1 )
 	# Ensure the target directory for source code is available.
 	mkdir -p $(CURDIR)/${TAG}
 	# Note: We mount a home directory for downloading/storing the semconv repository.
