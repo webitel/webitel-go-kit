@@ -5,7 +5,7 @@
 // Copyright (c) 2026 Webitel
 // SPDX-License-Identifier: MIT
 
-{% set pkg = ctx.pkg | lower ~ "conv" -%}
+{% set pkg = ctx.pkg | camel_case | lower ~ "conv" -%}
 // Package {{ pkg }} provides types and functionality for OpenTelemetry semantic
 // conventions in the "{{ ctx.root_namespace }}" namespace.
 package {{ pkg }}
