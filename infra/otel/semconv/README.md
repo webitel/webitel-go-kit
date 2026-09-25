@@ -1,4 +1,4 @@
-# Semconv
+# semconv
 
 Go binding for [Webitel semantic conventions](https://github.com/webitel/opentelemetry-semantic-conventions).
 
