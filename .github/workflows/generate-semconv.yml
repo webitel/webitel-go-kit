@@ -1,0 +1,90 @@
+name: Generate semconv
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Registry release tag, e.g. v0.3.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generate-semconv-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+      TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Check the tag
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+
+      - name: Create Github APP token
+        id: app-token
+        uses: webitel/reusable-workflows/actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.DELIVERY_BOT_APP_ID }}
+          private-key: ${{ secrets.DELIVERY_BOT_APP_PEM }}
+
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: infra/otel/go.mod
+          cache: false
+
+      - name: Generate
+        run: make -C infra/otel/semconv generate TAG="$TAG"
+
+      - name: Build
+        working-directory: infra/otel
+        run: go vet "./semconv/${TAG}/..."
+
+      - name: Open PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        
+        run: |
+          set -euo pipefail
+
+          git add -A -- "infra/otel/semconv/${TAG}"
+          if git diff --cached --quiet; then
+            echo "::notice::infra/otel/semconv/${TAG} is up to date"
+            exit 0
+          fi
+
+          git config user.name  "${{ steps.app-token.outputs.user-name }}"
+          git config user.email "${{ steps.app-token.outputs.user-email }}"
+
+          BRANCH="semconv/${TAG}"
+          TITLE="chore(otel/semconv): generate ${TAG}"
+          git checkout -B "$BRANCH"
+          git commit -m "$TITLE"
+          git push --force origin "$BRANCH"
+
+          if [[ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]]; then
+            echo "::notice::updated the open PR for ${BRANCH}"
+            exit 0
+          fi
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "$TITLE" \
+            --body "Generated from [webitel/opentelemetry-semantic-conventions@${TAG}](https://github.com/webitel/opentelemetry-semantic-conventions/tree/${TAG}) with \`make -C infra/otel/semconv generate TAG=${TAG}\`." \
+            --label automated
