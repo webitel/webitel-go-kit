@@ -87,11 +87,22 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         run: |
           set -euo pipefail
-          MODULES_JSON=$(cat /tmp/modules.json)
-          export MODULES_JSON
-          yq -i \
-            '.on.workflow_dispatch.inputs.module.options = (env(MODULES_JSON) | from_json)' \
-            .github/workflows/release.yml
+
+          MODULE_LINES=$(jq -r '.[] | "          - " + .' /tmp/modules.json)
+          export MODULE_LINES
+          awk '
+            /^      module:$/                   { in_module = 1 }
+            in_module && /^        options:$/  { print; print ENVIRON["MODULE_LINES"]; skipping = 1; next }
+            skipping && /^          - /        { next }
+            skipping                           { skipping = 0; in_module = 0 }
+                                               { print }
+          ' .github/workflows/release.yml > /tmp/release.yml
+          mv /tmp/release.yml .github/workflows/release.yml
+
+          # Fail if the edit did not produce exactly the desired list.
+          yq -o=json -I=0 '.on.workflow_dispatch.inputs.module.options' .github/workflows/release.yml \
+            | jq -e --slurpfile want /tmp/modules.json '. == $want[0]' > /dev/null \
+            || { echo "::error::release.yml module options do not match the desired list"; exit 1; }
 
           echo "New release.yml options:"
           yq '.on.workflow_dispatch.inputs.module.options' .github/workflows/release.yml
