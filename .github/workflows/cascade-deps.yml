@@ -252,8 +252,8 @@ jobs:
             echo "- Each bumped module was verified with \`go build ./...\` and \`go vet ./...\`."
             echo "- This PR does **not** release the dependents. To release them, dispatch"
             echo "  the \`release\` workflow with the appropriate bump kind after merging."
-            echo "- The \`release-status.yml\` workflow refreshes \`RELEASE-STATUS.md\` on every"
-            echo "  push to \`main\` if you want a longer-lived view of pending releases."
+            echo "- The \`release-status.yml\` workflow refreshes the \`release-status\` issue on"
+            echo "  every push to \`main\` if you want a longer-lived view of pending releases."
           } > /tmp/pr_body.md
 
           git push origin "$BRANCH"
