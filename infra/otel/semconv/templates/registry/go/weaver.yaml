@@ -1,35 +1,35 @@
-params:
-  excluded_namespaces:
-    - "aspnetcore"
-    - "cpython"
-    - "dotnet"
-    - "jvm"
-    - "kestrel"
-    - "nodejs"
-    - "v8js"
-  excluded_attributes: ["messaging.client_id"]
+# The registry depends on upstream semconv (see its manifest.yaml), so the
+# resolved registry contains upstream conventions too. Both filters below keep
+# only the "webitel" namespace to keep them out of this package: without that,
+# weaver generates Go for every referenced upstream attribute and we ship a
+# broken duplicate of go.opentelemetry.io/otel/semconv.
 templates:
+  - pattern: doc.go.j2
+    filter: "."
+    application_mode: single
+    file_name: doc.go
+  - pattern: schema.go.j2
+    filter: "."
+    application_mode: single
+    file_name: schema.go
   - pattern: attribute_group.go.j2
     filter: >
-      semconv_grouped_attributes({
-        "exclude_deprecated": true,
-        "exclude_root_namespace": $excluded_namespaces,
-      })
-      | map({
-        root_namespace: .root_namespace,
-        attributes: .attributes | map(select(.name as $st | $excluded_attributes[] | index($st) | not)),
-      })
+      semconv_grouped_attributes({"exclude_deprecated": true})
+      | map(select(.root_namespace == "webitel"))
     application_mode: single
     file_name: attribute_group.go
   - pattern: metric.go.j2
     filter: >
-      semconv_metrics({
-        "exclude_deprecated": true,
-        "exclude_root_namespace": $excluded_namespaces,
-      }) 
-      | semconv_group_metrics_by_root_namespace
+      semconv_metrics({"exclude_deprecated": true})
+      | map(select(.metric_name | startswith("webitel.")))
+      | group_by(.metric_name | split(".")[1])
+      | map({
+          pkg: (.[0].metric_name | split(".")[1]),
+          root_namespace: ("webitel." + (.[0].metric_name | split(".")[1])),
+          metrics: .
+        })
     application_mode: each
-    file_name: "{{ctx.root_namespace | camel_case | lower }}conv/metric.go"
+    file_name: "{{ ctx.pkg | lower }}conv/metric.go"
 comment_formats:
   go:
     format: markdown
@@ -68,33 +68,6 @@ text_maps:
     double[]: "...float64"
     boolean: bool
     boolean[]: "...bool"
-  instrument:
-    webitel.health.ready: Int64ObservableGauge
-    webitel.health.check.state: Int64ObservableGauge
-    webitel.health.check.transitions: Int64ObservableCounter
-    webitel.health.check.duration: Float64ObservableGauge
-    system.cpu.time: Float64ObservableCounter
-    go.config.gogc: Int64ObservableUpDownCounter
-    go.goroutine.count: Int64ObservableUpDownCounter
-    go.memory.allocated: Int64ObservableCounter
-    go.memory.allocations: Int64ObservableCounter
-    go.memory.gc.goal: Int64ObservableUpDownCounter
-    go.memory.limit: Int64ObservableUpDownCounter
-    go.memory.used: Int64ObservableUpDownCounter
-    go.processor.limit: Int64ObservableUpDownCounter
-    otel.sdk.processor.log.queue.capacity: Int64ObservableUpDownCounter
-    otel.sdk.processor.log.queue.size: Int64ObservableUpDownCounter
-    otel.sdk.processor.span.queue.capacity: Int64ObservableUpDownCounter
-    otel.sdk.processor.span.queue.size: Int64ObservableUpDownCounter
-    process.cpu.time: Float64ObservableCounter
-    system.memory.usage: Int64ObservableUpDownCounter
-    system.memory.utilization: Float64ObservableGauge
-    system.network.io: Int64ObservableCounter
-  custom_bucket_boundaries:
-    http.client.request.duration: "[]float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}"
-    http.server.request.duration: "[]float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}"
-    rpc.client.call.duration: "[]float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}"
-    rpc.server.call.duration: "[]float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}"
 acronyms:
   - ACL
   - AI
@@ -179,6 +152,7 @@ acronyms:
   - JSONRPC
   - JVM
   - K8S
+  - KB
   - LHS
   - MCC
   - MNC

@@ -1,67 +1,40 @@
 # semconv
 
-Webitel's own semantic conventions, and the Go package generated from them.
+Go binding for [Webitel semantic conventions](https://github.com/webitel/opentelemetry-semantic-conventions).
 
-Only conventions with no upstream equivalent live here. Anything OpenTelemetry
-already defines is imported from `go.opentelemetry.io/otel/semconv` directly.
+Conventions OpenTelemetry already defines are not repeated here:
+use `go.opentelemetry.io/otel/semconv` for those.
 
-## Regenerating
+## Usage
 
-```sh
-./generate.sh            # regenerate attribute_group.go and webitelconv/
-./generate.sh --check    # fail if the committed output is stale (this is what CI runs)
-```
-
-The generated Go is committed, so nothing downstream needs Weaver.
-
-## Adding an attribute
-
-Add it to a `registry.webitel.*` group in `registry/registry.yaml`, then run
-`./generate.sh` and commit the result.
-
-```yaml
-- id: webitel.queue.name
-  type: string
-  stability: development
-  brief: The name of the queue.
-  examples: ["support", "sales"]
-```
-
-Every name must start with `webitel.`; `generate.sh` fails if one does not.
-Requirement levels do not belong here — they belong to the metric or span group
-that references the attribute, because the same attribute can be required for
-one signal and optional for another. See the
-[semconv syntax](https://github.com/open-telemetry/weaver/blob/main/schemas/semconv-syntax.md).
-
-## Adding a metric
-
-Add a `type: metric` group to `registry/registry.yaml`. Its attributes are
-`ref`s into a `registry.webitel.*` group, and this is where their requirement
-level is set. Run `./generate.sh` and commit the result.
-
-```yaml
-- id: metric.webitel.health.check.duration
-  type: metric
-  metric_name: webitel.health.check.duration
-  stability: development
-  brief: Elapsed time of a check's last completed run.
-  instrument: gauge
-  unit: s
-  attributes:
-    - ref: webitel.health.check.name
-      requirement_level: required
-    - ref: webitel.health.check.group
-      requirement_level: required
-```
-
-Metrics land in `webitelconv/`, one constructor per metric with a typed method
-per attribute:
+Each registry release is a separate package. Attributes are in the version
+package, metrics in one `<namespace>conv` package per namespace:
 
 ```go
-duration, err := webitelconv.NewHealthCheckDuration(meter)
-// ...
-o.ObserveFloat64(duration.Inst(), secs, metric.WithAttributes(
-	duration.AttrHealthCheckName(name),
-	duration.AttrHealthCheckGroup(webitelconv.HealthCheckGroupCritical),
-))
+import (
+	semconv "github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.2.0"
+	"github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.2.0/healthconv"
+)
+
+semconv.WebitelHealthCheckNameKey            // webitel.health.check.name
+healthconv.NewCheckDurationObservable(meter) // webitel.health.check.duration
 ```
+
+## Generating
+
+```sh
+make generate TAG=v0.2.0
+```
+
+### Unreleased conventions
+
+To try a convention change before it is released, generate into `dev/` from a
+local checkout or a pushed branch:
+
+```sh
+make generate TAG=dev REGISTRY=../../../../opentelemetry-semantic-conventions/model
+make generate TAG=dev REGISTRY='https://github.com/webitel/opentelemetry-semantic-conventions.git@my-branch[model]'
+```
+
+`templates/registry/go` is vendored from
+[opentelemetry-go v1.46.0](https://github.com/open-telemetry/opentelemetry-go/tree/58db4c898f5b5594f8ba78f156475bf48486e2f2/semconv/templates/registry/go).

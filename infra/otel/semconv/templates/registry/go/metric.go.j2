@@ -2,10 +2,10 @@
 {% import 'instrument.j2' as i -%}
 // Code generated from semantic convention specification. DO NOT EDIT.
 
-// Copyright The OpenTelemetry Authors
-// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Webitel
+// SPDX-License-Identifier: MIT
 
-{% set pkg = ctx.root_namespace | camel_case | lower ~ "conv" -%}
+{% set pkg = ctx.pkg | lower ~ "conv" -%}
 // Package {{ pkg }} provides types and functionality for OpenTelemetry semantic
 // conventions in the "{{ ctx.root_namespace }}" namespace.
 package {{ pkg }}
@@ -14,7 +14,7 @@ package {{ pkg }}
     instruments; a namespace with only observable metrics must not import them. -#}
 {%- set sync = namespace(any=false) %}
 {%- for metric in ctx.metrics %}
-{%- set inst = metric.metric_name | map_text("instrument", i.instrument_default(metric)) %}
+{%- set inst = i.instrument(metric) %}
 {%- if "Observable" is not in inst %}{% set sync.any = true %}{% endif %}
 {%- endfor %}
 import (
