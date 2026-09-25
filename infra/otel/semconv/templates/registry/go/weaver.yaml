@@ -29,7 +29,7 @@ templates:
           metrics: .
         })
     application_mode: each
-    file_name: "{{ ctx.pkg | lower }}conv/metric.go"
+    file_name: "{{ ctx.pkg | camel_case | lower }}conv/metric.go"
 comment_formats:
   go:
     format: markdown
