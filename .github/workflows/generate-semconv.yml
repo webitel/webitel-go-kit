@@ -55,6 +55,12 @@ jobs:
         working-directory: infra/otel
         run: go vet "./semconv/${TAG}/..."
 
+      - name: Point the README at the latest version
+        working-directory: infra/otel/semconv
+        run: |
+          latest="$(printf '%s\n' v*/ | sort -V | tail -n 1)"
+          sed -E -i "s#(semconv/|TAG=)v[0-9]+\.[0-9]+\.[0-9]+#\1${latest%/}#g" README.md
+
       - name: Open PR
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -62,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          git add -A -- "infra/otel/semconv/${TAG}"
+          git add -A -- "infra/otel/semconv/${TAG}" infra/otel/semconv/README.md
           if git diff --cached --quiet; then
             echo "::notice::infra/otel/semconv/${TAG} is up to date"
             exit 0
