@@ -1,10 +1,3 @@
-// Package health exports infra/health's Registry as OpenTelemetry metrics:
-// webitel.health.ready, webitel.health.check.state,
-// webitel.health.check.transitions and webitel.health.check.duration. One
-// callback feeds all four from a single Snapshot() per collection, so a
-// scrape runs no checks.
-//
-// Call Start once per (registry, provider) pair.
 package health
 
 import (
@@ -15,7 +8,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/webitel/webitel-go-kit/infra/health"
-	"github.com/webitel/webitel-go-kit/infra/otel/semconv/webitelconv"
+	"github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.2.0/healthconv"
 )
 
 const scopeName = "github.com/webitel/webitel-go-kit/infra/otel/instrumentation/health"
@@ -44,72 +37,111 @@ func Start(snap Snapshotter, opts ...Option) (metric.Registration, error) {
 
 	meter := cfg.mp.Meter(scopeName, metric.WithInstrumentationVersion(Version()))
 
-	ready, err := webitelconv.NewHealthReady(meter)
+	status, err := healthconv.NewStatusObservable(meter)
 	if err != nil {
 		return nil, err
 	}
-	state, err := webitelconv.NewHealthCheckState(meter)
+	
+	checkStatus, err := healthconv.NewCheckStatusObservable(meter)
 	if err != nil {
 		return nil, err
 	}
-	transitions, err := webitelconv.NewHealthCheckTransitions(meter)
+
+	transitions, err := healthconv.NewCheckTransitionsObservable(meter)
 	if err != nil {
 		return nil, err
 	}
-	duration, err := webitelconv.NewHealthCheckDuration(meter)
+
+	duration, err := healthconv.NewCheckDurationObservable(meter)
 	if err != nil {
 		return nil, err
 	}
 
 	return meter.RegisterCallback(
-		collect(snap, ready, state, transitions, duration),
-		ready.Inst(), state.Inst(), transitions.Inst(), duration.Inst(),
+		collect(snap, status, checkStatus, transitions, duration),
+		status.Inst(), checkStatus.Inst(), transitions.Inst(), duration.Inst(),
 	)
+}
+
+var (
+	nodeStates  = []healthconv.StateAttr{healthconv.StateReady, healthconv.StateDegraded, healthconv.StateNotReady}
+	checkStates = []healthconv.CheckStateAttr{healthconv.CheckStateOk, healthconv.CheckStateFail, healthconv.CheckStateUnknown}
+)
+
+func nodeState(s health.State) healthconv.StateAttr {
+	switch s {
+	case health.StateReady:
+		return healthconv.StateReady
+	case health.StateDegraded:
+		return healthconv.StateDegraded
+	default:
+		return healthconv.StateNotReady
+	}
+}
+
+func checkState(s health.Status) healthconv.CheckStateAttr {
+	switch s {
+	case health.StatusOK:
+		return healthconv.CheckStateOk
+	case health.StatusFail:
+		return healthconv.CheckStateFail
+	default:
+		return healthconv.CheckStateUnknown
+	}
+}
+
+func boolValue(b bool) int64 {
+	if b {
+		return 1
+	}
+
+	return 0
 }
 
 func collect(
 	snap Snapshotter,
-	ready webitelconv.HealthReady,
-	state webitelconv.HealthCheckState,
-	transitions webitelconv.HealthCheckTransitions,
-	duration webitelconv.HealthCheckDuration,
+	status healthconv.StatusObservable,
+	checkStatus healthconv.CheckStatusObservable,
+	transitions healthconv.CheckTransitionsObservable,
+	duration healthconv.CheckDurationObservable,
 ) metric.Callback {
 	return func(_ context.Context, o metric.Observer) error {
 		snapshot := snap.Snapshot()
 
-		readyVal := int64(0)
-		if snapshot.State.Ready() {
-			readyVal = 1
+		current := nodeState(snapshot.State)
+		for _, s := range nodeStates {
+			o.ObserveInt64(status.Inst(), boolValue(s == current), metric.WithAttributes(status.AttrState(s)))
 		}
-		o.ObserveInt64(ready.Inst(), readyVal)
 
 		for _, c := range snapshot.Checks {
-			group := webitelconv.HealthCheckGroupAttr(c.Group.String())
-			checkAttrs := metric.WithAttributes(
-				state.AttrHealthCheckName(c.Name),
-				state.AttrHealthCheckGroup(group),
-			)
+			group := healthconv.CheckGroupAttr(c.Group.String())
 
-			stateVal := int64(0)
-			if c.Status == health.StatusOK {
-				stateVal = 1
+			cur := checkState(c.Status)
+			for _, s := range checkStates {
+				o.ObserveInt64(checkStatus.Inst(), boolValue(s == cur), metric.WithAttributes(
+					checkStatus.AttrCheckName(c.Name),
+					checkStatus.AttrCheckGroup(group),
+					checkStatus.AttrCheckState(s),
+				))
 			}
-			o.ObserveInt64(state.Inst(), stateVal, checkAttrs)
 
-			// Zero counts are observed too, so the first flip shows as an increase().
 			o.ObserveInt64(transitions.Inst(), int64(c.Transitions.OK), metric.WithAttributes(
-				transitions.AttrHealthCheckName(c.Name),
-				transitions.AttrHealthCheckGroup(group),
-				transitions.AttrHealthCheckStatus(webitelconv.HealthCheckStatusOk),
+				transitions.AttrCheckName(c.Name),
+				transitions.AttrCheckGroup(group),
+				transitions.AttrCheckState(healthconv.CheckStateOk),
 			))
+
 			o.ObserveInt64(transitions.Inst(), int64(c.Transitions.Fail), metric.WithAttributes(
-				transitions.AttrHealthCheckName(c.Name),
-				transitions.AttrHealthCheckGroup(group),
-				transitions.AttrHealthCheckStatus(webitelconv.HealthCheckStatusFail),
+				transitions.AttrCheckName(c.Name),
+				transitions.AttrCheckGroup(group),
+				transitions.AttrCheckState(healthconv.CheckStateFail),
 			))
 
 			if !c.LastRun.IsZero() {
-				o.ObserveFloat64(duration.Inst(), c.LastDuration.Seconds(), checkAttrs)
+				o.ObserveFloat64(duration.Inst(), c.LastDuration.Seconds(), metric.WithAttributes(
+					duration.AttrCheckName(c.Name),
+					duration.AttrCheckGroup(group),
+				))
 			}
 		}
 

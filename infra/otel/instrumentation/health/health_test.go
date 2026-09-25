@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/webitel/webitel-go-kit/infra/health"
-	"github.com/webitel/webitel-go-kit/infra/otel/semconv"
-	"github.com/webitel/webitel-go-kit/infra/otel/semconv/webitelconv"
+	semconv "github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.2.0"
+	"github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.2.0/healthconv"
 )
 
 type fakeSnapshotter struct {
@@ -66,36 +66,39 @@ func TestCollect(t *testing.T) {
 	byName := collectScope(t, reader)
 	require.Len(t, byName, 4)
 
-	readyM, ok := byName[webitelconv.HealthReady{}.Name()].Data.(metricdata.Gauge[int64])
-	require.True(t, ok)
-	require.Len(t, readyM.DataPoints, 1)
-	require.EqualValues(t, 1, readyM.DataPoints[0].Value)
-	require.Equal(t, 0, readyM.DataPoints[0].Attributes.Len())
+	require.Equal(t, map[string]int64{"ready": 0, "degraded": 1, "not_ready": 0}, nodeStatus(t, byName))
 
-	stateM, ok := byName[webitelconv.HealthCheckState{}.Name()].Data.(metricdata.Gauge[int64])
+	stM, ok := byName[healthconv.CheckStatusObservable{}.Name()].Data.(metricdata.Sum[int64])
 	require.True(t, ok)
-	stateByName := map[string]int64{}
+	require.False(t, stM.IsMonotonic)
+	stByNameState := map[string]int64{}
 	groupByName := map[string]string{}
-	for _, dp := range stateM.DataPoints {
+	for _, dp := range stM.DataPoints {
 		name, _ := dp.Attributes.Value(semconv.WebitelHealthCheckNameKey)
 		group, _ := dp.Attributes.Value(semconv.WebitelHealthCheckGroupKey)
-		stateByName[name.AsString()] = dp.Value
+		state, _ := dp.Attributes.Value(semconv.WebitelHealthCheckStateKey)
+		stByNameState[name.AsString()+"/"+state.AsString()] = dp.Value
 		groupByName[name.AsString()] = group.AsString()
 	}
-	require.Equal(t, map[string]int64{"loop": 1, "postgres": 1, "cache": 0, "never-ran": 0}, stateByName)
+	require.Equal(t, map[string]int64{
+		"loop/ok": 1, "loop/fail": 0, "loop/unknown": 0,
+		"postgres/ok": 1, "postgres/fail": 0, "postgres/unknown": 0,
+		"cache/ok": 0, "cache/fail": 1, "cache/unknown": 0,
+		"never-ran/ok": 0, "never-ran/fail": 0, "never-ran/unknown": 1,
+	}, stByNameState)
 	require.Equal(t, map[string]string{
 		"loop": "liveness", "postgres": "critical", "cache": "informational", "never-ran": "critical",
 	}, groupByName)
 
-	trM, ok := byName[webitelconv.HealthCheckTransitions{}.Name()].Data.(metricdata.Sum[int64])
+	trM, ok := byName[healthconv.CheckTransitionsObservable{}.Name()].Data.(metricdata.Sum[int64])
 	require.True(t, ok)
 	require.True(t, trM.IsMonotonic)
 	require.Equal(t, metricdata.CumulativeTemporality, trM.Temporality)
 	trByNameStatus := map[string]int64{}
 	for _, dp := range trM.DataPoints {
 		name, _ := dp.Attributes.Value(semconv.WebitelHealthCheckNameKey)
-		status, _ := dp.Attributes.Value(semconv.WebitelHealthCheckStatusKey)
-		trByNameStatus[name.AsString()+"/"+status.AsString()] = dp.Value
+		state, _ := dp.Attributes.Value(semconv.WebitelHealthCheckStateKey)
+		trByNameStatus[name.AsString()+"/"+state.AsString()] = dp.Value
 	}
 	require.Equal(t, map[string]int64{
 		"loop/ok": 1, "loop/fail": 0,
@@ -104,7 +107,7 @@ func TestCollect(t *testing.T) {
 		"never-ran/ok": 0, "never-ran/fail": 0,
 	}, trByNameStatus)
 
-	durM, ok := byName[webitelconv.HealthCheckDuration{}.Name()].Data.(metricdata.Gauge[float64])
+	durM, ok := byName[healthconv.CheckDurationObservable{}.Name()].Data.(metricdata.Gauge[float64])
 	require.True(t, ok)
 	durByName := map[string]float64{}
 	for _, dp := range durM.DataPoints {
@@ -116,16 +119,33 @@ func TestCollect(t *testing.T) {
 	require.InDelta(t, 0.045, durByName["cache"], 0.0005)
 }
 
-func TestReadyReflectsEveryState(t *testing.T) {
+// nodeStatus returns webitel.health.status by the webitel.health.state value.
+func nodeStatus(t *testing.T, byName map[string]metricdata.Metrics) map[string]int64 {
+	t.Helper()
+
+	m, ok := byName[healthconv.StatusObservable{}.Name()].Data.(metricdata.Sum[int64])
+	require.True(t, ok)
+	require.False(t, m.IsMonotonic)
+
+	byState := map[string]int64{}
+	for _, dp := range m.DataPoints {
+		require.Equal(t, 1, dp.Attributes.Len())
+		state, _ := dp.Attributes.Value(semconv.WebitelHealthStateKey)
+		byState[state.AsString()] = dp.Value
+	}
+	return byState
+}
+
+func TestStatusReflectsEveryState(t *testing.T) {
 	for _, tc := range []struct {
 		state health.State
-		want  int64
+		want  string
 	}{
-		{health.StateReady, 1},
-		{health.StateDegraded, 1},
-		{health.StateNotReady, 0},
-		{health.StateUnknown, 0},
-		{health.StateStopping, 0},
+		{health.StateReady, "ready"},
+		{health.StateDegraded, "degraded"},
+		{health.StateNotReady, "not_ready"},
+		{health.StateUnknown, "not_ready"},
+		{health.StateStopping, "not_ready"},
 	} {
 		t.Run(tc.state.String(), func(t *testing.T) {
 			reader := sdkmetric.NewManualReader()
@@ -136,10 +156,9 @@ func TestReadyReflectsEveryState(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, reg.Unregister()) })
 
-			got, ok := collectScope(t, reader)[webitelconv.HealthReady{}.Name()].Data.(metricdata.Gauge[int64])
-			require.True(t, ok)
-			require.Len(t, got.DataPoints, 1)
-			require.EqualValues(t, tc.want, got.DataPoints[0].Value)
+			want := map[string]int64{"ready": 0, "degraded": 0, "not_ready": 0}
+			want[tc.want] = 1
+			require.Equal(t, want, nodeStatus(t, collectScope(t, reader)))
 		})
 	}
 }
@@ -173,12 +192,18 @@ func TestLiveRegistry(t *testing.T) {
 	require.Eventually(t, func() bool {
 		byName := collectScope(t, reader)
 
-		readyM, ok := byName[webitelconv.HealthReady{}.Name()].Data.(metricdata.Gauge[int64])
-		if !ok || len(readyM.DataPoints) != 1 || readyM.DataPoints[0].Value != 1 {
+		statusM, ok := byName[healthconv.StatusObservable{}.Name()].Data.(metricdata.Sum[int64])
+		if !ok {
 			return false
 		}
+		for _, dp := range statusM.DataPoints {
+			state, _ := dp.Attributes.Value(semconv.WebitelHealthStateKey)
+			if state.AsString() == "ready" && dp.Value != 1 {
+				return false
+			}
+		}
 
-		durM, ok := byName[webitelconv.HealthCheckDuration{}.Name()].Data.(metricdata.Gauge[float64])
+		durM, ok := byName[healthconv.CheckDurationObservable{}.Name()].Data.(metricdata.Gauge[float64])
 
 		return ok && len(durM.DataPoints) == 1
 	}, 3*time.Second, 5*time.Millisecond)
