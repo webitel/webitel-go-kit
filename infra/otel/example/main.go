@@ -8,7 +8,7 @@ import (
 
 	otelsdk "github.com/webitel/webitel-go-kit/infra/otel/sdk"
 	"go.opentelemetry.io/otel/sdk/resource"
-	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 
 	// -------------------- bridge(s) -------------------- //
 
