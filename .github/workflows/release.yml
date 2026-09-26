@@ -36,14 +36,22 @@ on:
         required: true
         type: choice
         options:
+          - appconfig
           - infra/discovery
+          - infra/errors
           - infra/fts_client
+          - infra/health
+          - infra/httpproxy
           - infra/logger_client
           - infra/otel
+          - infra/pgw
           - infra/profiler
           - infra/pubsub/rabbitmq
+          - infra/ratelimit
+          - infra/ratelimit/mux
           - infra/sqldb
           - infra/transport
+          - pkg/cache
           - pkg/errors
           - pkg/etag
           - pkg/filters
