@@ -19,6 +19,8 @@ on:
     paths-ignore:
       - '**/*.md'
 
+  workflow_dispatch:
+
 concurrency:
   group: modules-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -32,18 +34,59 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - id: list
-        name: Discover go.mod files
+        name: Discover changed modules
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          modules=$(find . -name go.mod -not -path './.git/*' -not -path '*/vendor/*' \
-            -exec dirname {} \; | sed 's|^\./||' | sort | jq -R -s -c 'split("\n")[:-1]')
+          all=$(find . -name go.mod -not -path './.git/*' -not -path '*/vendor/*' \
+            -exec dirname {} \; | sed 's|^\./||' | sort)
+
+          # PRs are checked out as a merge commit whose first parent is the
+          # base branch tip, so HEAD^1..HEAD is exactly what the PR changes.
+          case "$EVENT_NAME" in
+            pull_request) base=$(git rev-parse HEAD^1) ;;
+            push)         base=$PUSH_BEFORE ;;
+            *)            base= ;;
+          esac
+
+          if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "Testing every module (event: $EVENT_NAME)"
+            selected=$all
+          else
+            changed=$(git diff --name-only "$base" HEAD)
+            if grep -qx '.github/workflows/modules-ci.yml' <<< "$changed"; then
+              echo "modules-ci.yml changed, testing every module"
+              selected=$all
+            else
+              # Map each changed file to the deepest module containing it, so
+              # infra/ratelimit/mux/x.go selects infra/ratelimit/mux only.
+              selected=$(awk '
+                NR == FNR { mods[++n] = $0; next }
+                {
+                  best = ""
+                  for (i = 1; i <= n; i++)
+                    if (index($0, mods[i] "/") == 1 && length(mods[i]) > length(best))
+                      best = mods[i]
+                  if (best != "") print best
+                }
+              ' <(printf '%s\n' "$all") <(printf '%s\n' "$changed") | sort -u)
+            fi
+          fi
+
+          modules=$(printf '%s\n' "$selected" | jq -R -s -c 'split("\n") | map(select(length > 0))')
           echo "modules=$modules" >> "$GITHUB_OUTPUT"
-          echo "Found modules:"
+          echo "Selected modules:"
           echo "$modules" | jq -r '.[]'
 
   build:
     needs: discover
+    if: needs.discover.outputs.modules != '[]'
     runs-on: ubuntu-latest
     name: Build
     env:
