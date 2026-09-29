@@ -22,7 +22,7 @@ func TestWatchdogPings(t *testing.T) {
 	t.Setenv("WATCHDOG_PID", "")
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -61,7 +61,7 @@ func TestWatchdogGatedOnSchedulerAlive(t *testing.T) {
 	t.Setenv("WATCHDOG_PID", "")
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -95,7 +95,7 @@ func TestWatchdogPIDMismatch(t *testing.T) {
 
 	lg := &logCapture{}
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond), WithLogger(lg.logger()))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestWatchdogMalformedEnv(t *testing.T) {
 
 	lg := &logCapture{}
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond), WithLogger(lg.logger()))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -172,7 +172,7 @@ func TestWatchdogAbsent(t *testing.T) {
 
 	lg := &logCapture{}
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond), WithLogger(lg.logger()))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 

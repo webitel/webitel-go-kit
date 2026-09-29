@@ -191,7 +191,7 @@ func newNotifier(t *testing.T, reg *health.Registry, addr string, opts ...Option
 
 	t.Setenv("NOTIFY_SOCKET", addr)
 
-	n := New(reg, opts...)
+	n := New(opts...)
 	if n == nil {
 		t.Fatal("New returned nil with NOTIFY_SOCKET set")
 	}

@@ -61,7 +61,10 @@ the verdict flip", not "is this check healthy now" — `Status` answers that.
 ## Quick start
 
 ```go
-h := health.New(health.DefaultConfig(), log)
+h := health.New(health.DefaultConfig(), log,
+    health.WithTransport(healthhttp.NewServer("127.0.0.1:8081")),
+    health.WithTransport(sdnotify.New()), // nil when NOTIFY_SOCKET is unset, ignored
+)
 
 h.Critical("grpc", health.ListenerCheck(lis))
 h.Informational("postgres", store.Ping)
@@ -70,6 +73,16 @@ if err := h.Start(ctx); err != nil {
     return err
 }
 ```
+
+The registry owns its transports. `Start` runs the checks, then starts each
+transport in order. If one fails, the ones already started are stopped, the
+checks are halted, and the returned error joins the failure with any rollback
+failure. That registry is finished: exit, or build a new one. Nil and typed-nil
+transports are ignored.
+
+A transport implements `health.Transport`: `Start(ctx, *Registry)` and
+`Stop(ctx)`. `Stop` on a transport that never started must be safe: it must not
+block or fail, though it may still send a shutdown signal, as `sdnotify` does.
 
 `ListenerCheck` dials a listener to prove it still accepts connections. It uses
 the listener's own address, not the one advertised to service discovery — a host
@@ -88,24 +101,25 @@ discovery.NewServiceDiscovery(nodeID, url, h.ReadyFunc())
 is `false` the error is never nil**, so a caller may use it without a nil check.
 
 Shut down with `Shutdown`, which runs the sequence in the order the registry
-requires. `ctx` must carry at least `DrainHold` of budget: `Drain` returns
-immediately and the hold is absorbed inside `Stop`, so a shorter context cuts
-the hold short and service discovery may never see the node leave rotation.
+requires: `Drain`, then every transport in reverse start order, then the
+DrainHold wait, then the scheduler. `ctx` must carry at least `DrainHold` of
+budget: `Drain` returns immediately and the hold is absorbed inside `Stop`, so a
+shorter context cuts the hold short and service discovery may never see the node
+leave rotation.
 
 ```go
 ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 defer cancel()
 
-err := health.Shutdown(ctx, h, notifier) // any number of transports, nil ones skipped
+err := h.Shutdown(ctx)
 ```
 
 Every transport is stopped even if an earlier one fails, and the errors are
 joined. The equivalent by hand, if you need to interleave something:
 
 ```go
-h.Drain()          // not ready from here on, one way
-notifier.Stop(ctx) // if the sd_notify transport is used
-h.Stop(ctx)        // waits out the rest of DrainHold, then halts the scheduler
+h.Drain()    // not ready from here on, one way
+h.Stop(ctx)  // stops the transports, waits out the rest of DrainHold, halts the scheduler
 ```
 
 ## HTTP
@@ -119,14 +133,12 @@ router.Handle("/readyz", healthhttp.ReadinessHandler(h))
 router.Handle("/healthz", healthhttp.HealthHandler(h))
 ```
 
-Or run a listener of your own, for a service with no HTTP server:
+Or run a listener of your own, for a service with no HTTP server. `NewServer`
+is a transport: pass it to `health.WithTransport` and the registry binds it on
+`Start` and stops it on `Stop`. It returns nil for an empty address.
 
 ```go
-srv := healthhttp.NewServer(h, "127.0.0.1:8081")
-if err := srv.Start(); err != nil {
-    return err
-}
-defer srv.Stop(ctx)
+h := health.New(cfg, log, health.WithTransport(healthhttp.NewServer("127.0.0.1:8081")))
 ```
 
 `healthhttp.Handler(h)` serves all three from one mount by routing on the last
@@ -159,10 +171,7 @@ JSON, and only on a `Server` whose listener bound to loopback.
 ## systemd
 
 ```go
-n := sdnotify.New(h) // nil when NOTIFY_SOCKET is unset
-if err := n.Start(ctx); err != nil {
-    return err
-}
+h := health.New(cfg, log, health.WithTransport(sdnotify.New())) // New is nil when NOTIFY_SOCKET is unset
 ```
 
 With no `NOTIFY_SOCKET` the transport does nothing at all, so a dev machine, a

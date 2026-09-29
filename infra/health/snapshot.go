@@ -3,7 +3,6 @@ package health
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 )
@@ -32,8 +31,6 @@ func (r *Registry) Snapshot() Snapshot {
 		checks = append(checks, cs.result(now, r.cfg))
 	}
 	r.mu.Unlock()
-
-	slices.SortFunc(checks, func(a, b CheckResult) int { return strings.Compare(a.Name, b.Name) })
 
 	return Snapshot{
 		State:          deriveState(checks, draining, stopped),

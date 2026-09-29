@@ -2,12 +2,49 @@ package health
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type recordingTransport struct {
+	name     string
+	startErr error
+	stopErr  error
+	log      *[]string
+	mu       *sync.Mutex
+}
+
+func (s recordingTransport) record(event string) {
+	s.mu.Lock()
+	*s.log = append(*s.log, event+":"+s.name)
+	s.mu.Unlock()
+}
+
+func (s recordingTransport) Start(context.Context, *Registry) error {
+	s.record("start")
+
+	return s.startErr
+}
+
+func (s recordingTransport) Stop(context.Context) error {
+	s.record("stop")
+
+	return s.stopErr
+}
+
+type nilableTransport struct{}
+
+func (n *nilableTransport) Start(context.Context, *Registry) error {
+	panic("Start called on a nil *nilableTransport")
+}
+
+func (n *nilableTransport) Stop(context.Context) error {
+	panic("Stop called on a nil *nilableTransport")
+}
 
 // testConfig scales every timing down so the scheduler's behaviour is visible
 // in milliseconds. Nothing here is faked: these are the real tickers and the
@@ -63,6 +100,26 @@ func find(reg *Registry, name string) CheckResult {
 	}
 
 	return CheckResult{}
+}
+
+func snapshotLog(mu *sync.Mutex, log *[]string) []string {
+	mu.Lock()
+	defer mu.Unlock()
+
+	return append([]string(nil), *log...)
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
 }
 
 func TestCheckRunsInBackground(t *testing.T) {
@@ -516,5 +573,153 @@ func TestPartialConfigIsFilledIn(t *testing.T) {
 	}
 	if got.Timeout != def.Timeout || got.FailThreshold != def.FailThreshold {
 		t.Errorf("got %+v, want the unset fields from DefaultConfig", got)
+	}
+}
+
+func TestShutdownOrder(t *testing.T) {
+	var (
+		mu  sync.Mutex
+		log []string
+	)
+
+	a := recordingTransport{name: "a", log: &log, mu: &mu}
+	b := recordingTransport{name: "b", log: &log, mu: &mu}
+
+	reg := New(testConfig(), nil, WithTransport(a), WithTransport(b))
+	reg.Critical("c", func(context.Context) error { return nil })
+
+	if err := reg.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	if err := reg.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+
+	want := []string{"start:a", "start:b", "stop:b", "stop:a"}
+	if got := snapshotLog(&mu, &log); !equalStrings(got, want) {
+		t.Errorf("transport events = %v, want %v", got, want)
+	}
+
+	if s := reg.Snapshot().State; s != StateStopping {
+		t.Errorf("state = %v, want stopping", s)
+	}
+}
+
+func TestStopStopsEveryTransportDespiteErrors(t *testing.T) {
+	var (
+		mu  sync.Mutex
+		log []string
+	)
+
+	boom := errors.New("boom")
+	a := recordingTransport{name: "a", stopErr: boom, log: &log, mu: &mu}
+	b := recordingTransport{name: "b", log: &log, mu: &mu}
+
+	reg := New(testConfig(), nil, WithTransport(a), WithTransport(b))
+
+	err := reg.Shutdown(context.Background())
+	if !errors.Is(err, boom) {
+		t.Errorf("err = %v, want it to wrap boom", err)
+	}
+
+	if got := snapshotLog(&mu, &log); len(got) != 2 {
+		t.Errorf("events = %v, want both transports stopped — a failure must not skip the rest", got)
+	}
+}
+
+func TestStartFailureRollsBackAndJoinsErrors(t *testing.T) {
+	var (
+		mu  sync.Mutex
+		log []string
+	)
+
+	startBoom := errors.New("start boom")
+	stopBoom := errors.New("stop boom")
+	a := recordingTransport{name: "a", stopErr: stopBoom, log: &log, mu: &mu}
+	b := recordingTransport{name: "b", startErr: startBoom, log: &log, mu: &mu}
+	c := recordingTransport{name: "c", log: &log, mu: &mu}
+
+	reg := New(testConfig(), nil, WithTransport(a), WithTransport(b), WithTransport(c))
+	reg.Critical("c", func(context.Context) error { return nil })
+
+	err := reg.Start(context.Background())
+	if !errors.Is(err, startBoom) || !errors.Is(err, stopBoom) {
+		t.Fatalf("err = %v, want both the start and the rollback failure", err)
+	}
+
+	want := []string{"start:a", "start:b", "stop:a"}
+	if got := snapshotLog(&mu, &log); !equalStrings(got, want) {
+		t.Errorf("transport events = %v, want %v", got, want)
+	}
+
+	if s := reg.Snapshot().State; s != StateStopping {
+		t.Errorf("state = %v, want stopping", s)
+	}
+	if err := reg.Start(context.Background()); err == nil {
+		t.Error("Start after a failed Start succeeded, want an error")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := reg.Shutdown(ctx); err != nil {
+		t.Errorf("Shutdown after a failed Start: %v", err)
+	}
+}
+
+func TestShutdownAbsorbsTheDrainHold(t *testing.T) {
+	cfg := testConfig()
+	cfg.DrainHold = 120 * time.Millisecond
+
+	reg := New(cfg, nil)
+	reg.Critical("c", func(context.Context) error { return nil })
+
+	if err := reg.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	start := time.Now()
+	if err := reg.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed < cfg.DrainHold {
+		t.Errorf("returned after %s, want at least the %s hold", elapsed, cfg.DrainHold)
+	}
+}
+
+func TestShutdownOnNilRegistryIsSafe(t *testing.T) {
+	var reg *Registry
+
+	if err := reg.Shutdown(context.Background()); err != nil {
+		t.Errorf("nil registry: %v", err)
+	}
+}
+
+func TestWithTransportSkipsNil(t *testing.T) {
+	reg := New(testConfig(), nil, WithTransport(nil))
+
+	if err := reg.Shutdown(context.Background()); err != nil {
+		t.Errorf("nil transport should be skipped, got %v", err)
+	}
+}
+
+func TestWithTransportSkipsTypedNil(t *testing.T) {
+	var typedNil *nilableTransport
+
+	reg := New(testConfig(), nil, WithTransport(typedNil))
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("registry called a method on a typed nil: %v", r)
+		}
+	}()
+
+	if err := reg.Start(context.Background()); err != nil {
+		t.Errorf("Start: %v", err)
+	}
+	if err := reg.Shutdown(context.Background()); err != nil {
+		t.Errorf("typed nil transport should be skipped, got %v", err)
 	}
 }

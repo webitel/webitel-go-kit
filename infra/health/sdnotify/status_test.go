@@ -135,7 +135,7 @@ func TestStatusIsOneLineOnTheWire(t *testing.T) {
 	waitState(t, reg, health.StateNotReady)
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -162,7 +162,7 @@ func TestNoErrorTextLeaks(t *testing.T) {
 	stopAtCleanup(t, reg)
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
