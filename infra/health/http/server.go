@@ -27,13 +27,13 @@ type Server struct {
 }
 
 // NewServer builds a probe server, or nil when addr is empty.
-func NewServer(r *health.Registry, addr string, opts ...Option) *Server {
+func NewServer(addr string, opts ...Option) *Server {
 	if addr == "" {
 		return nil
 	}
 
 	o := newOptions(opts)
-	h := newHandler(r, o, false, "") // verbose is granted in serve, once the address is known
+	h := newHandler(nil, o, false, "") // verbose is granted in serve, once the address is known
 
 	return &Server{
 		h: h,
@@ -53,7 +53,7 @@ func NewServer(r *health.Registry, addr string, opts ...Option) *Server {
 
 // Start binds the listener, then serves in the background. Calling it twice
 // returns an error rather than binding a second port.
-func (s *Server) Start() error {
+func (s *Server) Start(_ context.Context, r *health.Registry) error {
 	if s == nil {
 		return nil
 	}
@@ -64,7 +64,7 @@ func (s *Server) Start() error {
 		return fmt.Errorf("health/http: listen %s: %w", s.addr, err)
 	}
 
-	if err := s.serve(l); err != nil {
+	if err := s.serve(l, r); err != nil {
 		l.Close()
 
 		return err
@@ -74,7 +74,7 @@ func (s *Server) Start() error {
 }
 
 // serve is the seam the tests use to present a non-loopback address.
-func (s *Server) serve(l net.Listener) error {
+func (s *Server) serve(l net.Listener, r *health.Registry) error {
 	s.mu.Lock()
 	if s.started {
 		s.mu.Unlock()
@@ -83,6 +83,7 @@ func (s *Server) serve(l net.Listener) error {
 	}
 	s.started = true
 	s.ln = l
+	s.h.reg = r
 
 	verbose := loopbackOnly(l.Addr())
 	s.h.verboseAllowed.Store(verbose)

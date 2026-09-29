@@ -69,16 +69,16 @@ func settled(t *testing.T, want int) int {
 // grant while requests were already in flight on the first listener.
 func TestRaceSecondStartIsRefused(t *testing.T) {
 	reg := racyRegistry(t)
-	srv := NewServer(reg, "127.0.0.1:0")
+	srv := NewServer("127.0.0.1:0")
 
-	if err := srv.Start(); err != nil {
+	if err := srv.Start(context.Background(), reg); err != nil {
 		t.Fatalf("first Start: %v", err)
 	}
 	t.Cleanup(func() { srv.Stop(context.Background()) })
 
 	first := srv.Addr()
 
-	if err := srv.Start(); err == nil {
+	if err := srv.Start(context.Background(), reg); err == nil {
 		t.Fatal("second Start succeeded; it must be refused, not bind another port")
 	}
 	if got := srv.Addr(); got != first {
@@ -90,7 +90,7 @@ func TestRaceConcurrentStartsBindOnePort(t *testing.T) {
 	reg := racyRegistry(t)
 
 	for round := 0; round < 10; round++ {
-		srv := NewServer(reg, "127.0.0.1:0")
+		srv := NewServer("127.0.0.1:0")
 
 		var mu sync.Mutex
 		var wins int
@@ -100,7 +100,7 @@ func TestRaceConcurrentStartsBindOnePort(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := srv.Start(); err == nil {
+				if err := srv.Start(context.Background(), reg); err == nil {
 					mu.Lock()
 					wins++
 					mu.Unlock()
@@ -124,8 +124,8 @@ func TestRaceRequestsWhileStartingAndStopping(t *testing.T) {
 	reg := racyRegistry(t)
 
 	for round := 0; round < 5; round++ {
-		srv := NewServer(reg, "127.0.0.1:0")
-		if err := srv.Start(); err != nil {
+		srv := NewServer("127.0.0.1:0")
+		if err := srv.Start(context.Background(), reg); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		base := "http://" + srv.Addr()
@@ -169,8 +169,7 @@ func TestRaceRequestsWhileStartingAndStopping(t *testing.T) {
 }
 
 func TestRaceStopBeforeStartIsANoOp(t *testing.T) {
-	reg := racyRegistry(t)
-	srv := NewServer(reg, "127.0.0.1:0")
+	srv := NewServer("127.0.0.1:0")
 
 	if err := srv.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop before Start: %v", err)
@@ -184,8 +183,8 @@ func TestRaceConcurrentStopsAreSafe(t *testing.T) {
 	reg := racyRegistry(t)
 
 	for round := 0; round < 10; round++ {
-		srv := NewServer(reg, "127.0.0.1:0")
-		if err := srv.Start(); err != nil {
+		srv := NewServer("127.0.0.1:0")
+		if err := srv.Start(context.Background(), reg); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -208,8 +207,8 @@ func TestRaceServerCyclesDoNotLeakGoroutines(t *testing.T) {
 	base := runtime.NumGoroutine()
 
 	for i := 0; i < 25; i++ {
-		srv := NewServer(reg, "127.0.0.1:0")
-		if err := srv.Start(); err != nil {
+		srv := NewServer("127.0.0.1:0")
+		if err := srv.Start(context.Background(), reg); err != nil {
 			t.Fatalf("cycle %d: Start: %v", i, err)
 		}
 
@@ -300,7 +299,7 @@ func TestRaceNilServerAndNilRegistryUnderConcurrency(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			_ = srv.Start()
+			_ = srv.Start(context.Background(), reg)
 			_ = srv.Stop(context.Background())
 			_ = srv.Addr()
 

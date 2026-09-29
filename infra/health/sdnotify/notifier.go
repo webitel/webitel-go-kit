@@ -38,7 +38,7 @@ type loopState struct {
 }
 
 // New builds a Notifier, or nil when NOTIFY_SOCKET is unset.
-func New(r *health.Registry, opts ...Option) *Notifier {
+func New(opts ...Option) *Notifier {
 	addr := os.Getenv("NOTIFY_SOCKET")
 	if addr == "" {
 		return nil
@@ -53,7 +53,6 @@ func New(r *health.Registry, opts ...Option) *Notifier {
 	}
 
 	return &Notifier{
-		reg:          r,
 		addr:         addr,
 		log:          o.log,
 		writeTimeout: o.writeTimeout,
@@ -65,7 +64,7 @@ func New(r *health.Registry, opts ...Option) *Notifier {
 
 // Start begins notifying. It does not block and a second call is a no-op. The
 // error is always nil: sd_notify(3) says to ignore notify failures.
-func (n *Notifier) Start(ctx context.Context) error {
+func (n *Notifier) Start(ctx context.Context, r *health.Registry) error {
 	if n == nil {
 		return nil
 	}
@@ -73,6 +72,7 @@ func (n *Notifier) Start(ctx context.Context) error {
 	first := false
 	n.startOnce.Do(func() {
 		first = true
+		n.reg = r
 		ctx, n.cancel = context.WithCancel(ctx)
 		n.done = make(chan struct{})
 
