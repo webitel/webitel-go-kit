@@ -41,6 +41,7 @@ on:
           - infra/errors
           - infra/fts_client
           - infra/health
+          - infra/health/fx
           - infra/httpproxy
           - infra/logger_client
           - infra/otel

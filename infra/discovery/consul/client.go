@@ -55,6 +55,7 @@ type Client struct {
 	serviceChecks                  api.AgentServiceChecks
 	tags                           []string
 	logger                         discovery.Logger
+	readiness                      func() (bool, error)
 
 	lock      sync.RWMutex
 	cancelers map[string]*canceler
@@ -424,12 +425,33 @@ func (c *Client) registerService(ctx context.Context, asr *api.AgentServiceRegis
 // error, the function will cancel the heartbeat and deregister the service. Otherwise, it
 // will return the error.
 func (c *Client) sendTTL(ctx context.Context, serviceId string) error {
-	err := c.client.Agent().UpdateTTLOpts(ServiceStr+serviceId+":ttl:1", "pass", "pass", new(api.QueryOptions).WithContext(ctx))
+	status, output := c.ttlStatus()
+	err := c.client.Agent().UpdateTTLOpts(ServiceStr+serviceId+":ttl:1", output, status, new(api.QueryOptions).WithContext(ctx))
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		_ = c.client.Agent().ServiceDeregister(serviceId)
 		return TTLContextCanceledErr
 	}
 	return err
+}
+
+// ttlStatus maps the readiness verdict to a TTL status and output. Without a
+// readiness func the service always reports pass. A false verdict with a nil
+// error still fails, with a generic output.
+func (c *Client) ttlStatus() (status, output string) {
+	if c.readiness == nil {
+		return api.HealthPassing, "pass"
+	}
+
+	ok, err := c.readiness()
+	if ok {
+		return api.HealthPassing, "pass"
+	}
+
+	if err == nil {
+		return api.HealthCritical, "not ready"
+	}
+
+	return api.HealthCritical, err.Error()
 }
 
 // retryRegister retries to register the given service with the Consul agent if the
@@ -461,7 +483,8 @@ func (c *Client) retryRegister(ctx context.Context, serviceId string, asr *api.A
 func (c *Client) startHeartbeat(asr *api.AgentServiceRegistration, serviceId string, cc *canceler) {
 	go func() {
 		defer close(cc.done)
-		if err := c.client.Agent().UpdateTTL(ServiceStr+serviceId+":ttl:1", "pass", "pass"); err != nil {
+		status, output := c.ttlStatus()
+		if err := c.client.Agent().UpdateTTL(ServiceStr+serviceId+":ttl:1", output, status); err != nil {
 			c.logger.Error("[Consul]update ttl heartbeat to consul failed!", "err", err)
 		}
 
