@@ -1,6 +1,6 @@
 module github.com/webitel/webitel-go-kit/infra/health/fx
 
-go 1.24.0
+go 1.25.4
 
 require (
 	github.com/webitel/webitel-go-kit/infra/health v0.2.0
