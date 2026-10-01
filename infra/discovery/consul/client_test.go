@@ -256,8 +256,8 @@ func TestTtlCheck(t *testing.T) {
 	check := client.ttlCheck(svc)
 
 	assert.NotNil(t, check)
-	assert.Equal(t, "service:test-service-1", check.CheckID)
-	assert.Equal(t, "15s", check.TTL)
+	assert.Equal(t, ServiceStr+"test-service-1:ttl:1", check.CheckID)
+	assert.Equal(t, "30s", check.TTL)
 	assert.Equal(t, "60s", check.DeregisterCriticalServiceAfter)
 }
 
