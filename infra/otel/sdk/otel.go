@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/webitel/webitel-go-kit/infra/otel/internal"
 	logv "github.com/webitel/webitel-go-kit/infra/otel/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log"
+	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/metric"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/trace"
 
@@ -48,11 +51,12 @@ type ShutdownFunc func(context.Context) error
 // configuration
 type options struct {
 	// Logs output severity level
-	Lvl      otelog.Severity
-	Logs     []log.Option
-	Traces   []trace.Option
-	Metrics  []metric.Option
-	Resource *resource.Resource
+	Lvl          otelog.Severity
+	Logs         []log.Option
+	LogsDisabled bool
+	Traces       []trace.Option
+	Metrics      []metric.Option
+	Resource     *resource.Resource
 	// RuntimeMetrics enables the standard Go runtime metric set.
 	RuntimeMetrics bool
 	// option used to set[build] level[logger] for SDK internals
@@ -135,8 +139,9 @@ func WithSetLevel(set func(otelog.Severity)) Option {
 // that will be triggered for you to redirect (bridge) logger(s)
 // which you project is internally using.
 //
-// Runs when OTEL_LOGS_EXPORTER=? is specified
-// and otel.GetLoggerProvider() has processor(s).
+// Runs only when a logs exporter is configured explicitly,
+// by OTEL_LOGS_EXPORTER=? or [WithLogOptions].
+// The default stdout exporter does not trigger it.
 func WithLogBridge(do ...func()) Option {
 	return option(func(conf *options) {
 		conf.setBridge = append(
@@ -215,13 +220,14 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 			WithLogLevel(otelog.Severity(level)).apply(&conf)
 		}),
 		internal.EnvString("LOGS_EXPORTER", func(input string) {
-			opts, err := log.NewOptions(ctx, input)
+			opts, disabled, err := newLogOptions(ctx, input)
+			WithLogOptions(opts...).apply(&conf)
 			if err != nil {
 				err = fmt.Errorf("invalid %s value %s: %w", "OTEL_LOGS_EXPORTER", input, err)
 				otel.Handle(err)
 				return // err
 			}
-			WithLogOptions(opts...).apply(&conf)
+			conf.LogsDisabled = disabled
 			// exporter, err := log.NewExporter(ctx, input)
 			// if err != nil {
 			// 	err = fmt.Errorf("invalid %s value %s: %w", "OTEL_LOGS_EXPORTER", input, err)
@@ -292,6 +298,41 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 	return // conf
 }
 
+func newLogOptions(ctx context.Context, input string) (opts []log.Option, disabled bool, err error) {
+	var dsns []string
+	for dsn := range strings.SplitSeq(input, ",") {
+		if dsn = strings.TrimSpace(dsn); dsn != "" {
+			dsns = append(dsns, dsn)
+		}
+	}
+	for _, dsn := range dsns {
+		if strings.EqualFold(dsn, "none") {
+			if len(dsns) > 1 {
+				return nil, false, errors.New("none must be the only value")
+			}
+			return nil, true, nil
+		}
+	}
+
+	var dsnErrs []error
+	for _, dsn := range dsns {
+		dsnOpts, dsnErr := log.NewOptions(ctx, dsn)
+		if dsnErr != nil {
+			dsnErrs = append(dsnErrs, fmt.Errorf("%s: %w", dsn, dsnErr))
+			continue
+		}
+		opts = append(opts, dsnOpts...)
+	}
+	return opts, false, errors.Join(dsnErrs...)
+}
+
+func stderrErrorHandler(err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s [O]pen[Tel]emetry error: %v\n", time.Now().Format(time.RFC3339), err)
+}
+
 // // Deprecated. Use [Configure] instead.
 // func Setup(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 // 	return Configure(ctx, opts...)
@@ -326,12 +367,7 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 			}
 
 			errs = errors.Join(errs, err)
-
-			// slog.Error(err.Error())
-			slog.Error(
-				"[O]pen[Tel]emetry configuration ;",
-				"error", err,
-			)
+			stderrErrorHandler(err)
 
 			// // Fatal
 			// os.Exit(1)
@@ -340,6 +376,8 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 	)
 	// Log&exit: errors while initialization ...
 	otel.SetErrorHandler(errorHandler)
+	// Never route through the logs pipeline: a failing exporter would re-enter this handler forever.
+	defer otel.SetErrorHandler(otel.ErrorHandlerFunc(stderrErrorHandler))
 
 	// Read ENV configuration ...
 	setup := newOptions(ctx, opts...)
@@ -355,6 +393,9 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 		// release them.
 		if len(setup.Metrics) > 0 {
 			setup.OnShutdown(sdkmetric.NewMeterProvider(setup.Metrics...).Shutdown)
+		}
+		if len(setup.Logs) > 0 {
+			setup.OnShutdown(sdklog.NewLoggerProvider(setup.Logs...).Shutdown)
 		}
 		// USE: otel.Handle(err)
 		return setup.Shutdown, errs
@@ -383,45 +424,28 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 	//                  logs                   //
 	// --------------------------------------- //
 
-	if len(setup.Logs) > 0 {
+	explicitLogs := len(setup.Logs) > 0
+	if !explicitLogs && !setup.LogsDisabled {
+		opts, err := log.NewOptions(ctx, "stdout:")
+		if err != nil {
+			otel.Handle(fmt.Errorf("otel/sdk: default logs exporter: %w", err))
+		}
+		setup.Logs = opts
+	}
+
+	if len(setup.Logs) > 0 && !setup.LogsDisabled {
 		provider := sdklog.NewLoggerProvider(
 			append(setup.Logs, sdklog.WithResource(src))...,
 		)
 		setup.OnShutdown(provider.Shutdown)
 		global.SetLoggerProvider(provider)
 
-		// otel/sdk/log.Logger("otel").Error(err)
-		errorHandler = func(err error) {
-
-			if err == nil {
-				return // none
-			}
-
-			var (
-				event otelog.Record
-				level = otelog.SeverityError
-			)
-
-			event.SetTimestamp(time.Now())
-			event.SetSeverityText("ERROR")
-			event.SetSeverity(level)
-
-			event.SetBody(otelog.StringValue(err.Error()))
-
-			global.GetLoggerProvider().Logger("otel").
-				Emit(context.Background(), event)
-
-			// // Fatal
-			// os.Exit(1)
-
-		}
-		// Just log any ERROR deemed irremediable by an OpenTelemetry component
-		otel.SetErrorHandler(errorHandler)
-
-		// TODO: redirect (bridge) internal logger(s)
-		for _, doBridge := range setup.setBridge {
-			if doBridge != nil {
-				doBridge()
+		if explicitLogs {
+			// TODO: redirect (bridge) internal logger(s)
+			for _, doBridge := range setup.setBridge {
+				if doBridge != nil {
+					doBridge()
+				}
 			}
 		}
 
