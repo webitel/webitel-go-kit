@@ -8,6 +8,7 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -31,6 +32,7 @@ type ConsumerConfig struct {
 	MaxWorkers        int
 	ReconnectDelay    time.Duration
 	ProcessingTimeout time.Duration
+	TracerProvider    trace.TracerProvider
 }
 
 // ConsumerOption defines a function to modify ConsumerConfig.
@@ -88,6 +90,13 @@ func WithConsumerProcessingTimeout(d time.Duration) ConsumerOption {
 	}
 }
 
+// WithConsumerTracerProvider sets provider for process spans. Global provider is used when not set.
+func WithConsumerTracerProvider(tp trace.TracerProvider) ConsumerOption {
+	return func(c *ConsumerConfig) {
+		c.TracerProvider = tp
+	}
+}
+
 type MessageConsumer struct {
 	broker    *Connection
 	queue     *QueueConfig
@@ -97,6 +106,7 @@ type MessageConsumer struct {
 	cancel    context.CancelFunc
 	workerSem chan struct{}
 	logger    Logger
+	tracer    trace.Tracer
 }
 
 func NewConsumer(
@@ -113,6 +123,7 @@ func NewConsumer(
 		handler:   handler,
 		logger:    logger,
 		workerSem: make(chan struct{}, consumerCfg.MaxWorkers),
+		tracer:    newTracer(consumerCfg.TracerProvider),
 	}
 }
 
@@ -198,15 +209,21 @@ func (c *MessageConsumer) processMessage(ctx context.Context, msg amqp.Delivery)
 	processCtx, cancel := context.WithTimeout(ctx, c.consumer.ProcessingTimeout)
 	defer cancel()
 
+	processCtx, span := startProcessSpan(processCtx, c.tracer, c.queue.Name, msg)
+	defer span.End()
+
 	if err := c.handler(processCtx, msg); err != nil {
+		failSpan(span, err)
 		c.logger.Error("message handling failed", err)
 		if err := msg.Nack(false, !msg.Redelivered); err != nil {
+			span.RecordError(err)
 			c.logger.Error("failed to Nack message", err)
 		}
 		return
 	}
 
 	if err := msg.Ack(false); err != nil {
+		span.RecordError(err)
 		c.logger.Error("ack message", err)
 	}
 }
