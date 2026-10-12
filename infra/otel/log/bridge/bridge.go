@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/global"
 )
@@ -82,7 +83,7 @@ func (h *Handler) WithName(name string) *Handler {
 	}
 }
 
-func (h *Handler) WithAttrs(data ...log.KeyValue) *Handler {
+func (h *Handler) WithAttrs(data ...attribute.KeyValue) *Handler {
 	// h2 := *h
 	h2 := &Handler{
 		Options:    h.Options,
@@ -105,7 +106,7 @@ func (h *Handler) WithAttrs(data ...log.KeyValue) *Handler {
 // }
 
 type Attributes struct {
-	data []log.KeyValue
+	data []attribute.KeyValue
 }
 
 func (e *Attributes) Len() int {
@@ -122,19 +123,19 @@ func (e *Attributes) Clone() *Attributes {
 	return &Attributes{data: slices.Clone(e.data)}
 }
 
-func (e *Attributes) List() []log.KeyValue {
+func (e *Attributes) List() []attribute.KeyValue {
 	if e != nil {
 		return e.data
 	}
 	return nil
 }
 
-func (e *Attributes) Add(data []log.KeyValue) {
+func (e *Attributes) Add(data []attribute.KeyValue) {
 	e.data = slices.Concat(e.data, data)
 }
 
 // Value convertion
-func Value(v any, conv ...func(v any) log.Value) log.Value {
+func Value(v any, conv ...func(v any) attribute.Value) attribute.Value {
 	// func BoolValue(v bool) Value
 	// func BytesValue(v []byte) Value
 	// func Float64Value(v float64) Value
@@ -144,33 +145,33 @@ func Value(v any, conv ...func(v any) log.Value) log.Value {
 	// func SliceValue(vs ...Value) Value
 	// func StringValue(v string) Value
 	switch v := v.(type) {
-	case log.Value:
+	case attribute.Value:
 		return v
 	case bool:
-		return log.BoolValue(v)
+		return attribute.BoolValue(v)
 	case []byte:
-		return log.BytesValue(v)
+		return attribute.ByteSliceValue(v)
 	case float64:
-		return log.Float64Value(v)
+		return attribute.Float64Value(v)
 	case int64:
-		return log.Int64Value(v)
+		return attribute.Int64Value(v)
 	case uint64:
-		return log.Int64Value(int64(v))
+		return attribute.Int64Value(int64(v))
 	case int:
-		return log.IntValue(v)
+		return attribute.IntValue(v)
 	case string:
-		return log.StringValue(v)
+		return attribute.StringValue(v)
 	case map[string]any:
-		group := make([]log.KeyValue, len(v))
+		group := make([]attribute.KeyValue, len(v))
 		for k, v := range v {
-			group = append(group, log.KeyValue{
-				Key:   k,
+			group = append(group, attribute.KeyValue{
+				Key:   attribute.Key(k),
 				Value: Value(v, conv...),
 			})
 		}
-		return log.MapValue(group...)
+		return attribute.MapValue(group...)
 	}
 	// reflect.ValueOf(v).Kind() == reflect.Slice
-	// log.SliceValue()
-	return log.StringValue(fmt.Sprintf("%+v", v))
+	// attribute.SliceValue()
+	return attribute.StringValue(fmt.Sprintf("%+v", v))
 }

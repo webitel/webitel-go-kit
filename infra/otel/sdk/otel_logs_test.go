@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 	otelog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -83,6 +84,6 @@ func captureFile(t *testing.T, target **os.File) func() string {
 func emitMarker(marker string) {
 	var rec otelog.Record
 	rec.SetSeverity(otelog.SeverityInfo)
-	rec.SetBody(otelog.StringValue(marker))
+	rec.SetBody(attribute.StringValue(marker))
 	global.GetLoggerProvider().Logger("test").Emit(context.Background(), rec)
 }
