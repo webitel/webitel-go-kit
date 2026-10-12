@@ -162,7 +162,7 @@ func Value(v any, conv ...func(v any) attribute.Value) attribute.Value {
 	case string:
 		return attribute.StringValue(v)
 	case map[string]any:
-		group := make([]attribute.KeyValue, len(v))
+		group := make([]attribute.KeyValue, 0, len(v))
 		for k, v := range v {
 			group = append(group, attribute.KeyValue{
 				Key:   attribute.Key(k),
