@@ -7,6 +7,7 @@
 *.dll
 *.so
 *.dylib
+**/example/**/otel
 
 # Test binary, built with `go test -fc`
 *.test
