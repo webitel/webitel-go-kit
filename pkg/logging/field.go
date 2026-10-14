@@ -179,7 +179,7 @@ func (m mapOf[V]) attributes(depth int) []attribute.KeyValue {
 		val := valueOf(v, depth+1)
 		if m.classOf != nil {
 			var keep bool
-			if val, keep = redactValue(m.classOf(k), val); !keep {
+			if val, keep = RedactValue(m.classOf(k), val); !keep {
 				continue
 			}
 		}

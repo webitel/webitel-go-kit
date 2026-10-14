@@ -89,14 +89,17 @@ func (e *entry) renderField(out []attribute.KeyValue, f Field) []attribute.KeyVa
 }
 
 func appendValue(out []attribute.KeyValue, key string, v attribute.Value, c redact.Class) []attribute.KeyValue {
-	v, keep := redactValue(c, v)
+	v, keep := RedactValue(c, v)
 	if !keep {
 		return out
 	}
 	return append(out, attribute.KeyValue{Key: attribute.Key(key), Value: v})
 }
 
-func redactValue(c redact.Class, v attribute.Value) (attribute.Value, bool) {
+// RedactValue returns v rendered for class c with the same rules as fields
+// marked by [Field.PII] and [Field.Secret]. keep is false when the value must
+// be dropped. [redact.ClassRegular] returns v unchanged.
+func RedactValue(c Class, v attribute.Value) (out attribute.Value, keep bool) {
 	if c == redact.ClassRegular {
 		return v, true
 	}

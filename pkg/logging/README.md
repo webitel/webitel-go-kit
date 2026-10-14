@@ -46,7 +46,7 @@ redact.SetPolicy(redact.Policy{Salt: salt})
 | `.PII()` | `pii:` + 32 hex chars (HMAC-SHA256, 16 bytes) | dropped |
 | `.Secret()` | `set` / `empty`, or dropped with `SecretMode: redact.Drop` | `set` / `empty` |
 
-Without a salt, PII values are dropped and one warning goes to stderr. Pseudonyms are still personal data under GDPR. Domain types can implement `LogValue()` with `redact.Map`/`redact.Value` and `String()` with `redact.Render`.
+Without a salt, PII values are dropped and one warning goes to stderr. Pseudonyms are still personal data under GDPR. Domain types can implement `LogValue()` with `redact.Map`/`redact.Value` and `String()` with `redact.Render`. `RedactValue` renders an `attribute.Value` with the same rules as `.PII()`/`.Secret()` fields, for code that sees attributes outside the facade.
 
 ## Compatibility surface
 
