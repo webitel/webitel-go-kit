@@ -120,6 +120,33 @@ func Render(c Class, s string, empty bool) (out string, keep bool) {
 	}
 }
 
+// Rendered reports whether s looks like the output of [Render] for class c.
+// It is only a guess from the form of s: a raw value of the same form is
+// reported as rendered.
+func Rendered(c Class, s string) bool {
+	switch c {
+	case ClassPII:
+		return s == SecretSet || s == SecretEmpty || isPseudonym(s)
+	case ClassSecret:
+		return s == SecretSet || s == SecretEmpty
+	default:
+		return false
+	}
+}
+
+func isPseudonym(s string) bool {
+	h, ok := strings.CutPrefix(s, PseudonymPrefix)
+	if !ok || len(h) != 2*pseudonymBytes {
+		return false
+	}
+	for i := 0; i < len(h); i++ {
+		if (h[i] < '0' || h[i] > '9') && (h[i] < 'a' || h[i] > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // Value returns v rendered for class c. A dropped value is the zero
 // [slog.Value]. ClassRegular returns v unchanged.
 func Value(c Class, v any) slog.Value {
