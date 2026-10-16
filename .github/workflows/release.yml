@@ -57,7 +57,7 @@ on:
           - pkg/etag
           - pkg/filters
           - pkg/interceptors
-          - pkg/logger
+          - pkg/logging
           - pkg/safemap
           - pkg/watcher
 

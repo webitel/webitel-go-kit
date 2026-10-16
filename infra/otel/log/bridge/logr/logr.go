@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/global"
 )
@@ -106,7 +107,7 @@ func (h *Handler) convertRecord(level log.Severity, message string, keysAndValue
 
 	record.SetSeverity(level)
 	record.SetTimestamp(timestamp)
-	record.SetBody(log.StringValue(message))
+	record.SetBody(attribute.StringValue(message))
 
 	if h.attrs.Len() > 0 {
 		record.AddAttributes(h.attrs.KeyValues()...)

@@ -3,9 +3,12 @@ package errors_test
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 
 	werror "github.com/webitel/webitel-go-kit/pkg/errors"
 )
@@ -189,4 +192,40 @@ func TestAs(t *testing.T) {
 	// but only the latest cause
 	err = werror.Wrap(err, werror.WithCause(errors.New("new cause")))
 	assert.False(t, errors.As(err, &rerr))
+}
+
+func TestErrWithValue_LogValue(t *testing.T) {
+	group := func(t *testing.T, err error) map[string]any {
+		t.Helper()
+		lv, ok := err.(slog.LogValuer)
+		require.True(t, ok)
+		v := lv.LogValue()
+		require.Equal(t, slog.KindGroup, v.Kind())
+
+		out := make(map[string]any)
+		for _, a := range v.Group() {
+			out[a.Key] = a.Value.Any()
+		}
+		return out
+	}
+
+	t.Run("value", func(t *testing.T) {
+		err := werror.Set(errors.New("boom"), "color", "red")
+		assert.Equal(t, map[string]any{"message": "boom", "color": "red"}, group(t, err))
+	})
+
+	t.Run("message", func(t *testing.T) {
+		err := werror.Set(errors.New("boom"), werror.ErrKeyMessage, "custom")
+		assert.Equal(t, map[string]any{"message": "custom"}, group(t, err))
+	})
+
+	t.Run("code", func(t *testing.T) {
+		err := werror.Set(errors.New("boom"), werror.ErrKeyCode, codes.NotFound)
+		assert.Equal(t, map[string]any{"message": "boom", "code": codes.NotFound}, group(t, err))
+	})
+
+	t.Run("own pair only", func(t *testing.T) {
+		err := werror.Set(werror.Set(errors.New("boom"), "a", 1), "b", 2)
+		assert.Equal(t, map[string]any{"message": "boom", "b": int64(2)}, group(t, err))
+	})
 }
