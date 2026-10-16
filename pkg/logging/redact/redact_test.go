@@ -78,6 +78,7 @@ func TestSetPolicy(t *testing.T) {
 }
 
 func TestRender(t *testing.T) {
+	pseudonym := expectedPseudonym([]byte("other-salt"), "alice")
 	cases := map[string]struct {
 		policy   *Policy
 		class    Class
@@ -100,6 +101,20 @@ func TestRender(t *testing.T) {
 		"secret drop empty":     {&Policy{SecretMode: Drop}, ClassSecret, "", true, "", false},
 		"unknown closed":        {nil, Class(7), "x", false, "", false},
 		"unknown":               {&Policy{Salt: testSalt}, Class(7), "x", false, "", false},
+
+		"pii rendered pseudonym":  {&Policy{Salt: testSalt}, ClassPII, pseudonym, false, pseudonym, true},
+		"pii rendered closed":     {nil, ClassPII, pseudonym, false, pseudonym, true},
+		"pii rendered no salt":    {&Policy{}, ClassPII, pseudonym, false, pseudonym, true},
+		"pii rendered set":        {&Policy{Salt: testSalt}, ClassPII, SecretSet, false, SecretSet, true},
+		"pii rendered empty":      {&Policy{Salt: testSalt}, ClassPII, SecretEmpty, false, SecretEmpty, true},
+		"pii short pseudonym":     {&Policy{Salt: testSalt}, ClassPII, "pii:abc", false, expectedPseudonym(testSalt, "pii:abc"), true},
+		"pii upper hex pseudonym": {&Policy{Salt: testSalt}, ClassPII, "pii:0123456789ABCDEF0123456789ABCDEF", false, expectedPseudonym(testSalt, "pii:0123456789ABCDEF0123456789ABCDEF"), true},
+		"secret rendered set":     {nil, ClassSecret, SecretSet, false, SecretSet, true},
+		"secret rendered empty":   {nil, ClassSecret, SecretEmpty, false, SecretEmpty, true},
+		"secret rendered drop":    {&Policy{SecretMode: Drop}, ClassSecret, SecretSet, false, "", false},
+		"secret pseudonym":        {nil, ClassSecret, pseudonym, false, SecretSet, true},
+		"regular rendered":        {nil, ClassRegular, pseudonym, false, pseudonym, true},
+		"unknown rendered":        {nil, Class(7), SecretSet, false, "", false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -113,6 +128,20 @@ func TestRender(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+
+	t.Run("idempotent", func(t *testing.T) {
+		resetPolicy(t)
+		SetPolicy(Policy{Salt: testSalt})
+		for _, c := range []Class{ClassPII, ClassSecret} {
+			for _, in := range []string{"alice", ""} {
+				once, keep := Render(c, in, in == "")
+				require.True(t, keep)
+				twice, keep := Render(c, once, once == "")
+				require.True(t, keep)
+				assert.Equal(t, once, twice, "class %s, value %q", c, in)
+			}
+		}
+	})
 
 	t.Run("pseudonym format", func(t *testing.T) {
 		resetPolicy(t)

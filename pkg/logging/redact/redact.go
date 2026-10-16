@@ -78,8 +78,8 @@ type Policy struct {
 }
 
 var (
-	policy   atomic.Pointer[Policy]
-	saltWarn sync.Once
+	policy     atomic.Pointer[Policy]
+	policyWarn sync.Once
 )
 
 func SetPolicy(p Policy) {
@@ -91,18 +91,21 @@ func SetPolicy(p Policy) {
 // form of the value, empty reports whether the value is empty (zero number,
 // empty string, list or map; a boolean is never empty).
 // keep is false when the value must be dropped. Unknown classes are dropped.
+//
+// Render is idempotent: s that already looks rendered for c (see [Rendered])
+// is returned as is, unless the policy drops values of c.
 func Render(c Class, s string, empty bool) (out string, keep bool) {
 	switch c {
 	case ClassRegular:
 		return s, true
 	case ClassPII:
-		p := policy.Load()
-		if p == nil {
-			return "", false
+		if Rendered(c, s) {
+			return s, true
 		}
-		if len(p.Salt) == 0 {
-			saltWarn.Do(func() {
-				fmt.Fprintln(os.Stderr, "redact: no HMAC salt configured, PII values are dropped")
+		p := policy.Load()
+		if p == nil || len(p.Salt) == 0 {
+			policyWarn.Do(func() {
+				fmt.Fprintln(os.Stderr, "redact: no HMAC salt set with redact.SetPolicy, PII values are dropped")
 			})
 			return "", false
 		}
@@ -110,6 +113,9 @@ func Render(c Class, s string, empty bool) (out string, keep bool) {
 	case ClassSecret:
 		if p := policy.Load(); p != nil && p.SecretMode == Drop {
 			return "", false
+		}
+		if Rendered(c, s) {
+			return s, true
 		}
 		if empty {
 			return SecretEmpty, true
