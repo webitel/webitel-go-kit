@@ -28,10 +28,13 @@
 |`OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT`|Maximum allowed log record attribute count|`128`||
 |||||
 | Standard LogRecord Encoding. ||||
-|`OTEL_LOGRECORD_CODEC`|Codec to be used for standard output. Can be applied while `OTEL_LOGS_EXPORTER`=[`stdout`\|`stderr`\|`file:`].</br>Accept: `text`, `json`, `otel`|`otel`||
+|`OTEL_LOGRECORD_CODEC`|Codec to be used for standard output. Can be applied while `OTEL_LOGS_EXPORTER`=[`stdout`\|`stderr`\|`file:`].</br>Accept: `text`, `json`, `otel`</br>The DSN parameter `codec` overrides it for one exporter, e.g. `stdout:;codec=text,file:/path/logs.json;codec=json` or `stderr://?codec=json`.|`otel`||
 |`OTEL_LOGRECORD_COLOR`|Colorize, depending on level, `OTEL_LOGRECORD_CODEC`=`text` records for console output.|`false`||
 |`OTEL_LOGRECORD_INDENT`|Use indentation, pretty print. Can be applied while `OTEL_LOGRECORD_CODEC`=[`json`\|`otel`].</br>Accept: boolean or whitespace(s) characters.</br>`true`,`'\t'`, `"  "`|`false`||
 |`OTEL_LOGRECORD_TIMESTAMP`|Timestamps layout. Can be applied for any standard codec.|`"2006-01-02T15:04:05.999Z07:00"`|See [Time.Format](https://pkg.go.dev/time#pkg-constants).|
+|||||
+| [Log Redaction](#log-redaction)||||
+|`OTEL_LOGS_REDACTION`|Redact sensitive log record attributes by name|`true`|Webitel-local. Boolean value; `false`/`FALSE`/`f`/`0` disable, anything else that is not a boolean logs a warning and leaves redaction enabled. Has no effect while the sensitive attributes map is empty. Either this variable or `WithSensitiveAttributes(nil)` in code disables redaction. See [Log redaction](#log-redaction).|
 |||||
 |[Batch LogRecord Processor](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#batch-logrecord-processor)||||
 |`OTEL_BLRP_SCHEDULE_DELAY`|Delay interval (in milliseconds) between two consecutive exports|`1000`||
@@ -79,6 +82,38 @@
 |`OTEL_EXPORTER_OTLP_CLIENT_KEY`</br>`OTEL_EXPORTER_OTLP_{SIGNAL}_CLIENT_KEY`|Clients private key to use in mTLS communication in PEM format.|||
 |`OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`</br>`OTEL_EXPORTER_OTLP_{SIGNAL}_CLIENT_CERTIFICATE`|Client certificate/chain trust for clients private key to use in mTLS communication in `PEM` format.|||
 |`OTEL_EXPORTER_OTLP_COMPRESSION`</br>`OTEL_EXPORTER_OTLP_{SIGNAL}_COMPRESSION`|Compression key for supported compression types. Supported compression: `gzip`.|||
+
+## Log redaction
+
+`Configure` registers a log record processor that renders the values of
+sensitive attributes before any exporter sees the record. Attributes are
+matched by name, also inside map values (slog groups) and slices of maps:
+
+- `pii` values become a keyed pseudonym, `pii:` and 32 hex characters, or are
+  dropped while no HMAC salt is set with `redact.SetPolicy`;
+- `secret` values become `set` or `empty`, or are dropped with
+  `SecretMode: redact.Drop`;
+- values of any other class are dropped.
+
+These are the rules of `.PII()`/`.Secret()` fields in `pkg/logging`. A value
+that already looks rendered (`redact.Rendered`) is kept as is, so a field
+marked in code is not rendered twice. The exception is `SecretMode:
+redact.Drop`: a rendered `secret` value is dropped too.
+
+The attributes come from `WithSensitiveAttributes`, which maps names to
+`"pii"` or `"secret"`, usually the `SensitiveAttributes` map of a generated
+`semconv` version:
+
+```go
+shutdown, err := otelsdk.Configure(ctx,
+	otelsdk.WithSensitiveAttributes(semconv.SensitiveAttributes),
+)
+```
+
+Until a `semconv` version with `SensitiveAttributes` is released, the default
+map is empty and nothing is redacted unless a map is passed. A nil or empty
+map, or `OTEL_LOGS_REDACTION=false`, disables redaction, and the processor is
+not registered. Without redaction, only fields marked in code are protected.
 
 Try an [example](https://github.com/webitel/webitel-go-kit/blob/features/otel/otel/example)
 

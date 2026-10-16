@@ -1,8 +1,12 @@
 # The registry depends on upstream semconv (see its manifest.yaml), so the
-# resolved registry contains upstream conventions too. Both filters below keep
-# only the "webitel" namespace to keep them out of this package: without that,
-# weaver generates Go for every referenced upstream attribute and we ship a
-# broken duplicate of go.opentelemetry.io/otel/semconv.
+# resolved registry contains upstream conventions too. The attribute_group,
+# metric and event filters keep only the "webitel" namespace to keep them out of
+# this package: without that, weaver generates Go for every referenced upstream
+# attribute and we ship a broken duplicate of go.opentelemetry.io/otel/semconv.
+# The sensitive filter needs no namespace check: only definitions in the webitel
+# registry carry annotations.webitel, and its policy rejects one on a ref.
+# The event filter passes the enum attributes of the same package's metrics, so
+# event.go does not declare an enum type metric.go already declares.
 templates:
   - pattern: doc.go.j2
     filter: "."
@@ -12,6 +16,12 @@ templates:
     filter: "."
     application_mode: single
     file_name: schema.go
+  - pattern: sensitive.go.j2
+    filter: >
+      {attributes: semconv_attributes({"exclude_deprecated": false})
+        | map(select(.annotations.webitel.sensitivity != null))}
+    application_mode: single
+    file_name: sensitive.go
   - pattern: attribute_group.go.j2
     filter: >
       semconv_grouped_attributes({"exclude_deprecated": true})
@@ -30,6 +40,23 @@ templates:
         })
     application_mode: each
     file_name: "{{ ctx.pkg | camel_case | lower }}conv/metric.go"
+  - pattern: event.go.j2
+    filter: >
+      semconv_metrics({"exclude_deprecated": true}) as $metrics
+      | semconv_events({"exclude_deprecated": true})
+      | map(select(.name | startswith("webitel.")))
+      | group_by(.name | split(".")[1])
+      | map((.[0].name | split(".")[1]) as $pkg
+        | [$metrics[] | select(.metric_name | startswith("webitel." + $pkg + "."))] as $own
+        | {
+            pkg: $pkg,
+            root_namespace: ("webitel." + $pkg),
+            has_metrics: ($own | length > 0),
+            metric_enums: [$own[] | .attributes[]? | select(.type | type == "object") | .name] | unique,
+            events: .
+          })
+    application_mode: each
+    file_name: "{{ ctx.pkg | camel_case | lower }}conv/event.go"
 comment_formats:
   go:
     format: markdown

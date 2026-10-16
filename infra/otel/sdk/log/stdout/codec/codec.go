@@ -114,7 +114,7 @@ func NewCodec(name string, out io.Writer, opts ...Option) Encoder {
 	codec := registry[name]
 	regedit.Unlock()
 	if codec == nil {
-		panic(errors.Errorf("otel/log/stdout.Codec( name: %q ); not registered", name))
+		return nil
 	}
 	return codec(out, opts...)
 }

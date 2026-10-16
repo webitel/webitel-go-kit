@@ -39,6 +39,7 @@ func NewCodec(out io.Writer, opts ...codec.Option) codec.Encoder {
 type record struct {
 	Timestamp         *codec.Timestamp `json:",omitempty"`
 	ObservedTimestamp *codec.Timestamp `json:",omitempty"`
+	EventName         string           `json:",omitempty"`
 	Severity          log.Severity
 	SeverityText      string
 	Body              attribute.Value
@@ -57,6 +58,7 @@ func (enc *Encoder) record(src sdk.Record) record {
 		Timestamp:         enc.opts.Timestamp(src.Timestamp()),
 		ObservedTimestamp: enc.opts.Timestamp(src.ObservedTimestamp()),
 
+		EventName:    src.EventName(),
 		Severity:     src.Severity(),
 		SeverityText: src.SeverityText(),
 		Body:         src.Body(),

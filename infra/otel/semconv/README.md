@@ -8,7 +8,7 @@ use `go.opentelemetry.io/otel/semconv` for those.
 ## Usage
 
 Each registry release is a separate package. Attributes are in the version
-package, metrics in one `<namespace>conv` package per namespace:
+package, metrics and events in one `<namespace>conv` package per namespace:
 
 ```go
 import (
@@ -19,6 +19,23 @@ import (
 semconv.WebitelHealthCheckNameKey            // webitel.health.check.name
 healthconv.NewCheckDurationObservable(meter) // webitel.health.check.duration
 ```
+
+An event is built by its constructor, with required attributes as parameters
+and optional ones as options, and logged with `pkg/logging`:
+
+```go
+log.WarnContext(ctx, "relay attempt failed",
+	logging.Ev(outboxconv.NewRelayFailedEvent("timeout",
+		outboxconv.RelayFailedWithMessagingDestinationName("orders"))))
+```
+
+The generated packages do not import `pkg/logging`: an event type satisfies
+`logging.Event` through its `EventName` and `Attributes` methods.
+
+`SensitiveAttributes` in the version package maps every attribute the registry
+marks sensitive to its class, `pii` or `secret`, for log redaction. Deprecated
+attributes stay in it. Versions generated before the marking existed have no
+such map.
 
 ## Generating
 
