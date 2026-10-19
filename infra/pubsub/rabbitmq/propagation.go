@@ -7,17 +7,15 @@ import (
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/baggage"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
 )
 
-// HeaderCarrier adapts amqp.Table to propagation.TextMapCarrier.
-type HeaderCarrier amqp.Table
+// headerCarrier adapts amqp.Table to propagation.TextMapCarrier.
+type headerCarrier amqp.Table
 
-var _ propagation.TextMapCarrier = HeaderCarrier(nil)
+var _ propagation.TextMapCarrier = headerCarrier(nil)
 
-func (c HeaderCarrier) Get(key string) string {
+func (c headerCarrier) Get(key string) string {
 	switch v := c[key].(type) {
 	case string:
 		return v
@@ -28,55 +26,54 @@ func (c HeaderCarrier) Get(key string) string {
 	}
 }
 
-func (c HeaderCarrier) Set(key, value string) {
+func (c headerCarrier) Set(key, value string) {
 	c[key] = value
 }
 
-func (c HeaderCarrier) Keys() []string {
+func (c headerCarrier) Keys() []string {
 	return slices.Collect(maps.Keys(c))
 }
 
-// publishParent returns parent context for publish span.
-// When headers carry any propagation field, they fully replace trace and baggage of ctx,
-// so captured context (e.g. outbox) never mixes with current one.
-func publishParent(ctx context.Context, headers amqp.Table) context.Context {
-	prop := otel.GetTextMapPropagator()
-
-	for _, field := range prop.Fields() {
-		if _, ok := headers[field]; ok {
-			ctx = trace.ContextWithSpanContext(ctx, trace.SpanContext{})
-			ctx = baggage.ContextWithoutBaggage(ctx)
-
-			return prop.Extract(ctx, HeaderCarrier(headers))
-		}
-	}
-
-	return ctx
-}
-
-// injectHeaders returns header map copy where propagation fields are replaced by ctx ones.
-// Copy is important to avoid modifying caller's table, which may be shared.
-// Such changes will cause map data races.
-func injectHeaders(ctx context.Context, headers amqp.Table) amqp.Table {
+// InjectHeaders returns headers with propagation fields replaced by ones from ctx.
+// Caller's table is never modified: a copy is returned when anything changes,
+// otherwise headers are returned as is. Nil headers are allowed.
+func InjectHeaders(ctx context.Context, headers amqp.Table) amqp.Table {
 	prop := otel.GetTextMapPropagator()
 
 	fields := prop.Fields()
-	if len(fields) == 0 {
+	injected := make(propagation.MapCarrier, len(fields))
+	prop.Inject(ctx, injected)
+
+	if len(injected) == 0 && !hasAnyField(headers, fields) {
 		return headers
 	}
 
-	out := make(amqp.Table, len(headers)+len(fields))
+	// alloc one new map with enough space to hold all headers and injected fields
+	// instead of populating injected with multiple small reallocations
+	out := make(amqp.Table, len(headers)+len(injected))
 	maps.Copy(out, headers)
 	// clear any propagation fields from header
 	for _, field := range fields {
 		delete(out, field)
 	}
 	// inject current ctx propagation fields
-	prop.Inject(ctx, HeaderCarrier(out))
+	for key, value := range injected {
+		out[key] = value
+	}
 
 	return out
 }
 
+func hasAnyField(headers amqp.Table, fields []string) bool {
+	for _, field := range fields {
+		if _, ok := headers[field]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
 func extractHeaders(ctx context.Context, headers amqp.Table) context.Context {
-	return otel.GetTextMapPropagator().Extract(ctx, HeaderCarrier(headers))
+	return otel.GetTextMapPropagator().Extract(ctx, headerCarrier(headers))
 }

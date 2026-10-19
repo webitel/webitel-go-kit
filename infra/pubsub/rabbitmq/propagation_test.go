@@ -22,7 +22,7 @@ const (
 )
 
 func TestHeaderCarrierGet(t *testing.T) {
-	carrier := HeaderCarrier{
+	carrier := headerCarrier{
 		"string": "value",
 		"bytes":  []byte("value"),
 		"int":    int32(7),
@@ -46,36 +46,36 @@ func TestHeaderCarrierGet(t *testing.T) {
 		})
 	}
 
-	require.Empty(t, HeaderCarrier(nil).Get("missing"))
+	require.Empty(t, headerCarrier(nil).Get("missing"))
 }
 
 func TestHeaderCarrierSetKeys(t *testing.T) {
-	carrier := HeaderCarrier{"a": int32(1)}
+	carrier := headerCarrier{"a": int32(1)}
 	carrier.Set("b", "2")
 	carrier.Set("a", "1")
 
 	require.Equal(t, "1", carrier.Get("a"))
 	require.Equal(t, "2", carrier.Get("b"))
 	require.ElementsMatch(t, []string{"a", "b"}, carrier.Keys())
-	require.Empty(t, HeaderCarrier(nil).Keys())
+	require.Empty(t, headerCarrier(nil).Keys())
 }
 
 func TestInjectHeadersNoopPropagator(t *testing.T) {
 	setPropagator(t, propagation.NewCompositeTextMapPropagator())
 
 	headers := amqp.Table{"a": "b"}
-	got := injectHeaders(testContext(t), headers)
+	got := InjectHeaders(testContext(t), headers)
 
 	require.True(t, sameTable(headers, got))
 	require.Equal(t, amqp.Table{"a": "b"}, got)
-	require.Nil(t, injectHeaders(testContext(t), nil))
+	require.Nil(t, InjectHeaders(testContext(t), nil))
 }
 
 func TestInjectHeaders(t *testing.T) {
 	setW3CPropagator(t)
 
 	headers := amqp.Table{"a": "b"}
-	got := injectHeaders(testContext(t), headers)
+	got := InjectHeaders(testContext(t), headers)
 
 	require.False(t, sameTable(headers, got))
 	require.Equal(t, amqp.Table{"a": "b"}, headers)
@@ -89,7 +89,7 @@ func TestInjectHeaders(t *testing.T) {
 func TestInjectHeadersNil(t *testing.T) {
 	setW3CPropagator(t)
 
-	got := injectHeaders(testContext(t), nil)
+	got := InjectHeaders(testContext(t), nil)
 
 	require.Equal(t, amqp.Table{
 		"traceparent": testTraceparent,
@@ -101,10 +101,23 @@ func TestInjectHeadersEmptyContext(t *testing.T) {
 	setW3CPropagator(t)
 
 	headers := amqp.Table{"a": "b"}
-	got := injectHeaders(context.Background(), headers)
+	got := InjectHeaders(context.Background(), headers)
 
+	require.True(t, sameTable(headers, got))
 	require.Equal(t, amqp.Table{"a": "b"}, got)
-	require.Equal(t, amqp.Table{"a": "b"}, headers)
+	require.Nil(t, InjectHeaders(context.Background(), nil))
+}
+
+func TestInjectHeadersEmptyContextRemovesFields(t *testing.T) {
+	setW3CPropagator(t)
+
+	headers := amqp.Table{"a": "b", "traceparent": testTraceparent, "baggage": testBaggage}
+	want := maps.Clone(headers)
+
+	got := InjectHeaders(context.Background(), headers)
+
+	require.Equal(t, want, headers)
+	require.Equal(t, amqp.Table{"a": "b"}, got)
 }
 
 func TestInjectHeadersReplacesFields(t *testing.T) {
@@ -118,7 +131,7 @@ func TestInjectHeadersReplacesFields(t *testing.T) {
 	}
 	want := maps.Clone(headers)
 
-	got := injectHeaders(testContext(t), headers)
+	got := InjectHeaders(testContext(t), headers)
 
 	require.Equal(t, want, headers)
 	require.Equal(t, amqp.Table{
@@ -128,16 +141,16 @@ func TestInjectHeadersReplacesFields(t *testing.T) {
 	}, got)
 }
 
-func TestPublishParentWithoutFields(t *testing.T) {
+func TestExtractHeadersWithoutFields(t *testing.T) {
 	setW3CPropagator(t)
 
 	ctx := testContext(t)
 
-	require.Equal(t, ctx, publishParent(ctx, nil))
-	require.Equal(t, ctx, publishParent(ctx, amqp.Table{"a": "b"}))
+	require.Equal(t, ctx, extractHeaders(ctx, nil))
+	require.Equal(t, ctx, extractHeaders(ctx, amqp.Table{"a": "b"}))
 }
 
-func TestPublishParentFromHeaders(t *testing.T) {
+func TestExtractHeadersOverContext(t *testing.T) {
 	setW3CPropagator(t)
 
 	const (
@@ -146,33 +159,42 @@ func TestPublishParentFromHeaders(t *testing.T) {
 	)
 
 	tests := []struct {
-		name      string
-		headers   amqp.Table
-		wantTrace string
-		wantSpan  string
-		wantBag   string
+		name       string
+		headers    amqp.Table
+		wantTrace  string
+		wantSpan   string
+		wantRemote bool
+		wantBag    string
 	}{
 		{
-			name:      "traceparent",
-			headers:   amqp.Table{"traceparent": "00-" + otherTraceID + "-" + otherSpanID + "-01"},
-			wantTrace: otherTraceID,
-			wantSpan:  otherSpanID,
+			name:       "traceparent",
+			headers:    amqp.Table{"traceparent": "00-" + otherTraceID + "-" + otherSpanID + "-01"},
+			wantTrace:  otherTraceID,
+			wantSpan:   otherSpanID,
+			wantRemote: true,
+			wantBag:    "7",
 		},
 		{
-			name:    "baggage",
-			headers: amqp.Table{"baggage": []byte("webitel.domain.id=9")},
-			wantBag: "9",
-		},
-		{
-			name:      "both",
-			headers:   amqp.Table{"traceparent": "00-" + otherTraceID + "-" + otherSpanID + "-01", "baggage": "webitel.domain.id=9"},
-			wantTrace: otherTraceID,
-			wantSpan:  otherSpanID,
+			name:      "baggage",
+			headers:   amqp.Table{"baggage": []byte("webitel.domain.id=9")},
+			wantTrace: testTraceID,
+			wantSpan:  testSpanID,
 			wantBag:   "9",
 		},
 		{
-			name:    "empty value",
-			headers: amqp.Table{"traceparent": ""},
+			name:       "both",
+			headers:    amqp.Table{"traceparent": "00-" + otherTraceID + "-" + otherSpanID + "-01", "baggage": "webitel.domain.id=9"},
+			wantTrace:  otherTraceID,
+			wantSpan:   otherSpanID,
+			wantRemote: true,
+			wantBag:    "9",
+		},
+		{
+			name:      "empty value",
+			headers:   amqp.Table{"traceparent": ""},
+			wantTrace: testTraceID,
+			wantSpan:  testSpanID,
+			wantBag:   "7",
 		},
 	}
 
@@ -181,16 +203,12 @@ func TestPublishParentFromHeaders(t *testing.T) {
 			parent, cancel := context.WithCancel(testContext(t))
 			defer cancel()
 
-			ctx := publishParent(parent, tt.headers)
+			ctx := extractHeaders(parent, tt.headers)
 
 			sc := trace.SpanContextFromContext(ctx)
-			if tt.wantTrace == "" {
-				require.False(t, sc.IsValid())
-			} else {
-				require.True(t, sc.IsRemote())
-				require.Equal(t, tt.wantTrace, sc.TraceID().String())
-				require.Equal(t, tt.wantSpan, sc.SpanID().String())
-			}
+			require.Equal(t, tt.wantTrace, sc.TraceID().String())
+			require.Equal(t, tt.wantSpan, sc.SpanID().String())
+			require.Equal(t, tt.wantRemote, sc.IsRemote())
 			require.Equal(t, tt.wantBag, baggage.FromContext(ctx).Member("webitel.domain.id").Value())
 
 			cancel()
@@ -240,7 +258,7 @@ func TestPropagationRoundTrip(t *testing.T) {
 	setW3CPropagator(t)
 
 	src := testContext(t)
-	ctx := extractHeaders(context.Background(), injectHeaders(src, nil))
+	ctx := extractHeaders(context.Background(), InjectHeaders(src, nil))
 
 	require.Equal(t, trace.SpanContextFromContext(src).WithRemote(true), trace.SpanContextFromContext(ctx))
 	require.Equal(t, baggage.FromContext(src).String(), baggage.FromContext(ctx).String())

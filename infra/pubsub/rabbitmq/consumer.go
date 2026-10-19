@@ -215,17 +215,35 @@ func (c *MessageConsumer) processMessage(ctx context.Context, msg amqp.Delivery)
 	if err := c.handler(processCtx, msg); err != nil {
 		failSpan(span, err)
 		c.logger.Error("message handling failed", err)
-		if err := msg.Nack(false, !msg.Redelivered); err != nil {
-			span.RecordError(err)
-			c.logger.Error("failed to Nack message", err)
+
+		settleErr := c.settle(processCtx, operationNack, msg, func() error {
+			return msg.Nack(false, !msg.Redelivered)
+		})
+		if settleErr != nil {
+			c.logger.Error("failed to Nack message", settleErr)
 		}
+
 		return
 	}
 
-	if err := msg.Ack(false); err != nil {
-		span.RecordError(err)
-		c.logger.Error("ack message", err)
+	settleErr := c.settle(processCtx, operationAck, msg, func() error {
+		return msg.Ack(false)
+	})
+	if settleErr != nil {
+		c.logger.Error("ack message", settleErr)
 	}
+}
+
+func (c *MessageConsumer) settle(ctx context.Context, operation string, msg amqp.Delivery, settle func() error) error {
+	_, span := startSettleSpan(ctx, c.tracer, operation, c.queue.Name, msg)
+	defer span.End()
+
+	err := settle()
+	if err != nil {
+		failSpan(span, err)
+	}
+
+	return err
 }
 
 func (c *MessageConsumer) Shutdown(ctx context.Context) error {

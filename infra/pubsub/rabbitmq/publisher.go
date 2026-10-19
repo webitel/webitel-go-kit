@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -148,7 +149,8 @@ func (p *MessagePublisher) Publish(
 	body []byte,
 	headers amqp.Table,
 ) (err error) {
-	ctx, span, headers := startPublishSpan(ctx, p.tracer, exchange, routingKey, body, headers)
+	messageID := uuid.NewString()
+	ctx, span, headers := startPublishSpan(ctx, p.tracer, exchange, routingKey, messageID, body, headers)
 	defer func() {
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
@@ -159,7 +161,7 @@ func (p *MessagePublisher) Publish(
 	var lastErr error
 
 	for attempt := 0; attempt < p.config.MaxRetries; attempt++ {
-		err := p.doPublish(ctx, exchange, routingKey, body, headers)
+		err := p.doPublish(ctx, exchange, routingKey, messageID, body, headers)
 		if err == nil {
 			return nil
 		}
@@ -193,6 +195,7 @@ func (p *MessagePublisher) doPublish(
 	ctx context.Context,
 	exchange string,
 	routingKey string,
+	messageID string,
 	body []byte,
 	headers amqp.Table,
 ) error {
@@ -204,6 +207,7 @@ func (p *MessagePublisher) doPublish(
 	}
 
 	msg := amqp.Publishing{
+		MessageId:   messageID,
 		ContentType: "application/json",
 		Body:        body,
 		Headers:     headers,

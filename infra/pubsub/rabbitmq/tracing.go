@@ -8,7 +8,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -19,6 +19,8 @@ const (
 
 	operationPublish = "publish"
 	operationProcess = "process"
+	operationAck     = "ack"
+	operationNack    = "nack"
 )
 
 func newTracer(tp trace.TracerProvider) trace.Tracer {
@@ -34,6 +36,7 @@ func startPublishSpan(
 	tracer trace.Tracer,
 	exchange string,
 	routingKey string,
+	messageID string,
 	body []byte,
 	headers amqp.Table,
 ) (context.Context, trace.Span, amqp.Table) {
@@ -42,6 +45,7 @@ func startPublishSpan(
 		semconv.MessagingOperationTypeSend,
 		semconv.MessagingOperationName(operationPublish),
 		semconv.MessagingDestinationName(destinationName(exchange)),
+		semconv.MessagingMessageID(messageID),
 		semconv.MessagingMessageBodySize(len(body)),
 	}
 	if routingKey != "" {
@@ -49,13 +53,13 @@ func startPublishSpan(
 	}
 
 	ctx, span := tracer.Start(
-		publishParent(ctx, headers),
+		extractHeaders(ctx, headers),
 		fmt.Sprintf("%s %s", operationPublish, destinationName(exchange)),
 		trace.WithSpanKind(trace.SpanKindProducer),
 		trace.WithAttributes(attrs...),
 	)
 
-	return ctx, span, injectHeaders(ctx, headers)
+	return ctx, span, InjectHeaders(ctx, headers)
 }
 
 // startProcessSpan starts consumer span as child of publisher span from message headers.
@@ -77,11 +81,42 @@ func startProcessSpan(
 	if msg.RoutingKey != "" {
 		attrs = append(attrs, semconv.MessagingRabbitMQDestinationRoutingKey(msg.RoutingKey))
 	}
+	if msg.MessageId != "" {
+		attrs = append(attrs, semconv.MessagingMessageID(msg.MessageId))
+	}
 
 	return tracer.Start(
 		extractHeaders(ctx, msg.Headers),
 		fmt.Sprintf("%s %s", operationProcess, queue),
 		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(attrs...),
+	)
+}
+
+// startSettleSpan starts ack/nack span as child of process span.
+func startSettleSpan(
+	ctx context.Context,
+	tracer trace.Tracer,
+	operation string,
+	queue string,
+	msg amqp.Delivery,
+) (context.Context, trace.Span) {
+	attrs := []attribute.KeyValue{
+		semconv.MessagingSystemRabbitMQ,
+		semconv.MessagingOperationTypeSettle,
+		semconv.MessagingOperationName(operation),
+		semconv.MessagingDestinationName(destinationName(msg.Exchange)),
+		semconv.MessagingDestinationSubscriptionName(queue),
+		semconv.MessagingRabbitMQMessageDeliveryTag(int(msg.DeliveryTag)),
+	}
+	if msg.MessageId != "" {
+		attrs = append(attrs, semconv.MessagingMessageID(msg.MessageId))
+	}
+
+	return tracer.Start(
+		ctx,
+		fmt.Sprintf("%s %s", operation, queue),
+		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)
 }
