@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/webitel/webitel-go-kit/infra/otel/log/bridge"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	"google.golang.org/grpc/grpclog"
 )
@@ -130,6 +131,6 @@ func (h *Handler) emit(lvl log.Severity, msg string) {
 	var rec log.Record
 	rec.SetTimestamp(time.Now())
 	rec.SetSeverity(lvl)
-	rec.SetBody(log.StringValue(msg))
+	rec.SetBody(attribute.StringValue(msg))
 	h.Logger.Emit(ctx, rec)
 }
