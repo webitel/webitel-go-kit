@@ -121,6 +121,7 @@ type record struct {
 	ObservedTimestamp *codec.Timestamp     `json:"-"`
 	Severity          log.Severity         `json:"-"`
 	SeverityText      string               `json:"level,omitempty"`
+	EventName         string               `json:"event_name,omitempty"`
 	Message           logValue             `json:"message,omitempty"`
 	TraceID           *trace.TraceID       `json:"trace_id,omitempty"`
 	TraceFlags        *trace.TraceFlags    `json:"trace_flags,omitempty"`
@@ -161,6 +162,7 @@ func (enc *Encoder) record(src sdk.Record) record {
 
 		Severity:     src.Severity(),
 		SeverityText: src.SeverityText(),
+		EventName:    src.EventName(),
 		Message:      logValue{src.Body()},
 
 		TraceID:    traceIdValue(src.TraceID()),

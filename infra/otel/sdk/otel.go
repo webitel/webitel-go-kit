@@ -14,6 +14,7 @@ import (
 	"github.com/webitel/webitel-go-kit/infra/otel/internal"
 	logv "github.com/webitel/webitel-go-kit/infra/otel/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log"
+	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/redaction"
 	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/metric"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/trace"
@@ -52,13 +53,21 @@ type ShutdownFunc func(context.Context) error
 type options struct {
 	// Logs output severity level
 	Lvl          otelog.Severity
-	Logs         []log.Option
+	LogOptions   []log.Option
 	LogsDisabled bool
 	Traces       []trace.Option
 	Metrics      []metric.Option
 	Resource     *resource.Resource
 	// RuntimeMetrics enables the standard Go runtime metric set.
 	RuntimeMetrics bool
+	// SensitiveAttributes maps attribute names to the sensitivity class,
+	// "pii" or "secret", redacted in log records.
+	SensitiveAttributes map[string]string
+	// LogsRedaction enables log redaction by SensitiveAttributes.
+	LogsRedaction bool
+	// logProcessors run before the exporter processors of LogOptions, in order:
+	// baggage copy, redaction, throttle.
+	logProcessors []sdklog.Processor
 	// option used to set[build] level[logger] for SDK internals
 	// https://pkg.go.dev/go.opentelemetry.io/otel#SetLogger
 	// https://github.com/open-telemetry/opentelemetry-go/blob/v1.29.0/internal/global/internal_logging.go#L20
@@ -153,8 +162,17 @@ func WithLogBridge(do ...func()) Option {
 func WithLogOptions(opts ...log.Option) Option {
 	return option(func(conf *options) {
 		if len(opts) > 0 {
-			conf.Logs = append(conf.Logs, opts...)
+			conf.LogOptions = append(conf.LogOptions, opts...)
 		}
+	})
+}
+
+// WithSensitiveAttributes option sets the attributes redacted in log records,
+// by name, to their sensitivity class: "pii" or "secret".
+// A nil or empty map disables log redaction.
+func WithSensitiveAttributes(classes map[string]string) Option {
+	return option(func(conf *options) {
+		conf.SensitiveAttributes = classes
 	})
 }
 
@@ -199,13 +217,13 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 	// var level slog.LevelVar
 	// level.Set(slog.LevelError + 4) // [MIN]: ERROR4, e.g. FATAL
 	conf = options{
-		Lvl:      otelog.SeverityError, // default: "error"
-		Logs:     nil,                  // noop
-		Traces:   nil,                  // noop
-		Metrics:  nil,                  // noop
-		Resource: nil,                  // resource.Environment(),
-
-		setLevel: SetLogLevel,
+		Lvl:           otelog.SeverityError, // default: "error"
+		LogOptions:    nil,                  // noop
+		Traces:        nil,                  // noop
+		Metrics:       nil,                  // noop
+		Resource:      nil,                  // resource.Environment(),
+		LogsRedaction: true,
+		setLevel:      SetLogLevel,
 	}
 	// Environment, as next defaults layer ...
 	internal.Environment.Apply(
@@ -220,7 +238,7 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 			WithLogLevel(otelog.Severity(level)).apply(&conf)
 		}),
 		internal.EnvString("LOGS_EXPORTER", func(input string) {
-			opts, disabled, err := newLogOptions(ctx, input)
+			opts, disabled, err := newLogDSNOptions(ctx, input)
 			WithLogOptions(opts...).apply(&conf)
 			if err != nil {
 				err = fmt.Errorf("invalid %s value %s: %w", "OTEL_LOGS_EXPORTER", input, err)
@@ -250,6 +268,18 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 			// WithLogOptions(
 			// 	sdklog.WithProcessor(processor),
 			// ).apply(&conf)
+		}),
+		internal.EnvString("LOGS_REDACTION", func(input string) {
+			enable, err := strconv.ParseBool(input)
+			if err != nil {
+				slog.Warn(
+					"otel: invalid OTEL_LOGS_REDACTION value, log redaction stays enabled",
+					"value", input,
+					"error", err.Error(),
+				)
+				return
+			}
+			conf.LogsRedaction = enable
 		}),
 		internal.EnvString("TRACES_EXPORTER", func(input string) {
 			opts, err := trace.NewOptions(ctx, input)
@@ -298,7 +328,7 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 	return // conf
 }
 
-func newLogOptions(ctx context.Context, input string) (opts []log.Option, disabled bool, err error) {
+func newLogDSNOptions(ctx context.Context, input string) (opts []log.Option, disabled bool, err error) {
 	var dsns []string
 	for dsn := range strings.SplitSeq(input, ",") {
 		if dsn = strings.TrimSpace(dsn); dsn != "" {
@@ -324,6 +354,16 @@ func newLogOptions(ctx context.Context, input string) (opts []log.Option, disabl
 		opts = append(opts, dsnOpts...)
 	}
 	return opts, false, errors.Join(dsnErrs...)
+}
+
+func (c *options) loggerProviderOptions(src *resource.Resource) []sdklog.LoggerProviderOption {
+	opts := make([]sdklog.LoggerProviderOption, 0, len(c.logProcessors)+len(c.LogOptions)+1)
+	for _, p := range c.logProcessors {
+		opts = append(opts, sdklog.WithProcessor(p))
+	}
+
+	opts = append(opts, c.LogOptions...)
+	return append(opts, sdklog.WithResource(src))
 }
 
 func stderrErrorHandler(err error) {
@@ -394,8 +434,8 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 		if len(setup.Metrics) > 0 {
 			setup.OnShutdown(sdkmetric.NewMeterProvider(setup.Metrics...).Shutdown)
 		}
-		if len(setup.Logs) > 0 {
-			setup.OnShutdown(sdklog.NewLoggerProvider(setup.Logs...).Shutdown)
+		if len(setup.LogOptions) > 0 {
+			setup.OnShutdown(sdklog.NewLoggerProvider(setup.LogOptions...).Shutdown)
 		}
 		// USE: otel.Handle(err)
 		return setup.Shutdown, errs
@@ -424,18 +464,21 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 	//                  logs                   //
 	// --------------------------------------- //
 
-	explicitLogs := len(setup.Logs) > 0
+	explicitLogs := len(setup.LogOptions) > 0
 	if !explicitLogs && !setup.LogsDisabled {
 		opts, err := log.NewOptions(ctx, "stdout:")
 		if err != nil {
 			otel.Handle(fmt.Errorf("otel/sdk: default logs exporter: %w", err))
 		}
-		setup.Logs = opts
+		setup.LogOptions = opts
 	}
 
-	if len(setup.Logs) > 0 && !setup.LogsDisabled {
+	if len(setup.LogOptions) > 0 && !setup.LogsDisabled {
+		if setup.LogsRedaction && len(setup.SensitiveAttributes) > 0 {
+			setup.logProcessors = append(setup.logProcessors, redaction.NewProcessor(setup.SensitiveAttributes))
+		}
 		provider := sdklog.NewLoggerProvider(
-			append(setup.Logs, sdklog.WithResource(src))...,
+			setup.loggerProviderOptions(src)...,
 		)
 		setup.OnShutdown(provider.Shutdown)
 		global.SetLoggerProvider(provider)

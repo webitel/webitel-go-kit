@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -72,7 +73,10 @@ var fileparams = map[string]func(*FileWriter, string) error{
 	},
 }
 
-func FileDSN(rawDSN string) (*FileWriter, error) {
+// FileDSN returns a FileWriter configured from rawDSN.
+// externalParams are info-only: they name DSN params handled by the caller,
+// so FileDSN skips them instead of reporting them as unknown.
+func FileDSN(rawDSN string, externalParams ...string) (*FileWriter, error) {
 	scheme, rawDSN, err := GetScheme(rawDSN)
 	if err != nil {
 		return nil, err
@@ -105,8 +109,8 @@ func FileDSN(rawDSN string) (*FileWriter, error) {
 			continue
 		}
 		cn = strings.ToLower(cn)
-		setup := fileparams[cn]
-		if setup == nil {
+		setup, ok := fileparams[cn]
+		if !ok && !slices.Contains(externalParams, cn) {
 			// unknown ;param= spec
 			slog.Default().Warn("Unknown file.param= spec", "param", cn, cn, s)
 			continue

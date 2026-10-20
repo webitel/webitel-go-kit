@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"strconv"
 
 	"github.com/mattn/go-isatty"
@@ -59,13 +60,6 @@ func (enc *Encoder) Encode(rec sdk.Record) error {
 	// 	levelText = logv.Severity(rec.Severity()).String()
 	// }
 
-	// scope := rec.InstrumentationScope()
-	// name := path.Base(scope.Name)
-
-	// buf.WriteString(name)
-	// buf.WriteByte(':')
-	// buf.WriteByte(' ')
-
 	// func (h *handler) appendLevel(buf *buffer, level slog.Level) {
 	appendLevelDelta := func(delta log.Severity) {
 		if delta == 0 {
@@ -109,6 +103,15 @@ func (enc *Encoder) Encode(rec sdk.Record) error {
 	}
 	// }
 	buf.WriteByte(' ')
+	if name := rec.InstrumentationScope().Name; name != "" {
+		buf.WriteString(path.Base(name))
+		buf.WriteString(": ")
+	}
+	if name := rec.EventName(); name != "" {
+		buf.WriteByte('[')
+		buf.WriteString(name)
+		buf.WriteString("] ")
+	}
 	enc.printValue(buf, rec.Body())
 	// body := rec.Body().String()
 	// _, err := fmt.Fprintf(state, "[%s] %v", level, body)
