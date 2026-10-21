@@ -8,6 +8,7 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -31,6 +32,7 @@ type ConsumerConfig struct {
 	MaxWorkers        int
 	ReconnectDelay    time.Duration
 	ProcessingTimeout time.Duration
+	TracerProvider    trace.TracerProvider
 }
 
 // ConsumerOption defines a function to modify ConsumerConfig.
@@ -88,6 +90,13 @@ func WithConsumerProcessingTimeout(d time.Duration) ConsumerOption {
 	}
 }
 
+// WithConsumerTracerProvider sets provider for process spans. Global provider is used when not set.
+func WithConsumerTracerProvider(tp trace.TracerProvider) ConsumerOption {
+	return func(c *ConsumerConfig) {
+		c.TracerProvider = tp
+	}
+}
+
 type MessageConsumer struct {
 	broker    *Connection
 	queue     *QueueConfig
@@ -97,6 +106,7 @@ type MessageConsumer struct {
 	cancel    context.CancelFunc
 	workerSem chan struct{}
 	logger    Logger
+	tracer    trace.Tracer
 }
 
 func NewConsumer(
@@ -113,6 +123,7 @@ func NewConsumer(
 		handler:   handler,
 		logger:    logger,
 		workerSem: make(chan struct{}, consumerCfg.MaxWorkers),
+		tracer:    newTracer(consumerCfg.TracerProvider),
 	}
 }
 
@@ -198,17 +209,41 @@ func (c *MessageConsumer) processMessage(ctx context.Context, msg amqp.Delivery)
 	processCtx, cancel := context.WithTimeout(ctx, c.consumer.ProcessingTimeout)
 	defer cancel()
 
+	processCtx, span := startProcessSpan(processCtx, c.tracer, c.queue.Name, msg)
+	defer span.End()
+
 	if err := c.handler(processCtx, msg); err != nil {
+		failSpan(span, err)
 		c.logger.Error("message handling failed", err)
-		if err := msg.Nack(false, !msg.Redelivered); err != nil {
-			c.logger.Error("failed to Nack message", err)
+
+		settleErr := c.settle(processCtx, operationNack, msg, func() error {
+			return msg.Nack(false, !msg.Redelivered)
+		})
+		if settleErr != nil {
+			c.logger.Error("failed to Nack message", settleErr)
 		}
+
 		return
 	}
 
-	if err := msg.Ack(false); err != nil {
-		c.logger.Error("ack message", err)
+	settleErr := c.settle(processCtx, operationAck, msg, func() error {
+		return msg.Ack(false)
+	})
+	if settleErr != nil {
+		c.logger.Error("ack message", settleErr)
 	}
+}
+
+func (c *MessageConsumer) settle(ctx context.Context, operation string, msg amqp.Delivery, settle func() error) error {
+	_, span := startSettleSpan(ctx, c.tracer, operation, c.queue.Name, msg)
+	defer span.End()
+
+	err := settle()
+	if err != nil {
+		failSpan(span, err)
+	}
+
+	return err
 }
 
 func (c *MessageConsumer) Shutdown(ctx context.Context) error {

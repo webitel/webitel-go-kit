@@ -7,7 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -35,6 +38,7 @@ type PublisherConfig struct {
 	Confirmation        bool
 	Persistent          bool
 	Mandatory           bool
+	TracerProvider      trace.TracerProvider
 }
 
 // PublisherOption defines a function to modify PublisherConfig.
@@ -100,6 +104,14 @@ func WithMandatory(mandatory bool) PublisherOption {
 	}
 }
 
+// WithPublisherTracerProvider sets provider for publish spans.
+// Global provider is used when not set.
+func WithPublisherTracerProvider(tp trace.TracerProvider) PublisherOption {
+	return func(c *PublisherConfig) {
+		c.TracerProvider = tp
+	}
+}
+
 type MessagePublisher struct {
 	broker    *Connection
 	config    *PublisherConfig
@@ -108,6 +120,7 @@ type MessagePublisher struct {
 	returnCh  <-chan amqp.Return
 	mu        sync.Mutex
 	logger    Logger
+	tracer    trace.Tracer
 }
 
 func NewPublisher(
@@ -119,6 +132,7 @@ func NewPublisher(
 		broker: broker,
 		config: config,
 		logger: logger,
+		tracer: newTracer(config.TracerProvider),
 	}
 
 	if err := p.ensureChannel(); err != nil && !broker.cfg.LazyConnect {
@@ -134,14 +148,25 @@ func (p *MessagePublisher) Publish(
 	routingKey string,
 	body []byte,
 	headers amqp.Table,
-) error {
+) (err error) {
+	messageID := uuid.NewString()
+	ctx, span, headers := startPublishSpan(ctx, p.tracer, exchange, routingKey, messageID, body, headers)
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
 	var lastErr error
 
 	for attempt := 0; attempt < p.config.MaxRetries; attempt++ {
-		err := p.doPublish(ctx, exchange, routingKey, body, headers)
+		err := p.doPublish(ctx, exchange, routingKey, messageID, body, headers)
 		if err == nil {
 			return nil
 		}
+
+		span.RecordError(err)
 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
@@ -170,6 +195,7 @@ func (p *MessagePublisher) doPublish(
 	ctx context.Context,
 	exchange string,
 	routingKey string,
+	messageID string,
 	body []byte,
 	headers amqp.Table,
 ) error {
@@ -181,6 +207,7 @@ func (p *MessagePublisher) doPublish(
 	}
 
 	msg := amqp.Publishing{
+		MessageId:   messageID,
 		ContentType: "application/json",
 		Body:        body,
 		Headers:     headers,
