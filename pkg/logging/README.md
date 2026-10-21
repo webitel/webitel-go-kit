@@ -28,6 +28,7 @@ log.ErrorCtx(ctx, "relay stalled",
 - `With` fields are rendered for every record, so sensitivity follows the current `redact` policy.
 - `Component` is the instrumentation scope name. Use constants only: `<service>.<subsystem>` for application code, the framework name for adapters. Default scope: the module import path.
 - The level filter is `LevelHandler` with `WithLevel` (use `*slog.LevelVar` to change it at run time). `OTEL_LOG_LEVEL` does not filter application records.
+- `Level` maps 1:1 to the OpenTelemetry severity: `Level.Severity()` and `LevelOf(log.Severity)` convert both ways, and `String()` gives the same `NAME[+N]` text (`INFO+2`).
 
 ## Startup
 

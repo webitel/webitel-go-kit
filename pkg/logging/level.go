@@ -33,6 +33,10 @@ func (l Level) Severity() log.Severity {
 	return log.Severity(l + severityOffset)
 }
 
+func LevelOf(s log.Severity) Level {
+	return Level(s) - severityOffset
+}
+
 func (l Level) String() string {
 	name := func(base string, off Level) string {
 		if off == 0 {
