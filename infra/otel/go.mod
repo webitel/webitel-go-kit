@@ -4,7 +4,6 @@ go 1.26.0
 
 require (
 	github.com/go-logr/logr v1.4.4
-	github.com/go-logr/stdr v1.2.2
 	github.com/jackc/pgx/v5 v5.9.1
 	github.com/mattn/go-isatty v0.0.20
 	github.com/pkg/errors v0.9.1
@@ -12,8 +11,7 @@ require (
 	github.com/prometheus/otlptranslator v1.0.0
 	github.com/stretchr/testify v1.12.1
 	github.com/webitel/webitel-go-kit/infra/health v0.3.0
-	github.com/webitel/webitel-go-kit/pkg/logging v0.1.0
-	go.opentelemetry.io/contrib/bridges/otelslog v0.21.0
+	github.com/webitel/webitel-go-kit/pkg/logging v0.1.1
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.72.0
 	go.opentelemetry.io/contrib/processors/baggagecopy v0.17.0
 	go.opentelemetry.io/otel v1.47.0
@@ -35,7 +33,6 @@ require (
 	go.opentelemetry.io/otel/sdk/log/logtest v0.23.0
 	go.opentelemetry.io/otel/sdk/metric v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
-	google.golang.org/grpc v1.84.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
@@ -43,6 +40,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.31.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -52,6 +50,7 @@ require (
 	github.com/prometheus/common v0.72.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/contrib/bridges/otelslog v0.21.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.1 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/net v0.59.0 // indirect
@@ -59,5 +58,6 @@ require (
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc // indirect
+	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )

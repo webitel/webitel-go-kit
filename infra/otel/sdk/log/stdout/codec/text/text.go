@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"github.com/mattn/go-isatty"
-	// logv "github.com/webitel/webitel-go-kit/infra/otel/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout/codec"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
@@ -54,11 +53,6 @@ func (enc *Encoder) Encode(rec sdk.Record) error {
 	}
 
 	levelVerb := rec.Severity()
-	// levelText := rec.SeverityText()
-	// if levelText == "" {
-	// 	// level = rec.Severity().String()
-	// 	levelText = logv.Severity(rec.Severity()).String()
-	// }
 
 	// func (h *handler) appendLevel(buf *buffer, level slog.Level) {
 	appendLevelDelta := func(delta log.Severity) {

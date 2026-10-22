@@ -8,7 +8,10 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 )
 
 var (
@@ -105,23 +108,26 @@ type MessageConsumer struct {
 	wg        sync.WaitGroup
 	cancel    context.CancelFunc
 	workerSem chan struct{}
-	logger    Logger
+	logger    *logging.Logger
 	tracer    trace.Tracer
 }
 
+// NewConsumer returns a consumer of queueCfg. A nil logger uses [logging.New].
 func NewConsumer(
 	broker *Connection,
 	queueCfg *QueueConfig,
 	consumerCfg *ConsumerConfig,
 	handler HandleFunc,
-	logger Logger,
+	logger *logging.Logger,
 ) *MessageConsumer {
 	return &MessageConsumer{
-		broker:    broker,
-		queue:     queueCfg,
-		consumer:  consumerCfg,
-		handler:   handler,
-		logger:    logger,
+		broker:   broker,
+		queue:    queueCfg,
+		consumer: consumerCfg,
+		handler:  handler,
+		logger: componentLogger(logger).With(logging.KV(
+			semconv.MessagingDestinationSubscriptionName(queueCfg.Name),
+		)),
 		workerSem: make(chan struct{}, consumerCfg.MaxWorkers),
 		tracer:    newTracer(consumerCfg.TracerProvider),
 	}
@@ -147,7 +153,7 @@ func (c *MessageConsumer) consumeLoop(ctx context.Context) {
 		default:
 			ch, err := c.broker.NewChannel(ctx)
 			if err != nil {
-				c.logger.Error("open channel", err)
+				c.logger.ErrorCtx(ctx, "open channel", logging.Err(err))
 				time.Sleep(retryDelay)
 				retryDelay = min(retryDelay*2, c.consumer.ReconnectDelay)
 				continue
@@ -157,7 +163,7 @@ func (c *MessageConsumer) consumeLoop(ctx context.Context) {
 			_ = ch.Close()
 
 			if err != nil {
-				c.logger.Error("consuming failed", err)
+				c.logger.ErrorCtx(ctx, "consuming failed", logging.Err(err))
 				time.Sleep(retryDelay)
 				retryDelay = min(retryDelay*2, c.consumer.ReconnectDelay)
 				continue
@@ -224,13 +230,13 @@ func (c *MessageConsumer) processMessage(ctx context.Context, msg amqp.Delivery)
 
 	if err := c.handler(processCtx, msg); err != nil {
 		failSpan(span, err)
-		c.logger.Error("message handling failed", err)
+		c.logger.ErrorCtx(processCtx, "message handling failed", logging.Err(err))
 
 		settleErr := c.settle(processCtx, operationNack, msg, func() error {
 			return msg.Nack(false, !msg.Redelivered)
 		})
 		if settleErr != nil {
-			c.logger.Error("failed to Nack message", settleErr)
+			c.logger.ErrorCtx(processCtx, "failed to Nack message", logging.Err(settleErr))
 		}
 
 		return
@@ -240,7 +246,7 @@ func (c *MessageConsumer) processMessage(ctx context.Context, msg amqp.Delivery)
 		return msg.Ack(false)
 	})
 	if settleErr != nil {
-		c.logger.Error("ack message", settleErr)
+		c.logger.ErrorCtx(processCtx, "ack message", logging.Err(settleErr))
 	}
 }
 
