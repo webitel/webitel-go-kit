@@ -29,19 +29,23 @@ func Register(scheme string, ctor Options) {
 	scheme = strings.TrimSpace(scheme)
 	scheme = strings.ToLower(scheme)
 	if scheme != input {
-		otel.Handle(fmt.Errorf("otel/sdk/trace.Register( scheme: %q ); invalid name", scheme))
+		otel.Handle(fmt.Errorf("otel/sdk/trace.Register( scheme: %q ); invalid name", input))
+		return
 	}
 	if scheme == "" {
 		otel.Handle(fmt.Errorf("otel/sdk/trace.Register( scheme: ? ); name required"))
+		return
 	}
 	if ctor == nil {
 		otel.Handle(fmt.Errorf("otel/sdk/trace.Register( scheme: %q ); not implemented", scheme))
+		return
 	}
 
 	regedit.Lock()
 	defer regedit.Unlock()
 	if _, exists := registry[scheme]; exists {
 		otel.Handle(fmt.Errorf("otel/sdk/trace.Register( scheme: %q ); duplicate name", scheme))
+		return
 	}
 	registry[scheme] = ctor
 }
