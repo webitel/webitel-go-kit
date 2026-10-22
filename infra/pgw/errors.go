@@ -1,6 +1,10 @@
 package pgw
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/jackc/pgx/v5/pgconn"
+)
 
 type Error interface {
 	error
@@ -10,6 +14,8 @@ type Error interface {
 type ConnectionExceptionError struct {
 	Code   string
 	Detail string
+
+	pgErr *pgconn.PgError
 }
 
 func (e *ConnectionExceptionError) Error() string {
@@ -18,11 +24,22 @@ func (e *ConnectionExceptionError) Error() string {
 
 func (e *ConnectionExceptionError) pgwError() {}
 
+func (e *ConnectionExceptionError) Unwrap() error {
+	if e.pgErr == nil { // a typed nil would look like a non-nil error to errors.As
+		return nil
+	}
+	return e.pgErr
+}
+
 type DataExceptionError struct {
-	Schema string
-	Column string
-	Table  string
-	Detail string
+	Code           string // SQLSTATE
+	ConstraintName string
+	Schema         string
+	Column         string
+	Table          string
+	Detail         string
+
+	pgErr *pgconn.PgError
 }
 
 func (e *DataExceptionError) Error() string {
@@ -30,3 +47,10 @@ func (e *DataExceptionError) Error() string {
 }
 
 func (e *DataExceptionError) pgwError() {}
+
+func (e *DataExceptionError) Unwrap() error {
+	if e.pgErr == nil {
+		return nil
+	}
+	return e.pgErr
+}

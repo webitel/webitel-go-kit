@@ -3,6 +3,7 @@ package pgw
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/webitel/webitel-go-kit/pkg/safemap"
@@ -31,16 +32,24 @@ func (e *errorsManager) ParsePgError(err error) error {
 		return nil
 	}
 
+	// already mapped: errors.As below would find the PgError behind Unwrap and map it twice
+	var mapped Error
+	if errors.As(err, &mapped) {
+		return err
+	}
+
 	var pgErr *pgconn.PgError
 	ok := errors.As(err, &pgErr)
 	if !ok {
 		return err
 	}
 
-	switch pgErr.Code {
-	case "08000", "08006":
-		// connection exceptions
+	// class 08: connection exceptions
+	if strings.HasPrefix(pgErr.Code, "08") {
 		return e.parseConnectionException(pgErr)
+	}
+
+	switch pgErr.Code {
 	case "23502":
 		// data exception: not null violation
 		return e.parseNotNullViolation(pgErr)
@@ -62,6 +71,7 @@ func (e *errorsManager) parseConnectionException(pgErr *pgconn.PgError) error {
 	return &ConnectionExceptionError{
 		Code:   pgErr.Code,
 		Detail: pgErr.Message,
+		pgErr:  pgErr,
 	}
 }
 
@@ -71,10 +81,13 @@ func (e *errorsManager) parseNotNullViolation(pgErr *pgconn.PgError) error {
 		return processor(pgErr)
 	}
 	return &DataExceptionError{
-		Schema: pgErr.SchemaName,
-		Table:  pgErr.TableName,
-		Column: pgErr.ColumnName,
-		Detail: pgErr.Message,
+		Code:           pgErr.Code,
+		ConstraintName: pgErr.ConstraintName,
+		Schema:         pgErr.SchemaName,
+		Table:          pgErr.TableName,
+		Column:         pgErr.ColumnName,
+		Detail:         pgErr.Message,
+		pgErr:          pgErr,
 	}
 }
 
@@ -84,10 +97,13 @@ func (e *errorsManager) parseForeignKeyViolation(pgErr *pgconn.PgError) error {
 		return processor(pgErr)
 	}
 	return &DataExceptionError{
-		Schema: pgErr.SchemaName,
-		Table:  pgErr.TableName,
-		Column: pgErr.ColumnName,
-		Detail: pgErr.Message,
+		Code:           pgErr.Code,
+		ConstraintName: pgErr.ConstraintName,
+		Schema:         pgErr.SchemaName,
+		Table:          pgErr.TableName,
+		Column:         pgErr.ColumnName,
+		Detail:         pgErr.Message,
+		pgErr:          pgErr,
 	}
 }
 
@@ -97,10 +113,13 @@ func (e *errorsManager) parseUniqueViolation(pgErr *pgconn.PgError) error {
 		return processor(pgErr)
 	}
 	return &DataExceptionError{
-		Schema: pgErr.SchemaName,
-		Table:  pgErr.TableName,
-		Column: pgErr.ColumnName,
-		Detail: pgErr.Message,
+		Code:           pgErr.Code,
+		ConstraintName: pgErr.ConstraintName,
+		Schema:         pgErr.SchemaName,
+		Table:          pgErr.TableName,
+		Column:         pgErr.ColumnName,
+		Detail:         pgErr.Message,
+		pgErr:          pgErr,
 	}
 }
 
@@ -110,10 +129,13 @@ func (e *errorsManager) parseCheckViolation(pgErr *pgconn.PgError) error {
 		return processor(pgErr)
 	}
 	return &DataExceptionError{
-		Schema: pgErr.SchemaName,
-		Table:  pgErr.TableName,
-		Column: pgErr.ColumnName,
-		Detail: pgErr.Message,
+		Code:           pgErr.Code,
+		ConstraintName: pgErr.ConstraintName,
+		Schema:         pgErr.SchemaName,
+		Table:          pgErr.TableName,
+		Column:         pgErr.ColumnName,
+		Detail:         pgErr.Message,
+		pgErr:          pgErr,
 	}
 }
 

@@ -18,7 +18,7 @@ manager, err := pgw.NewPoolManager(ctx,
         DSN:      "postgres://user:pass@localhost:5432/mydb",
         MaxConns: 20,
         MinConns: 2,
-        pgw.DefaultPrimaryPoolConfig.HealthCheckInterval,  // embed defaults
+        HealthCheckInterval: pgw.DefaultPrimaryPoolConfig.HealthCheckInterval,  // embed defaults
     }),
 )
 if err != nil {
@@ -140,7 +140,16 @@ manager.RegisterNotNullViolation("users", "email", func(e *pgconn.PgError) error
 })
 ```
 
-Unregistered violations and connection exceptions are wrapped in `DataExceptionError` and `ConnectionExceptionError` respectively, both implementing the `pgw.Error` interface.
+Unregistered violations and connection exceptions (any SQLSTATE `08xxx`) are wrapped in `DataExceptionError` and `ConnectionExceptionError` respectively, both implementing the `pgw.Error` interface. An already wrapped error is not wrapped again.
+
+Both unwrap to the original `*pgconn.PgError`, and `DataExceptionError` also has `Code` and `ConstraintName`. Use `errors.As`, not a type assertion:
+
+```go
+var pgErr *pgconn.PgError
+if errors.As(err, &pgErr) {
+    // pgErr.Code, pgErr.ConstraintName
+}
+```
 
 ## Tracing
 
@@ -190,4 +199,10 @@ Each pool transitions through these states, visible via `Pool.GetState()` and su
 - `Acquire`, `AcquireAllIdle`, `AcquireFunc`
 - `CopyFrom`, `SendBatch`
 
-All methods pass errors through the registered constraint processors before returning.
+All methods pass errors through the registered constraint processors before returning, including errors from `Row.Scan`, `Rows.Err`, transactions and batch results. A processor may be called more than once for the same error, so it should have no side effects.
+
+Exceptions:
+
+- `Acquire`, `AcquireAllIdle`, `Tx.Conn` and `Tx.LargeObjects` return raw pgx objects, errors of calls made through them are not mapped.
+- Callbacks of `Batch.Queue(...)` get raw pgx results, the error they return is mapped on `Close`.
+- `AcquireFunc` maps the error returned by the callback, so return it as is: a wrapped error is replaced by the mapped one.
