@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"io"
 
-	logv "github.com/webitel/webitel-go-kit/infra/otel/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout/codec"
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
@@ -181,8 +181,8 @@ func (enc *Encoder) record(src sdk.Record) record {
 		DroppedAttributes: src.DroppedAttributes(),
 	}
 
-	if out.SeverityText == "" {
-		out.SeverityText = logv.Severity(out.Severity).String()
+	if out.SeverityText == "" && out.Severity > log.SeverityUndefined {
+		out.SeverityText = logging.LevelOf(out.Severity).String()
 	}
 
 	if n := src.AttributesLen(); n > 0 {

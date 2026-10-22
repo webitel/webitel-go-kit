@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otelog "go.opentelemetry.io/otel/log"
-	"go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 
 	otelsdk "github.com/webitel/webitel-go-kit/infra/otel/sdk"
@@ -22,7 +22,7 @@ func TestConfigureDefaultLogsExporterIsStdout(t *testing.T) {
 
 	shutdown, err := otelsdk.Configure(context.Background())
 	require.NoError(t, err)
-	require.IsType(t, &sdklog.LoggerProvider{}, global.GetLoggerProvider())
+	require.IsType(t, &sdklog.LoggerProvider{}, otel.GetLoggerProvider())
 
 	emitMarker("default-exporter-marker")
 	require.NoError(t, shutdown(context.Background()))
@@ -48,13 +48,13 @@ func TestConfigureLogsExporterList(t *testing.T) {
 
 func TestConfigureLogsExporterNone(t *testing.T) {
 	t.Setenv("OTEL_LOGS_EXPORTER", "none")
-	before := global.GetLoggerProvider()
+	before := otel.GetLoggerProvider()
 
 	shutdown, err := otelsdk.Configure(context.Background())
 	require.NoError(t, err)
 	require.NoError(t, shutdown(context.Background()))
 
-	require.Same(t, before, global.GetLoggerProvider())
+	require.Same(t, before, otel.GetLoggerProvider())
 }
 
 func TestConfigureLogsExporterNoneMixed(t *testing.T) {
@@ -85,5 +85,5 @@ func emitMarker(marker string) {
 	var rec otelog.Record
 	rec.SetSeverity(otelog.SeverityInfo)
 	rec.SetBody(attribute.StringValue(marker))
-	global.GetLoggerProvider().Logger("test").Emit(context.Background(), rec)
+	otel.GetLoggerProvider().Logger("test").Emit(context.Background(), rec)
 }
