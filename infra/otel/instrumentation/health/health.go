@@ -5,10 +5,11 @@ import (
 	"errors"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/webitel/webitel-go-kit/infra/health"
-	"github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.2.0/healthconv"
+	"github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.4.0/healthconv"
 )
 
 const scopeName = "github.com/webitel/webitel-go-kit/infra/otel/instrumentation/health"
@@ -41,7 +42,7 @@ func Start(snap Snapshotter, opts ...Option) (metric.Registration, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	checkStatus, err := healthconv.NewCheckStatusObservable(meter)
 	if err != nil {
 		return nil, err
@@ -114,34 +115,36 @@ func collect(
 		}
 
 		for _, c := range snapshot.Checks {
-			group := healthconv.CheckGroupAttr(c.Group.String())
+			// Every check metric carries the same identity; the name is
+			// conditionally required, so an unnamed check has no name attribute.
+			id := []attribute.KeyValue{
+				checkStatus.AttrCheckSystem(healthconv.CheckSystemAttr(c.System)),
+				checkStatus.AttrCheckGroup(healthconv.CheckGroupAttr(c.Group.String())),
+			}
+			if c.Name != "" {
+				id = append(id, checkStatus.AttrCheckName(c.Name))
+			}
 
 			cur := checkState(c.Status)
 			for _, s := range checkStates {
-				o.ObserveInt64(checkStatus.Inst(), boolValue(s == cur), metric.WithAttributes(
-					checkStatus.AttrCheckName(c.Name),
-					checkStatus.AttrCheckGroup(group),
-					checkStatus.AttrCheckState(s),
-				))
+				o.ObserveInt64(checkStatus.Inst(), boolValue(s == cur),
+					metric.WithAttributes(id...),
+					metric.WithAttributes(checkStatus.AttrCheckState(s)),
+				)
 			}
 
-			o.ObserveInt64(transitions.Inst(), int64(c.Transitions.OK), metric.WithAttributes(
-				transitions.AttrCheckName(c.Name),
-				transitions.AttrCheckGroup(group),
-				transitions.AttrCheckState(healthconv.CheckStateOk),
-			))
+			o.ObserveInt64(transitions.Inst(), int64(c.Transitions.OK),
+				metric.WithAttributes(id...),
+				metric.WithAttributes(transitions.AttrCheckState(healthconv.CheckStateOk)),
+			)
 
-			o.ObserveInt64(transitions.Inst(), int64(c.Transitions.Fail), metric.WithAttributes(
-				transitions.AttrCheckName(c.Name),
-				transitions.AttrCheckGroup(group),
-				transitions.AttrCheckState(healthconv.CheckStateFail),
-			))
+			o.ObserveInt64(transitions.Inst(), int64(c.Transitions.Fail),
+				metric.WithAttributes(id...),
+				metric.WithAttributes(transitions.AttrCheckState(healthconv.CheckStateFail)),
+			)
 
 			if !c.LastRun.IsZero() {
-				o.ObserveFloat64(duration.Inst(), c.LastDuration.Seconds(), metric.WithAttributes(
-					duration.AttrCheckName(c.Name),
-					duration.AttrCheckGroup(group),
-				))
+				o.ObserveFloat64(duration.Inst(), c.LastDuration.Seconds(), metric.WithAttributes(id...))
 			}
 		}
 
