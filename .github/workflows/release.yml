@@ -181,7 +181,7 @@ jobs:
 
       - name: Test module
         working-directory: ${{ inputs.module }}
-        run: go test -race ./...
+        run: go test -race -short ./...
         continue-on-error: true
 
       - name: Configure git

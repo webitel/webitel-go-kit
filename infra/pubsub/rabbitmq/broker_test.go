@@ -25,6 +25,10 @@ func TestPingCanceledContext(t *testing.T) {
 }
 
 func TestPingFollowsConnection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("needs RabbitMQ on localhost:5672")
+	}
+
 	defer goleak.VerifyNone(t)
 
 	cfg := &Config{
