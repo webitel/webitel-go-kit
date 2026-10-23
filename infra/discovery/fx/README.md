@@ -1,13 +1,13 @@
 # discoveryfx
 
-Підключення service discovery до fx-застосунку. Модуль створює Consul-провайдер,
-реєструє інстанс сервісу на старті й знімає реєстрацію на зупинці. Надає
-`discovery.DiscoveryProvider` — його можна брати з графа для `GetService`, `KV`
-тощо.
+Service discovery for an fx application. The module creates the Consul provider,
+registers the service instance on start and deregisters it on stop. It provides
+`discovery.DiscoveryProvider`, which can be taken from the graph for
+`GetService`, `KV` and so on.
 
-У графі має бути `*slog.Logger`.
+The graph must contain a `*slog.Logger`.
 
-## Використання
+## Usage
 
 ```go
 import (
@@ -29,32 +29,32 @@ fx.New(
             "buildTimestamp": model.BuildTimestamp,
         },
     }),
-    // ... сервери й залежності ...
+    // ... servers and dependencies ...
     healthfx.Shutdown(),
 )
 ```
 
-`Name` обов'язковий: з нього будується ID інстансу (`discovery.GenerateInstanceID`).
-Перший ендпоінт — адреса, яку перевіряє Consul. `Timeout` для викликів Consul
-за замовчуванням `DefaultTimeout` (30 с). Окремий `fx.Invoke` для побудови
-провайдера не потрібен — модуль робить це сам.
+`Name` is required: the instance ID is built from it (`discovery.GenerateInstanceID`).
+The first endpoint is the address Consul checks. `Timeout` for Consul calls
+defaults to `DefaultTimeout` (30s). No separate `fx.Invoke` is needed to build
+the provider — the module does it itself.
 
 ## Readiness
 
-Якщо в графі є `*health.Registry` (наприклад, з `healthfx.Module`), TTL-heartbeat
-передає в Consul його вердикт через `consul.WithReadiness(h.ReadyFunc())`: поки
-вузол не готовий, check у стані `critical`. Без реєстру heartbeat завжди
-передає `passing`.
+With a `*health.Registry` in the graph (for example, from `healthfx.Module`), the
+TTL heartbeat reports its verdict to Consul through
+`consul.WithReadiness(h.ReadyFunc())`: while the node is not ready, the check is
+`critical`. Without a registry the heartbeat always reports `passing`.
 
-## Порядок зупинки
+## Shutdown order
 
-`healthfx.Shutdown()` має стояти на кореневому рівні `fx.New`, останнім. Тоді на
-зупинці спершу відбувається drain (`DrainHold`, Consul бачить `critical`), а вже
-потім `Deregister`. Позиція `discoveryfx.Module` відносно `Shutdown()` на це не
-впливає. Не загортати `healthfx.Shutdown()` у власний `fx.Module` — тоді
-`Deregister` виконається до drain.
+`healthfx.Shutdown()` goes last, at the root of `fx.New`. Then on stop the drain
+runs first (`DrainHold`, Consul sees `critical`), and `Deregister` after it. The
+position of `discoveryfx.Module` relative to `Shutdown()` does not matter. Do not
+wrap `healthfx.Shutdown()` in its own `fx.Module` — `Deregister` would then run
+before the drain.
 
-## Перевірка
+## Testing
 
 ```bash
 cd infra/discovery/fx
