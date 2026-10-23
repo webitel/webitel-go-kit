@@ -48,7 +48,7 @@ func TestModule_RequiresName(t *testing.T) {
 	app := fx.New(
 		fx.NopLogger,
 		fx.Supply(discardLogger()),
-		Module(Config{ConsulAddr: agent.addr}),
+		Module(Config{Addr: agent.addr}),
 	)
 
 	if err := app.Err(); err == nil || !strings.Contains(err.Error(), "service name is required") {
@@ -60,11 +60,11 @@ func TestModule_Lifecycle(t *testing.T) {
 	agent := newAgent(t)
 
 	cfg := Config{
-		ConsulAddr: agent.addr,
-		Name:       "im-test-service",
-		Version:    "1.2.3",
-		Endpoints:  []string{"grpc://127.0.0.1:8080"},
-		Metadata:   map[string]string{"commit": "abc"},
+		Addr:      agent.addr,
+		Name:      "im-test-service",
+		Version:   "1.2.3",
+		Endpoints: []string{"grpc://127.0.0.1:8080"},
+		Metadata:  map[string]string{"commit": "abc"},
 	}
 
 	var provider discovery.DiscoveryProvider
@@ -116,7 +116,7 @@ func TestModule_Readiness(t *testing.T) {
 
 			opts := []fx.Option{
 				fx.Supply(discardLogger()),
-				Module(Config{ConsulAddr: agent.addr, Name: "im-test-service", Endpoints: []string{"grpc://127.0.0.1:8080"}}),
+				Module(Config{Addr: agent.addr, Name: "im-test-service", Endpoints: []string{"grpc://127.0.0.1:8080"}}),
 			}
 
 			if tt.health {
@@ -167,7 +167,7 @@ func TestModule_DeregistersAfterDrain(t *testing.T) {
 			}
 
 			opts = append(opts, tt.order(
-				Module(Config{ConsulAddr: agent.addr, Name: "im-test-service", Endpoints: []string{"grpc://127.0.0.1:8080"}}),
+				Module(Config{Addr: agent.addr, Name: "im-test-service", Endpoints: []string{"grpc://127.0.0.1:8080"}}),
 				healthfx.Shutdown(),
 			)...)
 
