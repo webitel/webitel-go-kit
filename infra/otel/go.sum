@@ -52,8 +52,8 @@ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UV
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/webitel/webitel-go-kit/infra/health v0.2.0 h1:aIhAz9LCp42neoeiwq7sR56QvuUCnRudlgvwszzg9qo=
-github.com/webitel/webitel-go-kit/infra/health v0.2.0/go.mod h1:qumOZfpiFfBSIxGd3CMiEyiNKY4xNaVpUh6nlnTgoPk=
+github.com/webitel/webitel-go-kit/infra/health v0.3.0 h1:CkmPHLHAFjWYgMtsjPY2Yig8SsWTtW3EX0BeFpVWUBA=
+github.com/webitel/webitel-go-kit/infra/health v0.3.0/go.mod h1:qumOZfpiFfBSIxGd3CMiEyiNKY4xNaVpUh6nlnTgoPk=
 github.com/webitel/webitel-go-kit/pkg/logging v0.1.0 h1:v4jTtz4rMBNP0apjeJcunvLFweLEW+g71/QPO5Qm3xc=
 github.com/webitel/webitel-go-kit/pkg/logging v0.1.0/go.mod h1:pbc/NQTMSydE3VXzsYqa/WmmHnfqjPUfvQq9R4Dg5Lw=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

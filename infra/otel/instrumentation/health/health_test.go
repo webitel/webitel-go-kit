@@ -72,7 +72,7 @@ func TestCollect(t *testing.T) {
 				LastDuration: time.Millisecond, Transitions: health.Transitions{OK: 1}},
 			{System: health.SystemPostgreSQL, Group: health.GroupCritical, Status: health.StatusOK, LastRun: now,
 				LastDuration: 123 * time.Millisecond, Transitions: health.Transitions{OK: 1}},
-			{System: health.SystemPostgreSQL, Name: "whatsapp", Group: health.GroupInformational, Status: health.StatusFail,
+			{System: health.SystemPostgreSQL, Name: "standby", Group: health.GroupInformational, Status: health.StatusFail,
 				LastRun: now, LastDuration: 45 * time.Millisecond, Transitions: health.Transitions{OK: 1, Fail: 2}},
 			{System: "never-ran", Group: health.GroupCritical, Status: health.StatusUnknown},
 		},
@@ -102,11 +102,11 @@ func TestCollect(t *testing.T) {
 	require.Equal(t, map[string]int64{
 		"loop ok": 1, "loop fail": 0, "loop unknown": 0,
 		"postgresql ok": 1, "postgresql fail": 0, "postgresql unknown": 0,
-		"postgresql/whatsapp ok": 0, "postgresql/whatsapp fail": 1, "postgresql/whatsapp unknown": 0,
+		"postgresql/standby ok": 0, "postgresql/standby fail": 1, "postgresql/standby unknown": 0,
 		"never-ran ok": 0, "never-ran fail": 0, "never-ran unknown": 1,
 	}, stByNameState)
 	require.Equal(t, map[string]string{
-		"loop": "liveness", "postgresql": "critical", "postgresql/whatsapp": "informational", "never-ran": "critical",
+		"loop": "liveness", "postgresql": "critical", "postgresql/standby": "informational", "never-ran": "critical",
 	}, groupByName)
 
 	trM, ok := byName[healthconv.CheckTransitionsObservable{}.Name()].Data.(metricdata.Sum[int64])
@@ -121,7 +121,7 @@ func TestCollect(t *testing.T) {
 	require.Equal(t, map[string]int64{
 		"loop ok": 1, "loop fail": 0,
 		"postgresql ok": 1, "postgresql fail": 0,
-		"postgresql/whatsapp ok": 1, "postgresql/whatsapp fail": 2,
+		"postgresql/standby ok": 1, "postgresql/standby fail": 2,
 		"never-ran ok": 0, "never-ran fail": 0,
 	}, trByNameStatus)
 
@@ -133,7 +133,7 @@ func TestCollect(t *testing.T) {
 	}
 	require.Len(t, durByName, 3, "a never-run check has no duration series")
 	require.InDelta(t, 0.123, durByName["postgresql"], 0.0005)
-	require.InDelta(t, 0.045, durByName["postgresql/whatsapp"], 0.0005)
+	require.InDelta(t, 0.045, durByName["postgresql/standby"], 0.0005)
 }
 
 // nodeStatus returns webitel.health.status by the webitel.health.state value.
