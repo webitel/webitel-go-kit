@@ -17,9 +17,7 @@ func TestRabbitMQReconnect(t *testing.T) {
 		ConnectTimeout: time.Second,
 	}
 
-	logger := &NoopLogger{}
-
-	conn, err := NewConnection(cfg, logger)
+	conn, err := NewConnection(cfg, nil)
 	require.NoError(t, err)
 
 	for range 20 {

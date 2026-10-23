@@ -7,13 +7,9 @@ import (
 	"os"
 
 	otelsdk "github.com/webitel/webitel-go-kit/infra/otel/sdk"
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
-
-	// -------------------- bridge(s) -------------------- //
-
-	slogutil "github.com/webitel/webitel-go-kit/infra/otel/log/bridge/slog"
-	"go.opentelemetry.io/contrib/bridges/otelslog"
 
 	// -------------------- plugin(s) -------------------- //
 	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/log/otlp"
@@ -47,11 +43,7 @@ func init() {
 	}
 
 	slog.SetDefault(
-		slog.New(slog.NewTextHandler(
-			os.Stdout, &slog.HandlerOptions{
-				Level: &verbose,
-			},
-		)),
+		logging.Bootstrap(logging.WithLevel(&verbose)).Slog(),
 	)
 }
 
@@ -61,20 +53,12 @@ func main() {
 	shutdown, err := otelsdk.Configure(ctx,
 		otelsdk.WithResource(service),
 		otelsdk.WithLogBridge(func() {
-			// Just for example ...
-			// Redirect slog.Default().Handler() to
-			// otel/log/global.LoggerProvider with slog.Level filter
-			stdlog := slog.New(
-				slogutil.WithLevel(
-					// front: otelslog.Handler level filter
-					&verbose,
-					// back: otel/log/global.Logger("slog")
-					otelslog.NewHandler("slog"),
-				),
+			slog.SetDefault(
+				logging.New(
+					logging.WithComponent(logging.Component(name)),
+					logging.WithLevel(&verbose),
+				).Slog(),
 			)
-
-			slog.SetDefault(stdlog)
-
 		}),
 	)
 

@@ -145,7 +145,7 @@ func TestProcessMessageSpan(t *testing.T) {
 					return tt.handlerErr
 				},
 				workerSem: make(chan struct{}, 1),
-				logger:    &NoopLogger{},
+				logger:    componentLogger(nil),
 				tracer:    tracer,
 			}
 
