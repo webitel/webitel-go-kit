@@ -11,8 +11,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/webitel/webitel-go-kit/infra/health"
-	semconv "github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.2.0"
-	"github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.2.0/healthconv"
+	"go.opentelemetry.io/otel/attribute"
+
+	semconv "github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.4.0"
+	"github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.4.0/healthconv"
 )
 
 type fakeSnapshotter struct {
@@ -20,6 +22,23 @@ type fakeSnapshotter struct {
 }
 
 func (f fakeSnapshotter) Snapshot() health.Snapshot { return f.snap }
+
+// checkKey rebuilds the registry key from a data point: system, or system/name.
+// It fails the test when the system is missing or the name is present but empty.
+func checkKey(t *testing.T, set attribute.Set) string {
+	t.Helper()
+
+	system, ok := set.Value(semconv.WebitelHealthCheckSystemKey)
+	require.True(t, ok, "data point without %s", semconv.WebitelHealthCheckSystemKey)
+
+	name, ok := set.Value(semconv.WebitelHealthCheckNameKey)
+	if !ok {
+		return system.AsString()
+	}
+	require.NotEmpty(t, name.AsString(), "%s present but empty", semconv.WebitelHealthCheckNameKey)
+
+	return system.AsString() + "/" + name.AsString()
+}
 
 // collectScope runs one collection and returns this package's metrics by name.
 func collectScope(t *testing.T, reader *sdkmetric.ManualReader) map[string]metricdata.Metrics {
@@ -49,13 +68,13 @@ func TestCollect(t *testing.T) {
 	snap := fakeSnapshotter{snap: health.Snapshot{
 		State: health.StateDegraded,
 		Checks: []health.CheckResult{
-			{Name: "loop", Group: health.GroupLiveness, Status: health.StatusOK, LastRun: now,
+			{System: "loop", Group: health.GroupLiveness, Status: health.StatusOK, LastRun: now,
 				LastDuration: time.Millisecond, Transitions: health.Transitions{OK: 1}},
-			{Name: "postgres", Group: health.GroupCritical, Status: health.StatusOK, LastRun: now,
+			{System: health.SystemPostgreSQL, Group: health.GroupCritical, Status: health.StatusOK, LastRun: now,
 				LastDuration: 123 * time.Millisecond, Transitions: health.Transitions{OK: 1}},
-			{Name: "cache", Group: health.GroupInformational, Status: health.StatusFail, LastRun: now,
-				LastDuration: 45 * time.Millisecond, Transitions: health.Transitions{OK: 1, Fail: 2}},
-			{Name: "never-ran", Group: health.GroupCritical, Status: health.StatusUnknown},
+			{System: health.SystemPostgreSQL, Name: "whatsapp", Group: health.GroupInformational, Status: health.StatusFail,
+				LastRun: now, LastDuration: 45 * time.Millisecond, Transitions: health.Transitions{OK: 1, Fail: 2}},
+			{System: "never-ran", Group: health.GroupCritical, Status: health.StatusUnknown},
 		},
 	}}
 
@@ -74,20 +93,20 @@ func TestCollect(t *testing.T) {
 	stByNameState := map[string]int64{}
 	groupByName := map[string]string{}
 	for _, dp := range stM.DataPoints {
-		name, _ := dp.Attributes.Value(semconv.WebitelHealthCheckNameKey)
+		key := checkKey(t, dp.Attributes)
 		group, _ := dp.Attributes.Value(semconv.WebitelHealthCheckGroupKey)
 		state, _ := dp.Attributes.Value(semconv.WebitelHealthCheckStateKey)
-		stByNameState[name.AsString()+"/"+state.AsString()] = dp.Value
-		groupByName[name.AsString()] = group.AsString()
+		stByNameState[key+" "+state.AsString()] = dp.Value
+		groupByName[key] = group.AsString()
 	}
 	require.Equal(t, map[string]int64{
-		"loop/ok": 1, "loop/fail": 0, "loop/unknown": 0,
-		"postgres/ok": 1, "postgres/fail": 0, "postgres/unknown": 0,
-		"cache/ok": 0, "cache/fail": 1, "cache/unknown": 0,
-		"never-ran/ok": 0, "never-ran/fail": 0, "never-ran/unknown": 1,
+		"loop ok": 1, "loop fail": 0, "loop unknown": 0,
+		"postgresql ok": 1, "postgresql fail": 0, "postgresql unknown": 0,
+		"postgresql/whatsapp ok": 0, "postgresql/whatsapp fail": 1, "postgresql/whatsapp unknown": 0,
+		"never-ran ok": 0, "never-ran fail": 0, "never-ran unknown": 1,
 	}, stByNameState)
 	require.Equal(t, map[string]string{
-		"loop": "liveness", "postgres": "critical", "cache": "informational", "never-ran": "critical",
+		"loop": "liveness", "postgresql": "critical", "postgresql/whatsapp": "informational", "never-ran": "critical",
 	}, groupByName)
 
 	trM, ok := byName[healthconv.CheckTransitionsObservable{}.Name()].Data.(metricdata.Sum[int64])
@@ -96,27 +115,25 @@ func TestCollect(t *testing.T) {
 	require.Equal(t, metricdata.CumulativeTemporality, trM.Temporality)
 	trByNameStatus := map[string]int64{}
 	for _, dp := range trM.DataPoints {
-		name, _ := dp.Attributes.Value(semconv.WebitelHealthCheckNameKey)
 		state, _ := dp.Attributes.Value(semconv.WebitelHealthCheckStateKey)
-		trByNameStatus[name.AsString()+"/"+state.AsString()] = dp.Value
+		trByNameStatus[checkKey(t, dp.Attributes)+" "+state.AsString()] = dp.Value
 	}
 	require.Equal(t, map[string]int64{
-		"loop/ok": 1, "loop/fail": 0,
-		"postgres/ok": 1, "postgres/fail": 0,
-		"cache/ok": 1, "cache/fail": 2,
-		"never-ran/ok": 0, "never-ran/fail": 0,
+		"loop ok": 1, "loop fail": 0,
+		"postgresql ok": 1, "postgresql fail": 0,
+		"postgresql/whatsapp ok": 1, "postgresql/whatsapp fail": 2,
+		"never-ran ok": 0, "never-ran fail": 0,
 	}, trByNameStatus)
 
 	durM, ok := byName[healthconv.CheckDurationObservable{}.Name()].Data.(metricdata.Gauge[float64])
 	require.True(t, ok)
 	durByName := map[string]float64{}
 	for _, dp := range durM.DataPoints {
-		name, _ := dp.Attributes.Value(semconv.WebitelHealthCheckNameKey)
-		durByName[name.AsString()] = dp.Value
+		durByName[checkKey(t, dp.Attributes)] = dp.Value
 	}
 	require.Len(t, durByName, 3, "a never-run check has no duration series")
-	require.InDelta(t, 0.123, durByName["postgres"], 0.0005)
-	require.InDelta(t, 0.045, durByName["cache"], 0.0005)
+	require.InDelta(t, 0.123, durByName["postgresql"], 0.0005)
+	require.InDelta(t, 0.045, durByName["postgresql/whatsapp"], 0.0005)
 }
 
 // nodeStatus returns webitel.health.status by the webitel.health.state value.
