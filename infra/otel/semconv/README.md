@@ -12,8 +12,8 @@ package, metrics and events in one `<namespace>conv` package per namespace:
 
 ```go
 import (
-	semconv "github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.3.0"
-	"github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.3.0/healthconv"
+	semconv "github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.4.0"
+	"github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.4.0/healthconv"
 )
 
 semconv.WebitelHealthCheckNameKey            // webitel.health.check.name
@@ -40,7 +40,7 @@ such map.
 ## Generating
 
 ```sh
-make generate TAG=v0.3.0
+make generate TAG=v0.4.0
 ```
 
 ### Unreleased conventions
