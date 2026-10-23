@@ -16,6 +16,7 @@ import (
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/redaction"
 	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout"
+	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/throttle"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/metric"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/trace"
 	"github.com/webitel/webitel-go-kit/pkg/logging"
@@ -65,8 +66,10 @@ type options struct {
 	SensitiveAttributes map[string]string
 	// LogsRedaction enables log redaction by SensitiveAttributes.
 	LogsRedaction bool
+	// LogsThrottle limits repeated log records; nil disables it.
+	LogsThrottle *throttle.Config
 	// logProcessors run before the exporter processors of LogOptions, in order:
-	// baggage copy, redaction, throttle.
+	// baggage copy, redaction.
 	logProcessors []sdklog.Processor
 	// option used to bridge third-party logger(s)
 	setBridge     []func()
@@ -158,6 +161,15 @@ func WithSensitiveAttributes(classes map[string]string) Option {
 	})
 }
 
+// WithLogThrottle option sets the quota of repeated log records, see
+// [throttle.LoggerProvider]. A nil config disables throttling.
+// Default is [throttle.DefaultConfig].
+func WithLogThrottle(cfg *throttle.Config) Option {
+	return option(func(conf *options) {
+		conf.LogsThrottle = cfg
+	})
+}
+
 func WithTraceOptions(opts ...trace.Option) Option {
 	return option(func(conf *options) {
 		if len(opts) > 0 {
@@ -205,6 +217,7 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 		Metrics:       nil,                  // noop
 		Resource:      nil,                  // resource.Environment(),
 		LogsRedaction: true,
+		LogsThrottle:  new(throttle.DefaultConfig()),
 	}
 	// Environment, as next defaults layer ...
 	internal.Environment.Apply(
@@ -261,6 +274,18 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 				return
 			}
 			conf.LogsRedaction = enable
+		}),
+		internal.EnvString("LOGS_THROTTLE", func(input string) {
+			cfg, err := throttle.ParseConfig(input)
+			if err != nil {
+				slog.Warn(
+					"otel: invalid OTEL_LOGS_THROTTLE value, default log throttling stays enabled",
+					"value", input,
+					"error", err.Error(),
+				)
+				return
+			}
+			conf.LogsThrottle = cfg
 		}),
 		internal.EnvString("TRACES_EXPORTER", func(input string) {
 			opts, err := trace.NewOptions(ctx, input)
@@ -466,7 +491,12 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 			setup.loggerProviderOptions(src)...,
 		)
 		setup.OnShutdown(provider.Shutdown)
-		otel.SetLoggerProvider(provider)
+
+		var lp otelog.LoggerProvider = provider
+		if setup.LogsThrottle != nil {
+			lp = throttle.NewLoggerProvider(provider, *setup.LogsThrottle)
+		}
+		otel.SetLoggerProvider(lp)
 
 		if explicitLogs {
 			// TODO: redirect (bridge) internal logger(s)

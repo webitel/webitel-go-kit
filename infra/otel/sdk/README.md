@@ -36,6 +36,9 @@
 | [Log Redaction](#log-redaction)||||
 |`OTEL_LOGS_REDACTION`|Redact sensitive log record attributes by name|`true`|Webitel-local. Boolean value; `false`/`FALSE`/`f`/`0` disable, anything else that is not a boolean logs a warning and leaves redaction enabled. Has no effect while the sensitive attributes map is empty. Either this variable or `WithSensitiveAttributes(nil)` in code disables redaction. See [Log redaction](#log-redaction).|
 |||||
+| [Log Throttling](#log-throttling)||||
+|`OTEL_LOGS_THROTTLE`|Quota of repeated log records|`window=1m,first=100,every=100,keys=10000`|Webitel-local. `off`, `on`, or comma-separated `name=value` fields over the default: `window` (Go duration), `first`, `every`, `keys` (positive integers). An invalid value logs a warning and keeps the default. `WithLogThrottle(nil)` in code disables throttling. See [Log throttling](#log-throttling).|
+|||||
 |[Batch LogRecord Processor](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#batch-logrecord-processor)||||
 |`OTEL_BLRP_SCHEDULE_DELAY`|Delay interval (in milliseconds) between two consecutive exports|`1000`||
 |`OTEL_BLRP_EXPORT_TIMEOUT`|Maximum allowed time (in milliseconds) to export data|`30000`||
@@ -138,6 +141,33 @@ in baggage, never logins, names or email addresses.
 
 Only records emitted with the request context get the attributes. Spans do not
 get them; a span is found through the trace ID of the record.
+
+## Log throttling
+
+`Configure` wraps the logger provider in `throttle.LoggerProvider`, so a
+service in a retry loop cannot flood the exporters. Records with the same key
+share a quota: the first `first` records of a window pass, then every
+`every`-th. The key is the scope name, severity, event name, body, and the
+`webitel.domain.id` baggage member, so one tenant cannot suppress the records
+of another. Keep messages constant and put the data in fields: a message that
+varies makes a new key for every record.
+
+A passed record that follows suppressed records carries their number in the
+`webitel.log.suppressed` attribute. Records suppressed after the last passed
+record of a window are not reported. At most `keys` keys are tracked in one
+window; records with new keys above that pass unthrottled, and one error goes
+to the OpenTelemetry error handler.
+
+The wrapper sits in front of the SDK because a log record processor cannot drop
+a record for the processors after it. It runs before correlation and redaction,
+and reads the tenant from the emit context. `Enabled` is not throttled.
+
+A service with its own provider can reuse it:
+
+```go
+lp := throttle.NewLoggerProvider(provider, throttle.DefaultConfig())
+log := logging.New(logging.WithProvider(lp))
+```
 
 Try an [example](https://github.com/webitel/webitel-go-kit/blob/features/otel/otel/example)
 
