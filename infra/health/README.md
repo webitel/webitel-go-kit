@@ -56,7 +56,19 @@ Staleness is applied when a result is read, never stored: a stale check reads
 `unknown` but `Transitions` does not move. The counter answers "how often did
 the verdict flip", not "is this check healthy now" — `Status` answers that.
 
-`infra/otel/instrumentation/health` exports these as OpenTelemetry metrics.
+`infra/otel/instrumentation/health` exports these as OpenTelemetry metrics. Its
+transport registers them when the registry starts and unregisters them when it
+stops, before the DrainHold wait:
+
+```go
+import otelhealth "github.com/webitel/webitel-go-kit/infra/otel/instrumentation/health"
+
+h := health.New(health.DefaultConfig(), log,
+    health.WithTransport(otelhealth.NewTransport()),
+)
+```
+
+With fx, pass it to the module: `healthfx.Module(cfg, health.WithTransport(otelhealth.NewTransport()))`.
 
 ## Quick start
 
