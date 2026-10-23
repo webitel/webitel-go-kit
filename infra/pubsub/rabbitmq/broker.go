@@ -276,6 +276,14 @@ func (b *Connection) Channel(ctx context.Context) (*amqp091.Channel, error) {
 	}
 }
 
+// Ping reports whether the connection and its channel are open. It reads the
+// cached state and does not dial, so it fits a health check.
+func (b *Connection) Ping(ctx context.Context) error {
+	_, err := b.Channel(ctx)
+
+	return err
+}
+
 func (b *Connection) DeclareExchange(ctx context.Context, cfg *ExchangeConfig) error {
 	return b.declare(ctx, "exchange "+cfg.Name, func(ch *amqp091.Channel) error {
 		if err := ch.ExchangeDeclare(
