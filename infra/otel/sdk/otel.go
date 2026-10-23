@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/webitel/webitel-go-kit/infra/otel/correlation"
 	"github.com/webitel/webitel-go-kit/infra/otel/internal"
 	logv "github.com/webitel/webitel-go-kit/infra/otel/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log"
@@ -474,6 +475,7 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 	}
 
 	if len(setup.LogOptions) > 0 && !setup.LogsDisabled {
+		setup.logProcessors = append(setup.logProcessors, correlation.NewLogProcessor())
 		if setup.LogsRedaction && len(setup.SensitiveAttributes) > 0 {
 			setup.logProcessors = append(setup.logProcessors, redaction.NewProcessor(setup.SensitiveAttributes))
 		}

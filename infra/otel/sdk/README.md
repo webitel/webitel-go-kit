@@ -115,6 +115,30 @@ map is empty and nothing is redacted unless a map is passed. A nil or empty
 map, or `OTEL_LOGS_REDACTION=false`, disables redaction, and the processor is
 not registered. Without redaction, only fields marked in code are protected.
 
+## Log correlation
+
+`Configure` registers a log record processor, before redaction, that copies
+W3C baggage members of the emit context into record attributes: every member
+whose key starts with `webitel.`, such as `webitel.domain.id`, and the allowed
+upstream keys, such as `user.id`. Other baggage members are not copied.
+Redaction runs after the copy, so sensitive `webitel.` attributes from baggage
+are redacted too.
+
+A service that has a verified authorization context sets them with
+`correlation.WithIdentity`; the propagators carry them to downstream services:
+
+```go
+ctx = correlation.WithIdentity(ctx, session.DomainId, session.UserId)
+```
+
+Baggage is an ordinary request header. A service reachable from outside drops
+the inbound baggage (`baggage.ContextWithoutBaggage`) before it sets the
+identity, so a client cannot choose the IDs logged for it. Put only opaque IDs
+in baggage, never logins, names or email addresses.
+
+Only records emitted with the request context get the attributes. Spans do not
+get them; a span is found through the trace ID of the record.
+
 Try an [example](https://github.com/webitel/webitel-go-kit/blob/features/otel/otel/example)
 
 ```sh
