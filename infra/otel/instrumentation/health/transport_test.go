@@ -45,24 +45,61 @@ func TestTransportFollowsRegistry(t *testing.T) {
 	require.Empty(t, collectScope(t, reader), "metrics still registered after Stop")
 }
 
-func TestTransportStopNeverStarted(t *testing.T) {
-	require.NoError(t, NewTransport().Stop(context.Background()))
+func TestTransportLifecycle(t *testing.T) {
+	type step struct {
+		start   bool // Start, otherwise Stop
+		wantErr bool
+		metrics bool // metrics registered after the step
+	}
 
-	var nilTransport *Transport
-	require.NoError(t, nilTransport.Start(context.Background(), nil))
-	require.NoError(t, nilTransport.Stop(context.Background()))
-}
+	var (
+		start      = step{start: true, metrics: true}
+		startAgain = step{start: true, wantErr: true, metrics: true}
+		stop       = step{}
+	)
 
-func TestTransportStartTwice(t *testing.T) {
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
-	t.Cleanup(func() { require.NoError(t, mp.Shutdown(context.Background())) })
+	tests := []struct {
+		name         string
+		nilTransport bool
+		steps        []step
+	}{
+		{name: "stop never started", steps: []step{stop}},
+		{name: "start then stop", steps: []step{start, stop}},
+		{name: "start twice", steps: []step{start, startAgain, stop}},
+		{name: "stop twice", steps: []step{start, stop, stop}},
+		{name: "start after stop", steps: []step{start, stop, start, stop}},
+		{name: "nil transport", nilTransport: true, steps: []step{{start: true}, stop}},
+	}
 
-	reg := health.New(health.DefaultConfig(), nil)
-	tr := NewTransport(WithMeterProvider(mp))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := sdkmetric.NewManualReader()
+			mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			t.Cleanup(func() { require.NoError(t, mp.Shutdown(context.Background())) })
 
-	require.NoError(t, tr.Start(context.Background(), reg))
-	require.Error(t, tr.Start(context.Background(), reg))
+			reg := health.New(health.DefaultConfig(), nil)
 
-	require.NoError(t, tr.Stop(context.Background()))
-	require.NoError(t, tr.Stop(context.Background()))
+			tr := NewTransport(WithMeterProvider(mp))
+			if tt.nilTransport {
+				tr = nil
+			}
+
+			for i, s := range tt.steps {
+				var err error
+				if s.start {
+					err = tr.Start(context.Background(), reg)
+				} else {
+					err = tr.Stop(context.Background())
+				}
+
+				if s.wantErr {
+					require.Error(t, err, "step %d", i)
+				} else {
+					require.NoError(t, err, "step %d", i)
+				}
+
+				require.Equal(t, s.metrics, len(collectScope(t, reader)) > 0, "metrics registered after step %d", i)
+			}
+		})
+	}
 }
