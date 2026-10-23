@@ -10,7 +10,7 @@ import (
 // Snapshot is one consistent view of the registry, taken under a single lock.
 type Snapshot struct {
 	State          State         // verdict over liveness and critical; informational only degrades
-	Checks         []CheckResult // sorted by name; Err is for logs, never for bodies
+	Checks         []CheckResult // sorted by Key(); Err is for logs, never for bodies
 	SchedulerAlive bool          // the scheduler itself is still turning
 	Draining       bool          // Drain was called; one-way
 	Time           time.Time     // the single now used for staleness, grace, and this stamp
@@ -54,7 +54,7 @@ func (r *Registry) ReadyFunc() func() (bool, error) {
 	}
 }
 
-// readyErr builds the verdict error from state tokens and check names only.
+// readyErr builds the verdict error from state tokens and check keys only.
 func readyErr(s Snapshot) error {
 	if s.State == StateStopping {
 		return errors.New("health: stopping: shutting down")
@@ -69,10 +69,10 @@ func readyErr(s Snapshot) error {
 			continue
 		}
 		if c.Status == StatusFail {
-			failing = append(failing, c.Name)
+			failing = append(failing, c.Key())
 		}
 		if c.Status == StatusUnknown {
-			unknown = append(unknown, c.Name)
+			unknown = append(unknown, c.Key())
 		}
 	}
 

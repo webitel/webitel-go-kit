@@ -92,9 +92,9 @@ func start(t *testing.T, cfg Config) *Registry {
 	return reg
 }
 
-func find(reg *Registry, name string) CheckResult {
+func find(reg *Registry, key string) CheckResult {
 	for _, res := range reg.results() {
-		if res.Name == name {
+		if res.Key() == key {
 			return res
 		}
 	}
@@ -442,23 +442,27 @@ func TestStopOnNeverStartedRegistrySkipsTheDrainHold(t *testing.T) {
 	}
 }
 
-func TestDuplicateNameIsIgnoredNotReplaced(t *testing.T) {
-	reg := New(testConfig(), nil)
-	reg.Critical("db", func(context.Context) error { return nil })
-	reg.Informational("db", func(context.Context) error { return nil })
+func TestDuplicateKeyIsIgnoredNotReplaced(t *testing.T) {
+	for _, name := range []string{"", "replica"} {
+		reg := New(testConfig(), nil)
+		reg.Critical("db", func(context.Context) error { return nil }, WithName(name))
+		reg.Informational("db", func(context.Context) error { return nil }, WithName(name))
 
-	results := reg.results()
-	if len(results) != 1 {
-		t.Fatalf("got %d checks, want 1", len(results))
-	}
-	if results[0].Group != GroupCritical {
-		t.Fatalf("the duplicate replaced the original: group is %s", results[0].Group)
+		results := reg.results()
+		if len(results) != 1 {
+			t.Fatalf("name %q: got %d checks, want 1", name, len(results))
+		}
+		if results[0].Group != GroupCritical {
+			t.Fatalf("name %q: the duplicate replaced the original: group is %s", name, results[0].Group)
+		}
 	}
 }
 
 func TestUnusableRegistrationsAreIgnored(t *testing.T) {
 	reg := New(testConfig(), nil)
 	reg.Critical("", func(context.Context) error { return nil })
+	reg.Critical("", func(context.Context) error { return nil }, WithName("orphan"))
+	reg.Critical("a/b", func(context.Context) error { return nil })
 	reg.Critical("nil-fn", nil)
 
 	if got := len(reg.results()); got != 0 {

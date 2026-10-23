@@ -198,7 +198,7 @@ func TestRaceRegistryChurnsWhileTheNotifierRuns(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
-			reg.Informational("late"+strconv.Itoa(i), func(context.Context) error { return nil })
+			reg.Informational(health.System("late"+strconv.Itoa(i)), func(context.Context) error { return nil })
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -262,7 +262,7 @@ func TestNoReadyWithOnlyInformationalChecks(t *testing.T) {
 	// for a critical check too — proving nothing about the informational rule.
 	waitFor(t, "the informational check to pass", func() bool {
 		for _, c := range reg.Snapshot().Checks {
-			if c.Name == "rabbit" && c.Status == health.StatusOK {
+			if c.Key() == "rabbit" && c.Status == health.StatusOK {
 				return true
 			}
 		}

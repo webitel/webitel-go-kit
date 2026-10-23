@@ -94,7 +94,8 @@ func (s State) Ready() bool {
 // CheckResult is one check's state when a snapshot was taken. Err is non-nil
 // whenever Status is not StatusOK, and is for logs only.
 type CheckResult struct {
-	Name    string
+	System  System
+	Name    string // empty unless registered WithName
 	Group   Group
 	Status  Status
 	Since   time.Time // when Status last changed
@@ -113,11 +114,16 @@ type Transitions struct {
 	Fail uint64
 }
 
+// Key is System, or System/Name when the check has a name.
+func (c CheckResult) Key() string { return checkKey(c.System, c.Name) }
+
 // checkState is guarded by the registry's mutex.
 type checkState struct {
-	name  string
-	group Group
-	fn    Check
+	system System
+	name   string
+	key    string
+	group  Group
+	fn     Check
 
 	status       Status
 	since        time.Time
@@ -172,6 +178,7 @@ func (cs *checkState) set(status Status, now time.Time) {
 // result reads the check's state, applying staleness at read time.
 func (cs *checkState) result(now time.Time, cfg Config) CheckResult {
 	res := CheckResult{
+		System:       cs.system,
 		Name:         cs.name,
 		Group:        cs.group,
 		Status:       cs.status,
@@ -185,11 +192,11 @@ func (cs *checkState) result(now time.Time, cfg Config) CheckResult {
 	switch {
 	case !cs.ran:
 		res.Status = StatusUnknown
-		res.Err = fmt.Errorf("check %q has not completed a run yet", cs.name)
+		res.Err = fmt.Errorf("check %q has not completed a run yet", cs.key)
 	case now.Sub(cs.lastRun) > cfg.StaleAfter:
 		res.Status = StatusUnknown
 		res.Err = fmt.Errorf("check %q is stale: last run %s ago",
-			cs.name, now.Sub(cs.lastRun).Round(time.Millisecond))
+			cs.key, now.Sub(cs.lastRun).Round(time.Millisecond))
 	}
 
 	return res

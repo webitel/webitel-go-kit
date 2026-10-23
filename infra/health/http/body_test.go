@@ -41,21 +41,23 @@ func TestHealthzGolden(t *testing.T) {
 			snap: health.Snapshot{
 				State: health.StateDegraded,
 				Checks: []health.CheckResult{
-					{Name: "grpc", Group: health.GroupCritical, Status: health.StatusOK,
+					{System: health.SystemGRPC, Group: health.GroupCritical, Status: health.StatusOK,
 						Since: rfc3339(t, "2026-08-08T07:04:11Z")},
-					{Name: "postgres", Group: health.GroupInformational, Status: health.StatusFail,
+					{System: health.SystemPostgreSQL, Group: health.GroupInformational, Status: health.StatusOK,
+						Since: rfc3339(t, "2026-08-08T07:05:30Z")},
+					{System: health.SystemPostgreSQL, Name: "standby", Group: health.GroupInformational, Status: health.StatusFail,
 						Since: rfc3339(t, "2026-08-08T07:07:52Z")},
 				},
 			},
-			want: `{"status":"degraded","checks":[{"name":"grpc","group":"critical","status":"ok","since":"2026-08-08T07:04:11Z"},{"name":"postgres","group":"informational","status":"fail","since":"2026-08-08T07:07:52Z"}]}`,
+			want: `{"status":"degraded","checks":[{"system":"grpc","group":"critical","status":"ok","since":"2026-08-08T07:04:11Z"},{"system":"postgresql","group":"informational","status":"ok","since":"2026-08-08T07:05:30Z"},{"system":"postgresql","name":"standby","group":"informational","status":"fail","since":"2026-08-08T07:07:52Z"}]}`,
 		},
 		{
 			name: "cold start, never run",
 			snap: health.Snapshot{
 				State:  health.StateUnknown,
-				Checks: []health.CheckResult{{Name: "grpc", Group: health.GroupCritical, Status: health.StatusUnknown}},
+				Checks: []health.CheckResult{{System: health.SystemGRPC, Group: health.GroupCritical, Status: health.StatusUnknown}},
 			},
-			want: `{"status":"unknown","checks":[{"name":"grpc","group":"critical","status":"unknown"}]}`,
+			want: `{"status":"unknown","checks":[{"system":"grpc","group":"critical","status":"unknown"}]}`,
 		},
 		{
 			name: "empty registry",
@@ -88,7 +90,7 @@ func TestHealthzEmptyChecks(t *testing.T) {
 }
 
 func TestSinceOmitted(t *testing.T) {
-	zero := detail(health.Snapshot{Checks: []health.CheckResult{{Name: "grpc"}}})
+	zero := detail(health.Snapshot{Checks: []health.CheckResult{{System: health.SystemGRPC}}})
 	if zero.Checks[0].Since != "" {
 		t.Fatalf("since = %q, want it omitted for a zero timestamp", zero.Checks[0].Since)
 	}
@@ -103,7 +105,7 @@ func TestSinceOmitted(t *testing.T) {
 
 	// Nanoseconds and a non-UTC zone both have to be normalised away.
 	local := time.Date(2026, 8, 8, 10, 4, 11, 123456789, time.FixedZone("EEST", 3*60*60))
-	set := detail(health.Snapshot{Checks: []health.CheckResult{{Name: "grpc", Since: local}}})
+	set := detail(health.Snapshot{Checks: []health.CheckResult{{System: health.SystemGRPC, Since: local}}})
 	if got := set.Checks[0].Since; got != "2026-08-08T07:04:11Z" {
 		t.Fatalf("since = %q, want 2026-08-08T07:04:11Z", got)
 	}
@@ -115,7 +117,7 @@ func TestHealthzSorted(t *testing.T) {
 	// cannot silently break the contract at the transport boundary.
 	reg := newTestRegistry(t, fastConfig())
 	for _, name := range []string{"zulu", "alpha", "mike"} {
-		reg.Critical(name, func(context.Context) error { return nil })
+		reg.Critical(health.System(name), func(context.Context) error { return nil })
 	}
 	waitState(t, reg, health.StateReady)
 
@@ -126,8 +128,8 @@ func TestHealthzSorted(t *testing.T) {
 	}
 
 	for i, want := range []string{"alpha", "mike", "zulu"} {
-		if body.Checks[i].Name != want {
-			t.Fatalf("checks[%d] = %q, want %q", i, body.Checks[i].Name, want)
+		if body.Checks[i].System != want {
+			t.Fatalf("checks[%d] = %q, want %q", i, body.Checks[i].System, want)
 		}
 	}
 }
@@ -183,7 +185,7 @@ func TestNoErrorTextLeaks(t *testing.T) {
 	// Without this the whole test could pass vacuously on a healthy registry.
 	for _, c := range reg.Snapshot().Checks {
 		if c.Status != health.StatusFail {
-			t.Fatalf("check %q is %s, want %s", c.Name, c.Status, health.NameFail)
+			t.Fatalf("check %q is %s, want %s", c.Key(), c.Status, health.NameFail)
 		}
 	}
 

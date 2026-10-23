@@ -275,7 +275,7 @@ func TestRaceHandlerUnderLoadWhileRegistryChurns(t *testing.T) {
 
 	// Churn the registry underneath the readers.
 	for i := 0; i < 40; i++ {
-		reg.Informational("late"+strconv.Itoa(i), func(context.Context) error {
+		reg.Informational(health.System("late"+strconv.Itoa(i)), func(context.Context) error {
 			return errSentinel
 		})
 		time.Sleep(time.Millisecond)
