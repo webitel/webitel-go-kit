@@ -38,6 +38,7 @@ on:
         options:
           - appconfig
           - infra/discovery
+          - infra/discovery/fx
           - infra/errors
           - infra/fts_client
           - infra/health
