@@ -392,9 +392,9 @@ func TestSchedulerAliveLifecycle(t *testing.T) {
 func TestVerdictErrorNamesTheKey(t *testing.T) {
 	err := readyErr(Snapshot{
 		State:  StateNotReady,
-		Checks: []CheckResult{{System: SystemPostgreSQL, Name: "whatsapp", Group: GroupCritical, Status: StatusFail}},
+		Checks: []CheckResult{{System: SystemPostgreSQL, Name: "standby", Group: GroupCritical, Status: StatusFail}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "postgresql/whatsapp") {
-		t.Fatalf("readyErr = %v, want it to name postgresql/whatsapp", err)
+	if err == nil || !strings.Contains(err.Error(), "postgresql/standby") {
+		t.Fatalf("readyErr = %v, want it to name postgresql/standby", err)
 	}
 }

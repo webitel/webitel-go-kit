@@ -88,10 +88,10 @@ Two checks of one system are told apart with `WithName`:
 
 ```go
 h.Informational(health.SystemPostgreSQL, pool.Ping)
-h.Informational(health.SystemPostgreSQL, waDB.Ping, health.WithName("whatsapp"))
+h.Informational(health.SystemPostgreSQL, standby.Ping, health.WithName("standby"))
 ```
 
-The key of a check is its system, or `system/name` — `postgresql/whatsapp`. It is
+The key of a check is its system, or `system/name` — `postgresql/standby`. It is
 unique in a registry and is what logs, `STATUS=` and the `ReadyFunc` error show.
 A second check with the same key is ignored and logged, so a second database
 registered without `WithName` is never checked. The name is a metric attribute:
@@ -181,7 +181,7 @@ Anything other than `GET` or `HEAD` returns 405 with an `Allow` header.
   "status": "degraded",
   "checks": [
     { "system": "grpc",       "group": "critical",      "status": "ok",   "since": "2026-08-12T10:04:11Z" },
-    { "system": "postgresql", "name": "whatsapp", "group": "informational", "status": "fail", "since": "2026-08-12T10:07:52Z" }
+    { "system": "postgresql", "name": "standby", "group": "informational", "status": "fail", "since": "2026-08-12T10:07:52Z" }
   ]
 }
 ```

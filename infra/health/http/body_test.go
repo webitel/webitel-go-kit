@@ -45,11 +45,11 @@ func TestHealthzGolden(t *testing.T) {
 						Since: rfc3339(t, "2026-08-08T07:04:11Z")},
 					{System: health.SystemPostgreSQL, Group: health.GroupInformational, Status: health.StatusOK,
 						Since: rfc3339(t, "2026-08-08T07:05:30Z")},
-					{System: health.SystemPostgreSQL, Name: "whatsapp", Group: health.GroupInformational, Status: health.StatusFail,
+					{System: health.SystemPostgreSQL, Name: "standby", Group: health.GroupInformational, Status: health.StatusFail,
 						Since: rfc3339(t, "2026-08-08T07:07:52Z")},
 				},
 			},
-			want: `{"status":"degraded","checks":[{"system":"grpc","group":"critical","status":"ok","since":"2026-08-08T07:04:11Z"},{"system":"postgresql","group":"informational","status":"ok","since":"2026-08-08T07:05:30Z"},{"system":"postgresql","name":"whatsapp","group":"informational","status":"fail","since":"2026-08-08T07:07:52Z"}]}`,
+			want: `{"status":"degraded","checks":[{"system":"grpc","group":"critical","status":"ok","since":"2026-08-08T07:04:11Z"},{"system":"postgresql","group":"informational","status":"ok","since":"2026-08-08T07:05:30Z"},{"system":"postgresql","name":"standby","group":"informational","status":"fail","since":"2026-08-08T07:07:52Z"}]}`,
 		},
 		{
 			name: "cold start, never run",

@@ -43,9 +43,9 @@ func TestStatusTextTable(t *testing.T) {
 			name: "named check",
 			snap: health.Snapshot{State: health.StateDegraded, Checks: []health.CheckResult{
 				check("db", health.GroupCritical, health.StatusOK),
-				{System: health.SystemPostgreSQL, Name: "whatsapp", Group: health.GroupInformational, Status: health.StatusFail},
+				{System: health.SystemPostgreSQL, Name: "standby", Group: health.GroupInformational, Status: health.StatusFail},
 			}},
-			want: "degraded: informational [postgresql/whatsapp]",
+			want: "degraded: informational [postgresql/standby]",
 		},
 		{
 			name: "not ready",

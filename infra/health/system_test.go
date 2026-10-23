@@ -22,7 +22,7 @@ func TestKey(t *testing.T) {
 		want string
 	}{
 		{CheckResult{System: SystemPostgreSQL}, "postgresql"},
-		{CheckResult{System: SystemPostgreSQL, Name: "whatsapp"}, "postgresql/whatsapp"},
+		{CheckResult{System: SystemPostgreSQL, Name: "standby"}, "postgresql/standby"},
 	}
 
 	for _, tc := range cases {
@@ -34,15 +34,15 @@ func TestKey(t *testing.T) {
 
 func TestSameSystemWithNames(t *testing.T) {
 	reg := New(testConfig(), nil)
-	reg.Informational(SystemPostgreSQL, pass, WithName("whatsapp"))
+	reg.Informational(SystemPostgreSQL, pass, WithName("standby"))
 	reg.Informational(SystemPostgreSQL, pass)
 
 	results := reg.results()
-	if got, want := keys(results), []string{"postgresql", "postgresql/whatsapp"}; !equalStrings(got, want) {
+	if got, want := keys(results), []string{"postgresql", "postgresql/standby"}; !equalStrings(got, want) {
 		t.Fatalf("keys = %v, want %v", got, want)
 	}
-	if results[1].System != SystemPostgreSQL || results[1].Name != "whatsapp" {
-		t.Fatalf("named check = %+v, want system postgresql and name whatsapp", results[1])
+	if results[1].System != SystemPostgreSQL || results[1].Name != "standby" {
+		t.Fatalf("named check = %+v, want system postgresql and name standby", results[1])
 	}
 	if results[0].Name != "" {
 		t.Fatalf("unnamed check has name %q", results[0].Name)
@@ -76,9 +76,9 @@ func TestCustomSystem(t *testing.T) {
 
 func TestNilOptionIsIgnored(t *testing.T) {
 	reg := New(testConfig(), nil)
-	reg.Informational(SystemPostgreSQL, pass, nil, WithName("whatsapp"))
+	reg.Informational(SystemPostgreSQL, pass, nil, WithName("standby"))
 
-	if got, want := keys(reg.results()), []string{"postgresql/whatsapp"}; !equalStrings(got, want) {
+	if got, want := keys(reg.results()), []string{"postgresql/standby"}; !equalStrings(got, want) {
 		t.Fatalf("keys = %v, want %v", got, want)
 	}
 }
