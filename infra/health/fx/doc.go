@@ -10,5 +10,8 @@
 //	)
 //
 // The module provides *health.Registry, for checks and for the service
-// discovery verdict.
+// discovery verdict. Extra health options, such as the metrics transport, go
+// after the config:
+//
+//	healthfx.Module(cfg, health.WithTransport(otelhealth.NewTransport()))
 package healthfx
