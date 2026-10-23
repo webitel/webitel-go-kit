@@ -66,13 +66,36 @@ h := health.New(health.DefaultConfig(), log,
     health.WithTransport(sdnotify.New()), // nil when NOTIFY_SOCKET is unset, ignored
 )
 
-h.Critical("grpc", health.ListenerCheck(lis))
-h.Informational("postgres", store.Ping)
+h.Critical(health.SystemGRPC, health.ListenerCheck(lis))
+h.Informational(health.SystemPostgreSQL, store.Ping)
 
 if err := h.Start(ctx); err != nil {
     return err
 }
 ```
+
+A check is registered by the system it probes. The `System` constants —
+`postgresql`, `redis`, `rabbitmq`, `grpc`, `http` — follow the upstream
+OpenTelemetry values, so health metrics line up with the spans of the same
+system. A listener of the service itself uses its protocol, `grpc` or `http`.
+Any other system takes a value of its own:
+
+```go
+h.Critical("freeswitch", callManager.Ready)
+```
+
+Two checks of one system are told apart with `WithName`:
+
+```go
+h.Informational(health.SystemPostgreSQL, pool.Ping)
+h.Informational(health.SystemPostgreSQL, waDB.Ping, health.WithName("whatsapp"))
+```
+
+The key of a check is its system, or `system/name` — `postgresql/whatsapp`. It is
+unique in a registry and is what logs, `STATUS=` and the `ReadyFunc` error show.
+A second check with the same key is ignored and logged, so a second database
+registered without `WithName` is never checked. The name is a metric attribute:
+keep it static, never a host, an address or a tenant.
 
 The registry owns its transports. `Start` runs the checks, then starts each
 transport in order. If one fails, the ones already started are stopped, the
@@ -157,11 +180,13 @@ Anything other than `GET` or `HEAD` returns 405 with an `Allow` header.
 {
   "status": "degraded",
   "checks": [
-    { "name": "grpc",     "group": "critical",      "status": "ok",   "since": "2026-08-12T10:04:11Z" },
-    { "name": "postgres", "group": "informational", "status": "fail", "since": "2026-08-12T10:07:52Z" }
+    { "system": "grpc",       "group": "critical",      "status": "ok",   "since": "2026-08-12T10:04:11Z" },
+    { "system": "postgresql", "name": "whatsapp", "group": "informational", "status": "fail", "since": "2026-08-12T10:07:52Z" }
   ]
 }
 ```
+
+`name` is present only for a check registered with `WithName`.
 
 **A check's error text never reaches a response body**, on any endpoint. Names
 and states are safe to expose; the text of a database error is not, and it goes

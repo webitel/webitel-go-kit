@@ -22,7 +22,7 @@ type Registry struct {
 	transports []Transport
 	// mu guards everything below and is never held while a check runs.
 	mu        sync.Mutex
-	checks    []*checkState   // sorted by name
+	checks    []*checkState   // sorted by key
 	ctx       context.Context // nil until Start
 	cancel    context.CancelFunc
 	started   bool
@@ -60,21 +60,38 @@ func New(cfg Config, log *slog.Logger, opts ...Option) *Registry {
 }
 
 // Liveness registers a check that answers "is this process wedged?".
-func (r *Registry) Liveness(name string, fn Check) { r.register(name, GroupLiveness, fn) }
+func (r *Registry) Liveness(system System, fn Check, opts ...CheckOption) {
+	r.register(system, GroupLiveness, fn, opts)
+}
 
 // Critical registers a check whose failure takes the node out of rotation.
-func (r *Registry) Critical(name string, fn Check) { r.register(name, GroupCritical, fn) }
+func (r *Registry) Critical(system System, fn Check, opts ...CheckOption) {
+	r.register(system, GroupCritical, fn, opts)
+}
 
 // Informational registers a check whose failure only degrades the node.
-func (r *Registry) Informational(name string, fn Check) { r.register(name, GroupInformational, fn) }
+func (r *Registry) Informational(system System, fn Check, opts ...CheckOption) {
+	r.register(system, GroupInformational, fn, opts)
+}
 
 // register adds a check, starting its goroutine at once when already running.
-func (r *Registry) register(name string, group Group, fn Check) {
+func (r *Registry) register(system System, group Group, fn Check, opts []CheckOption) {
 	if r == nil {
 		return
 	}
-	if name == "" || fn == nil {
-		r.log.Error("health: ignoring check with empty name or nil function", "check", name)
+
+	var o checkOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+
+	key := checkKey(system, o.name)
+
+	// A slash in the system would make the key ambiguous with system/name.
+	if system == "" || strings.Contains(string(system), "/") || fn == nil {
+		r.log.Error("health: ignoring check with empty or invalid system, or nil function", "check", key)
 
 		return
 	}
@@ -83,20 +100,20 @@ func (r *Registry) register(name string, group Group, fn Check) {
 	defer r.mu.Unlock()
 
 	if r.stopped {
-		r.log.Error("health: ignoring check registered after Stop", "check", name)
+		r.log.Error("health: ignoring check registered after Stop", "check", key)
 
 		return
 	}
-	at, exists := slices.BinarySearchFunc(r.checks, name, func(cs *checkState, name string) int {
-		return strings.Compare(cs.name, name)
+	at, exists := slices.BinarySearchFunc(r.checks, key, func(cs *checkState, key string) int {
+		return strings.Compare(cs.key, key)
 	})
 	if exists {
-		r.log.Error("health: ignoring duplicate check name", "check", name)
+		r.log.Error("health: ignoring duplicate check; tell checks of one system apart with WithName", "check", key)
 
 		return
 	}
 
-	cs := &checkState{name: name, group: group, fn: fn}
+	cs := &checkState{system: system, name: o.name, key: key, group: group, fn: fn}
 	r.checks = slices.Insert(r.checks, at, cs)
 
 	if r.started {
@@ -260,7 +277,7 @@ func (r *Registry) stop(ctx context.Context, up []Transport) error {
 	return errors.Join(errs...)
 }
 
-// results returns every check's state, sorted by name.
+// results returns every check's state, sorted by key.
 func (r *Registry) results() []CheckResult {
 	return r.Snapshot().Checks
 }
@@ -298,7 +315,7 @@ func (r *Registry) runOnce(ctx context.Context, cs *checkState) {
 	}
 	if err == nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		// Finished late: that is not passing.
-		err = fmt.Errorf("check %q passed only after its %s timeout", cs.name, r.cfg.Timeout)
+		err = fmt.Errorf("check %q passed only after its %s timeout", cs.key, r.cfg.Timeout)
 	}
 
 	r.record(cs, elapsed, err)
@@ -309,8 +326,8 @@ func (r *Registry) call(ctx context.Context, cs *checkState) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			r.log.Error("health: check panicked",
-				"check", cs.name, "panic", p, "stack", string(debug.Stack()))
-			err = fmt.Errorf("check %q panicked: %v", cs.name, p)
+				"check", cs.key, "panic", p, "stack", string(debug.Stack()))
+			err = fmt.Errorf("check %q panicked: %v", cs.key, p)
 		}
 	}()
 
@@ -327,12 +344,12 @@ func (r *Registry) record(cs *checkState, elapsed time.Duration, err error) {
 	}
 
 	if status == StatusFail {
-		r.log.Warn("health: check is failing", "check", cs.name, "group", cs.group, "err", err)
+		r.log.Warn("health: check is failing", "check", cs.key, "group", cs.group, "err", err)
 
 		return
 	}
 
-	r.log.Info("health: check recovered", "check", cs.name, "group", cs.group, "status", status)
+	r.log.Info("health: check recovered", "check", cs.key, "group", cs.group, "status", status)
 }
 
 // join waits for the check goroutines, bounded by ctx.

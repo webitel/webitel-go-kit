@@ -11,7 +11,7 @@ import (
 
 // cr builds a CheckResult for driving the pure derivation helpers.
 func cr(name string, group Group, status Status) CheckResult {
-	return CheckResult{Name: name, Group: group, Status: status}
+	return CheckResult{System: System(name), Group: group, Status: status}
 }
 
 func TestZeroSnapshotReadsUnknown(t *testing.T) {
@@ -97,8 +97,8 @@ func TestSnapshotChecksAreSortedAndTimeIsStamped(t *testing.T) {
 		t.Fatal("Snapshot.Time is zero")
 	}
 	for i, want := range []string{"a", "b", "c"} {
-		if s.Checks[i].Name != want {
-			t.Fatalf("Checks[%d] = %q, want %q", i, s.Checks[i].Name, want)
+		if s.Checks[i].Key() != want {
+			t.Fatalf("Checks[%d] = %q, want %q", i, s.Checks[i].Key(), want)
 		}
 	}
 
@@ -108,7 +108,7 @@ func TestSnapshotChecksAreSortedAndTimeIsStamped(t *testing.T) {
 		t.Fatalf("results() has %d checks, Snapshot().Checks has %d", len(res), len(s.Checks))
 	}
 	for i := range res {
-		if res[i].Name != s.Checks[i].Name || res[i].Group != s.Checks[i].Group || res[i].Status != s.Checks[i].Status {
+		if res[i].Key() != s.Checks[i].Key() || res[i].Group != s.Checks[i].Group || res[i].Status != s.Checks[i].Status {
 			t.Fatalf("results()[%d] = %+v, want %+v", i, res[i], s.Checks[i])
 		}
 	}
@@ -334,8 +334,8 @@ func TestSchedulerAlive(t *testing.T) {
 	now := time.Now()
 	stale := DefaultConfig().StaleAfter
 
-	neverRan := CheckResult{Name: "never"}
-	ranAt := func(at time.Time) CheckResult { return CheckResult{Name: "db", LastRun: at} }
+	neverRan := CheckResult{System: "never"}
+	ranAt := func(at time.Time) CheckResult { return CheckResult{System: "db", LastRun: at} }
 
 	for _, tt := range []struct {
 		name      string
@@ -386,5 +386,15 @@ func TestSchedulerAliveLifecycle(t *testing.T) {
 
 	if !reg.Snapshot().SchedulerAlive {
 		t.Fatal("SchedulerAlive false with a run completed within StaleAfter")
+	}
+}
+
+func TestVerdictErrorNamesTheKey(t *testing.T) {
+	err := readyErr(Snapshot{
+		State:  StateNotReady,
+		Checks: []CheckResult{{System: SystemPostgreSQL, Name: "whatsapp", Group: GroupCritical, Status: StatusFail}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "postgresql/whatsapp") {
+		t.Fatalf("readyErr = %v, want it to name postgresql/whatsapp", err)
 	}
 }
