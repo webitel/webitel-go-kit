@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
@@ -52,4 +53,59 @@ func TestPingFollowsConnection(t *testing.T) {
 
 	require.NoError(t, conn.Close())
 	require.ErrorIs(t, conn.Ping(context.Background()), ErrConnectionNotAvailable)
+}
+
+func newTestConnection(t *testing.T, logger Logger) *Connection {
+	t.Helper()
+
+	if testing.Short() {
+		t.Skip("needs RabbitMQ on localhost:5672")
+	}
+
+	conn, err := NewConnection(&Config{
+		URL:            "amqp://guest:guest@localhost:5672/",
+		ConnectTimeout: time.Second,
+	}, logger)
+	require.NoError(t, err)
+
+	return conn
+}
+
+func TestSharedChannelReopens(t *testing.T) {
+	tests := []struct {
+		name  string
+		close func(ch *amqp.Channel)
+	}{
+		{
+			name:  "closed by caller",
+			close: func(ch *amqp.Channel) { _ = ch.Close() },
+		},
+		{
+			name: "closed by channel error",
+			close: func(ch *amqp.Channel) {
+				_, _ = ch.QueueDeclarePassive("rabbitmq-test-missing-queue", false, false, false, false, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+
+			conn := newTestConnection(t, &NoopLogger{})
+
+			old, err := conn.Channel(context.Background())
+			require.NoError(t, err)
+
+			tt.close(old)
+
+			require.Eventually(t, func() bool {
+				ch, err := conn.Channel(context.Background())
+
+				return err == nil && ch != old
+			}, 5*time.Second, 50*time.Millisecond)
+
+			require.NoError(t, conn.Close())
+		})
+	}
 }
