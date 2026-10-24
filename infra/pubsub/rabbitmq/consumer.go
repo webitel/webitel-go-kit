@@ -145,17 +145,19 @@ func (c *MessageConsumer) consumeLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			ch, err := c.broker.Channel(ctx)
+			ch, err := c.broker.NewChannel(ctx)
 			if err != nil {
-				c.logger.Error("get channel", err)
+				c.logger.Error("open channel", err)
 				time.Sleep(retryDelay)
 				retryDelay = min(retryDelay*2, c.consumer.ReconnectDelay)
 				continue
 			}
 
-			if err := c.consumeMessages(ctx, ch); err != nil {
+			err = c.consumeMessages(ctx, ch)
+			_ = ch.Close()
+
+			if err != nil {
 				c.logger.Error("consuming failed", err)
-				_ = ch.Close()
 				time.Sleep(retryDelay)
 				retryDelay = min(retryDelay*2, c.consumer.ReconnectDelay)
 				continue
@@ -180,6 +182,10 @@ func (c *MessageConsumer) consumeMessages(ctx context.Context, ch *amqp.Channel)
 		return fmt.Errorf("%w: %v", ErrConsumerStartFailed, err)
 	}
 
+	// ch is closed on return: let in-flight deliveries settle first.
+	var inflight sync.WaitGroup
+	defer inflight.Wait()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -192,7 +198,11 @@ func (c *MessageConsumer) consumeMessages(ctx context.Context, ch *amqp.Channel)
 			select {
 			case c.workerSem <- struct{}{}:
 				c.wg.Add(1)
-				go c.processMessage(ctx, msg)
+				inflight.Add(1)
+				go func() {
+					defer inflight.Done()
+					c.processMessage(ctx, msg)
+				}()
 			case <-ctx.Done():
 				return nil
 			}
