@@ -1,3 +1,19 @@
+// Package healthfx wires the health registry into an fx application: it builds
+// the registry with the sd_notify and HTTP probe transports, starts it with the
+// application, and drains it first on shutdown.
+//
+//	fx.New(
+//		healthfx.Module(healthfx.Config{HTTPAddr: cfg.Health.Addr}),
+//		// ... servers and dependencies ...
+//		fx.Invoke(registerChecks),
+//		healthfx.Shutdown(), // last, so the drain runs before any server stops
+//	)
+//
+// The module provides *health.Registry, for checks and for the service
+// discovery verdict. Extra health options, such as the metrics transport, go
+// after the config:
+//
+//	healthfx.Module(cfg, health.WithTransport(otelhealth.NewTransport()))
 package healthfx
 
 import (
@@ -62,13 +78,14 @@ type settings struct {
 
 // Module provides *health.Registry. It needs a *slog.Logger in the graph. The
 // registry starts on the application's start with a context that outlives the
-// start hook.
-func Module(cfg Config) fx.Option {
+// start hook. opts go to health.New after the module's own transports, such as
+// health.WithTransport for an extra transport.
+func Module(cfg Config, opts ...health.Option) fx.Option {
 	cfg = cfg.withDefaults()
 
 	return fx.Module("health",
 		fx.Provide(func(log *slog.Logger, lc fx.Lifecycle) (*health.Registry, settings) {
-			return build(cfg, log, lc), settings{stopTimeout: cfg.StopTimeout}
+			return build(cfg, log, lc, opts), settings{stopTimeout: cfg.StopTimeout}
 		}),
 	)
 }
@@ -93,17 +110,17 @@ func Shutdown() fx.Option {
 	})
 }
 
-func build(cfg Config, log *slog.Logger, lc fx.Lifecycle) *health.Registry {
+func build(cfg Config, log *slog.Logger, lc fx.Lifecycle, opts []health.Option) *health.Registry {
 	hcfg := health.DefaultConfig()
 	hcfg.DrainHold = cfg.DrainHold
 
-	h := health.New(hcfg, log,
+	h := health.New(hcfg, log, append([]health.Option{
 		health.WithTransport(sdnotify.New(
 			sdnotify.WithLogger(log),
 			sdnotify.WithStartTimeout(cfg.StartTimeout),
 		)),
 		health.WithTransport(healthhttp.NewServer(cfg.HTTPAddr, healthhttp.WithLogger(log))),
-	)
+	}, opts...)...)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

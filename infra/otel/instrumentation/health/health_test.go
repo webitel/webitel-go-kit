@@ -78,7 +78,7 @@ func TestCollect(t *testing.T) {
 		},
 	}}
 
-	reg, err := Start(snap, WithMeterProvider(mp))
+	reg, err := register(snap, WithMeterProvider(mp))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, reg.Unregister()) })
 
@@ -169,7 +169,7 @@ func TestStatusReflectsEveryState(t *testing.T) {
 			mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 			t.Cleanup(func() { require.NoError(t, mp.Shutdown(context.Background())) })
 
-			reg, err := Start(fakeSnapshotter{snap: health.Snapshot{State: tc.state}}, WithMeterProvider(mp))
+			reg, err := register(fakeSnapshotter{snap: health.Snapshot{State: tc.state}}, WithMeterProvider(mp))
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, reg.Unregister()) })
 
@@ -202,7 +202,7 @@ func TestLiveRegistry(t *testing.T) {
 		require.NoError(t, reg.Stop(ctx))
 	})
 
-	handle, err := Start(reg, WithMeterProvider(mp))
+	handle, err := register(reg, WithMeterProvider(mp))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, handle.Unregister()) })
 

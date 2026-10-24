@@ -19,16 +19,16 @@ func Version() string {
 	return "0.0.0"
 }
 
-// Snapshotter is what the binding reads; *health.Registry satisfies it.
-type Snapshotter interface {
+// snapshotter is what the binding reads; *health.Registry satisfies it.
+type snapshotter interface {
 	Snapshot() health.Snapshot
 }
 
-// Start registers the metrics against snap and returns the registration as
+// register registers the metrics against snap and returns the registration as
 // the teardown handle.
-func Start(snap Snapshotter, opts ...Option) (metric.Registration, error) {
+func register(snap snapshotter, opts ...Option) (metric.Registration, error) {
 	if snap == nil {
-		return nil, errors.New("otel/instrumentation/health: nil Snapshotter")
+		return nil, errors.New("otel/instrumentation/health: nil snapshotter")
 	}
 
 	cfg := &bindingConfig{mp: otel.GetMeterProvider()}
@@ -100,7 +100,7 @@ func boolValue(b bool) int64 {
 }
 
 func collect(
-	snap Snapshotter,
+	snap snapshotter,
 	status healthconv.StatusObservable,
 	checkStatus healthconv.CheckStatusObservable,
 	transitions healthconv.CheckTransitionsObservable,

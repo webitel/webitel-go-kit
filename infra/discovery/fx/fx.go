@@ -1,3 +1,21 @@
+// Package discoveryfx wires service discovery into an fx application: it
+// creates the Consul provider, registers the service instance on start and
+// deregisters it on stop. With a *health.Registry in the graph the TTL
+// heartbeat reports its readiness verdict.
+//
+//	fx.New(
+//		healthfx.Module(healthfx.Config{HTTPAddr: cfg.Health.Addr}),
+//		discoveryfx.Module(discoveryfx.Config{
+//			Addr:      cfg.Consul.Addr,
+//			Name:      model.ServiceName,
+//			Version:   model.Version,
+//			Endpoints: []string{"grpc://" + cfg.Service.Addr},
+//		}),
+//		// ... servers and dependencies ...
+//		healthfx.Shutdown(), // last, so the drain runs before Deregister
+//	)
+//
+// The module provides discovery.DiscoveryProvider.
 package discoveryfx
 
 import (
@@ -20,8 +38,8 @@ const DefaultTimeout = 30 * time.Second
 // Config describes the Consul agent and the service instance to register.
 // Zero optional fields take their defaults.
 type Config struct {
-	// ConsulAddr is the address of the Consul agent.
-	ConsulAddr string
+	// Addr is the address of the Consul agent.
+	Addr string
 	// Name is the service name. It is required and also seeds the instance ID.
 	Name    string
 	Version string
@@ -81,7 +99,7 @@ func build(cfg Config, p params) (discovery.DiscoveryProvider, error) {
 		opts = append(opts, consul.WithReadiness(p.Health.ReadyFunc()))
 	}
 
-	provider, err := discovery.DefaultFactory.CreateProvider(discovery.ProviderConsul, p.Log, cfg.ConsulAddr, opts...)
+	provider, err := discovery.DefaultFactory.CreateProvider(discovery.ProviderConsul, p.Log, cfg.Addr, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("create discovery provider: %w", err)
 	}

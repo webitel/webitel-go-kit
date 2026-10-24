@@ -103,6 +103,52 @@ func TestModule_Lifecycle(t *testing.T) {
 	}
 }
 
+type recordingTransport struct {
+	started, stopped atomic.Bool
+}
+
+func (r *recordingTransport) Start(context.Context, *health.Registry) error {
+	r.started.Store(true)
+
+	return nil
+}
+
+func (r *recordingTransport) Stop(context.Context) error {
+	r.stopped.Store(true)
+
+	return nil
+}
+
+func TestModule_Options(t *testing.T) {
+	extra := &recordingTransport{}
+
+	app := fx.New(
+		fx.NopLogger,
+		fx.Supply(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		Module(Config{DrainHold: time.Millisecond}, health.WithTransport(extra)),
+		Shutdown(),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := app.Start(ctx); err != nil {
+		t.Fatalf("start app: %v", err)
+	}
+
+	if !extra.started.Load() {
+		t.Error("transport passed as an option was not started")
+	}
+
+	if err := app.Stop(ctx); err != nil {
+		t.Fatalf("stop app: %v", err)
+	}
+
+	if !extra.stopped.Load() {
+		t.Error("transport passed as an option was not stopped")
+	}
+}
+
 func waitReadyz(t *testing.T, url string) {
 	t.Helper()
 

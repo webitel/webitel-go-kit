@@ -18,10 +18,10 @@ import (
 fx.New(
     healthfx.Module(healthfx.Config{HTTPAddr: cfg.Health.Addr}),
     discoveryfx.Module(discoveryfx.Config{
-        ConsulAddr: cfg.Consul.Addr,
-        Name:       model.ServiceName,
-        Version:    model.Version,
-        Endpoints:  []string{"grpc://" + cfg.Service.Addr},
+        Addr:      cfg.Consul.Addr,
+        Name:      model.ServiceName,
+        Version:   model.Version,
+        Endpoints: []string{"grpc://" + cfg.Service.Addr},
         Metadata: map[string]string{
             "commit":         model.Commit,
             "commitDate":     model.CommitDate,
