@@ -109,6 +109,7 @@ func (b *Connection) connect() error {
 	b.ch = ch
 
 	go b.watchConn(conn)
+	go b.watchChannel(conn, ch)
 
 	b.logger.Info("connected to RabbitMQ")
 	return nil
@@ -124,6 +125,58 @@ func (b *Connection) watchConn(conn *amqp091.Connection) {
 	case <-b.done:
 		return
 	}
+}
+
+// watchChannel reopens the shared channel when it closes while its connection
+// stays up: a channel-level error or a caller's Close. A closed connection is
+// left to watchConn.
+func (b *Connection) watchChannel(conn *amqp091.Connection, ch *amqp091.Channel) {
+	notifyClose := ch.NotifyClose(make(chan *amqp091.Error, 1))
+
+	select {
+	case <-notifyClose:
+		b.reopenChannel(conn, ch)
+	case <-b.done:
+		return
+	}
+}
+
+func (b *Connection) reopenChannel(conn *amqp091.Connection, old *amqp091.Channel) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	select {
+	case <-b.done:
+		return
+	default:
+	}
+
+	if b.conn != conn || b.ch != old || conn.IsClosed() {
+		return
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		b.logger.Error("reopen rabbitmq channel", err)
+
+		return
+	}
+
+	if err := b.replayDeclarations(ch); err != nil {
+		b.logger.Warn("rabbitmq topology was not fully restored", "err", err)
+
+		if ch, err = conn.Channel(); err != nil {
+			b.logger.Error("reopen rabbitmq channel", err)
+
+			return
+		}
+	}
+
+	b.ch = ch
+
+	go b.watchChannel(conn, ch)
+
+	b.logger.Info("rabbitmq channel reopened")
 }
 
 func (b *Connection) reconnect() {
