@@ -166,8 +166,8 @@ github.com/webitel/webitel-go-kit/infra/discovery v0.0.0-20261023102238-4cb4c802
 github.com/webitel/webitel-go-kit/infra/discovery v0.0.0-20261023102238-4cb4c8025f0d/go.mod h1:IhUZHd7EYD1pCoX9dNNlkpF+/c3Q6ODgBcluGDMbJrU=
 github.com/webitel/webitel-go-kit/infra/health v0.3.0 h1:CkmPHLHAFjWYgMtsjPY2Yig8SsWTtW3EX0BeFpVWUBA=
 github.com/webitel/webitel-go-kit/infra/health v0.3.0/go.mod h1:qumOZfpiFfBSIxGd3CMiEyiNKY4xNaVpUh6nlnTgoPk=
-github.com/webitel/webitel-go-kit/infra/health/fx v0.1.0 h1:S3Q6Pp+3biVvm4wO/hXothO98JdWvIql3vDcM9H6TyM=
-github.com/webitel/webitel-go-kit/infra/health/fx v0.1.0/go.mod h1:13ea4gkmeS6xAOqHotMxkKorBfTEPAWPx7kWxGsQaJ0=
+github.com/webitel/webitel-go-kit/infra/health/fx v0.2.0 h1:uOUsvzomDYzrutVe1GJKWgCIfb0M3ddzaA9rd0cvCdk=
+github.com/webitel/webitel-go-kit/infra/health/fx v0.2.0/go.mod h1:13ea4gkmeS6xAOqHotMxkKorBfTEPAWPx7kWxGsQaJ0=
 go.uber.org/dig v1.19.0 h1:BACLhebsYdpQ7IROQ1AGPjrXcP5dF80U3gKoFzbaq/4=
 go.uber.org/dig v1.19.0/go.mod h1:Us0rSJiThwCv2GteUN0Q7OKvU7n5J4dxZ9JKUXozFdE=
 go.uber.org/fx v1.24.0 h1:wE8mruvpg2kiiL1Vqd0CC+tr0/24XIB10Iwp2lLWzkg=
