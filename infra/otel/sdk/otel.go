@@ -13,18 +13,18 @@ import (
 
 	"github.com/webitel/webitel-go-kit/infra/otel/correlation"
 	"github.com/webitel/webitel-go-kit/infra/otel/internal"
-	logv "github.com/webitel/webitel-go-kit/infra/otel/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/redaction"
 	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout"
+	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/throttle"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/metric"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/trace"
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 
 	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	// "go.opentelemetry.io/contrib/processors/minsev"
 	"go.opentelemetry.io/otel"
 	otelog "go.opentelemetry.io/otel/log"
-	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -66,13 +66,11 @@ type options struct {
 	SensitiveAttributes map[string]string
 	// LogsRedaction enables log redaction by SensitiveAttributes.
 	LogsRedaction bool
+	// LogsThrottle limits repeated log records; nil disables it.
+	LogsThrottle *throttle.Config
 	// logProcessors run before the exporter processors of LogOptions, in order:
-	// baggage copy, redaction, throttle.
+	// baggage copy, redaction.
 	logProcessors []sdklog.Processor
-	// option used to set[build] level[logger] for SDK internals
-	// https://pkg.go.dev/go.opentelemetry.io/otel#SetLogger
-	// https://github.com/open-telemetry/opentelemetry-go/blob/v1.29.0/internal/global/internal_logging.go#L20
-	setLevel func(level otelog.Severity) // , bridge bool)
 	// option used to bridge third-party logger(s)
 	setBridge     []func()
 	shutdownTx    sync.Mutex
@@ -131,20 +129,6 @@ func WithLogLevel(max otelog.Severity) Option {
 	})
 }
 
-// WithSetLevel option allows you [re]set/bridge
-// go.opentelemetry.io/otel/log/global.SetLogger()
-// the logger used internally to opentelemetry
-// with OTEL_LOG_LEVEL= severity specified.
-//
-// Always called except if OTEL_SDK_DISABLED='true'.
-// By default log.SeverityError level is set.
-// Default [SetLogLevel] method is used.
-func WithSetLevel(set func(otelog.Severity)) Option {
-	return option(func(conf *options) {
-		conf.setLevel = set
-	})
-}
-
 // WithLogBridge option allows you to register hook(s)
 // that will be triggered for you to redirect (bridge) logger(s)
 // which you project is internally using.
@@ -174,6 +158,15 @@ func WithLogOptions(opts ...log.Option) Option {
 func WithSensitiveAttributes(classes map[string]string) Option {
 	return option(func(conf *options) {
 		conf.SensitiveAttributes = classes
+	})
+}
+
+// WithLogThrottle option sets the quota of repeated log records, see
+// [throttle.LoggerProvider]. A nil config disables throttling.
+// Default is [throttle.DefaultConfig].
+func WithLogThrottle(cfg *throttle.Config) Option {
+	return option(func(conf *options) {
+		conf.LogsThrottle = cfg
 	})
 }
 
@@ -224,19 +217,19 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 		Metrics:       nil,                  // noop
 		Resource:      nil,                  // resource.Environment(),
 		LogsRedaction: true,
-		setLevel:      SetLogLevel,
+		LogsThrottle:  new(throttle.DefaultConfig()),
 	}
 	// Environment, as next defaults layer ...
 	internal.Environment.Apply(
 		internal.EnvString("LOG_LEVEL", func(input string) {
-			var level logv.Severity
+			var level logging.Level
 			err := level.UnmarshalText([]byte(input))
 			if err != nil {
 				err = fmt.Errorf("invalid %s value %s: %w", "OTEL_LOG_LEVEL", input, err)
 				otel.Handle(err)
 				return // err
 			}
-			WithLogLevel(otelog.Severity(level)).apply(&conf)
+			WithLogLevel(level.Severity()).apply(&conf)
 		}),
 		internal.EnvString("LOGS_EXPORTER", func(input string) {
 			opts, disabled, err := newLogDSNOptions(ctx, input)
@@ -281,6 +274,18 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 				return
 			}
 			conf.LogsRedaction = enable
+		}),
+		internal.EnvString("LOGS_THROTTLE", func(input string) {
+			cfg, err := throttle.ParseConfig(input)
+			if err != nil {
+				slog.Warn(
+					"otel: invalid OTEL_LOGS_THROTTLE value, default log throttling stays enabled",
+					"value", input,
+					"error", err.Error(),
+				)
+				return
+			}
+			conf.LogsThrottle = cfg
 		}),
 		internal.EnvString("TRACES_EXPORTER", func(input string) {
 			opts, err := trace.NewOptions(ctx, input)
@@ -397,6 +402,8 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 		ctx = context.Background()
 	}
 
+	otel.SetLogger(internalLogger())
+
 	// Handles any error deemed irremediable by an OpenTelemetry component.
 	// errorHandler := otel.GetErrorHandler()
 	var (
@@ -422,6 +429,7 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 
 	// Read ENV configuration ...
 	setup := newOptions(ctx, opts...)
+	SetLogLevel(setup.Lvl)
 	if errs != nil {
 		// An exporter's option constructor may already have acquired an OS
 		// resource: the prometheus metrics exporter opens its own listener
@@ -483,7 +491,12 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 			setup.loggerProviderOptions(src)...,
 		)
 		setup.OnShutdown(provider.Shutdown)
-		global.SetLoggerProvider(provider)
+
+		var lp otelog.LoggerProvider = provider
+		if setup.LogsThrottle != nil {
+			lp = throttle.NewLoggerProvider(provider, *setup.LogsThrottle)
+		}
+		otel.SetLoggerProvider(lp)
 
 		if explicitLogs {
 			// TODO: redirect (bridge) internal logger(s)
@@ -495,15 +508,6 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 		}
 
 	}
-	// OTEL_LOG_LEVEL = ? ; default: "error"
-	if setup.Lvl > otelog.SeverityUndefined {
-		// [re]set https://pkg.go.dev/go.opentelemetry.io/otel#SetLogger(!)
-		// severity/verbosity OTEL_LOG_LEVEL=
-		if setup.setLevel != nil {
-			setup.setLevel(setup.Lvl)
-		}
-	}
-
 	// --------------------------------------- //
 	//                traces                   //
 	// --------------------------------------- //

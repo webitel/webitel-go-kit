@@ -3,7 +3,7 @@ package profiler
 import (
 	"context"
 
-	"github.com/webitel/webitel-go-kit/pkg/logger"
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 	"go.uber.org/fx"
 )
 
@@ -12,7 +12,7 @@ type Params struct {
 
 	Lifecycle fx.Lifecycle
 	Config    Config
-	Logger    logger.Logger
+	Logger    *logging.Logger
 }
 
 func NewWithFx(p Params) *Profiler {

@@ -11,6 +11,8 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 )
 
 var (
@@ -119,19 +121,21 @@ type MessagePublisher struct {
 	confirmCh <-chan amqp.Confirmation
 	returnCh  <-chan amqp.Return
 	mu        sync.Mutex
-	logger    Logger
+	logger    *logging.Logger
 	tracer    trace.Tracer
 }
 
+// NewPublisher returns a publisher on its own channel. A nil logger uses
+// [logging.New].
 func NewPublisher(
 	broker *Connection,
 	config *PublisherConfig,
-	logger Logger,
+	logger *logging.Logger,
 ) (*MessagePublisher, error) {
 	p := &MessagePublisher{
 		broker: broker,
 		config: config,
-		logger: logger,
+		logger: componentLogger(logger),
 		tracer: newTracer(config.TracerProvider),
 	}
 
@@ -178,7 +182,7 @@ func (p *MessagePublisher) Publish(
 
 		lastErr = err
 
-		p.logger.Warn("publish attempt failed", "attempt", attempt+1, "error", err)
+		p.logger.WarnCtx(ctx, "publish attempt failed", logging.Int("attempt", attempt+1), logging.Err(err))
 
 		backoff := time.Duration(attempt+1) * time.Second
 		select {

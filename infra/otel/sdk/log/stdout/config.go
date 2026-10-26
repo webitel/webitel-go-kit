@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package stdout // import "github.com/webitel/webitel-go-kit/infra/otel/log/stdout"
+package stdout // import "github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout"
 
 import (
 	"io"
