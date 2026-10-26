@@ -37,7 +37,7 @@ func TestPingFollowsConnection(t *testing.T) {
 		ConnectTimeout: time.Second,
 	}
 
-	conn, err := NewConnection(cfg, &NoopLogger{})
+	conn, err := NewConnection(cfg, nil)
 	require.NoError(t, err)
 
 	require.NoError(t, conn.Ping(context.Background()))
@@ -55,7 +55,7 @@ func TestPingFollowsConnection(t *testing.T) {
 	require.ErrorIs(t, conn.Ping(context.Background()), ErrConnectionNotAvailable)
 }
 
-func newTestConnection(t *testing.T, logger Logger) *Connection {
+func newTestConnection(t *testing.T) *Connection {
 	t.Helper()
 
 	if testing.Short() {
@@ -65,7 +65,7 @@ func newTestConnection(t *testing.T, logger Logger) *Connection {
 	conn, err := NewConnection(&Config{
 		URL:            "amqp://guest:guest@localhost:5672/",
 		ConnectTimeout: time.Second,
-	}, logger)
+	}, nil)
 	require.NoError(t, err)
 
 	return conn
@@ -92,7 +92,7 @@ func TestSharedChannelReopens(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer goleak.VerifyNone(t)
 
-			conn := newTestConnection(t, &NoopLogger{})
+			conn := newTestConnection(t)
 
 			old, err := conn.Channel(context.Background())
 			require.NoError(t, err)

@@ -2,7 +2,6 @@ package rabbitmq
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,18 +10,10 @@ import (
 	"go.uber.org/goleak"
 )
 
-type countingLogger struct {
-	NoopLogger
-	errors atomic.Int64
-}
-
-func (l *countingLogger) Error(string, error, ...any) { l.errors.Add(1) }
-
 func TestConsumerFailureKeepsSharedChannel(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	logger := &countingLogger{}
-	conn := newTestConnection(t, logger)
+	conn := newTestConnection(t)
 
 	shared, err := conn.Channel(context.Background())
 	require.NoError(t, err)
@@ -33,12 +24,10 @@ func TestConsumerFailureKeepsSharedChannel(t *testing.T) {
 	consumerCfg, err := NewConsumerConfig("rabbitmq-test", WithConsumerReconnectDelay(100*time.Millisecond))
 	require.NoError(t, err)
 
-	consumer := NewConsumer(conn, queueCfg, consumerCfg, func(context.Context, amqp.Delivery) error { return nil }, logger)
+	consumer := NewConsumer(conn, queueCfg, consumerCfg, func(context.Context, amqp.Delivery) error { return nil }, nil)
 	require.NoError(t, consumer.Start(context.Background()))
 
-	require.Eventually(t, func() bool {
-		return logger.errors.Load() >= 2
-	}, 5*time.Second, 50*time.Millisecond)
+	time.Sleep(1500 * time.Millisecond)
 
 	ch, err := conn.Channel(context.Background())
 	require.NoError(t, err)

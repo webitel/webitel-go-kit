@@ -161,16 +161,16 @@ func (b *Connection) reopenChannel(conn *amqp091.Connection, old *amqp091.Channe
 
 	ch, err := conn.Channel()
 	if err != nil {
-		b.logger.Error("reopen rabbitmq channel", err)
+		b.logger.ErrorCtx(context.Background(), "reopen rabbitmq channel", logging.Err(err))
 
 		return
 	}
 
 	if err := b.replayDeclarations(ch); err != nil {
-		b.logger.Warn("rabbitmq topology was not fully restored", "err", err)
+		b.logger.WarnCtx(context.Background(), "rabbitmq topology was not fully restored", logging.Err(err))
 
 		if ch, err = conn.Channel(); err != nil {
-			b.logger.Error("reopen rabbitmq channel", err)
+			b.logger.ErrorCtx(context.Background(), "reopen rabbitmq channel", logging.Err(err))
 
 			return
 		}
@@ -180,7 +180,7 @@ func (b *Connection) reopenChannel(conn *amqp091.Connection, old *amqp091.Channe
 
 	go b.watchChannel(conn, ch)
 
-	b.logger.Info("rabbitmq channel reopened")
+	b.logger.InfoCtx(context.Background(), "rabbitmq channel reopened")
 }
 
 func (b *Connection) reconnect() {
