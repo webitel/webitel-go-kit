@@ -151,6 +151,10 @@ if errors.As(err, &pgErr) {
 }
 ```
 
+## Application error mapping
+
+Map pool / driver errors to coded `pkg/errors` at the store boundary with the separate [`apperr`](./apperr/README.md) module (`apperr.ParseError`). That keeps this package free of gRPC and application-error dependencies.
+
 ## Tracing
 
 Implement `pgw.Tracer` and pass it via `WithTracer`. The adapter covers queries, batch operations, `COPY FROM`, and prepared statements.
