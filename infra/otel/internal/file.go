@@ -110,9 +110,11 @@ func FileDSN(rawDSN string, externalParams ...string) (*FileWriter, error) {
 		}
 		cn = strings.ToLower(cn)
 		setup, ok := fileparams[cn]
-		if !ok && !slices.Contains(externalParams, cn) {
-			// unknown ;param= spec
-			slog.Default().Warn("Unknown file.param= spec", "param", cn, cn, s)
+		if !ok {
+			if !slices.Contains(externalParams, cn) {
+				// unknown ;param= spec
+				slog.Default().Warn("Unknown file.param= spec", "param", cn, cn, s)
+			}
 			continue
 		}
 		err = setup(dsn, s)
