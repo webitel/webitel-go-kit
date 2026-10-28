@@ -9,16 +9,21 @@ type TLS struct {
 	Key  string `mapstructure:"key"`
 }
 
-// GRPCConn is the outbound gRPC connection TLS configuration.
+// GRPCConn is the gRPC TLS configuration: the embedded TLS and MTLS configure
+// the server, Client configures outbound calls.
 // It is embedded under mapstructure key "conn" in ServiceConfig.
 type GRPCConn struct {
 	TLS         `mapstructure:",squash"`
 	VerifyCerts bool `mapstructure:"verify_certs"`
+	MTLS        bool `mapstructure:"mtls"` // MTLS: server requires client certs. Default true only via RegisterGRPCConnFlags.
 	Client      TLS  `mapstructure:"client"`
 }
 
 // ValidateTLS returns an error if any required certificate path is missing.
 // Call only when VerifyCerts is true.
+//
+// Deprecated: ValidateGRPCConn no longer uses it and checks the server and
+// client sections separately.
 func ValidateTLS(prefix string, t TLS) error {
 	if t.CA == "" {
 		return configError(prefix + ".ca is required when verify_certs is true")
@@ -33,9 +38,22 @@ func ValidateTLS(prefix string, t TLS) error {
 }
 
 // ValidateGRPCConn validates the GRPCConn TLS settings when verify_certs is enabled.
+// CA is needed only with mTLS; Client.Cert and Key go together. Client.CA is checked when the client is built.
 func ValidateGRPCConn(prefix string, conn GRPCConn) error {
-	if conn.VerifyCerts {
-		return ValidateTLS(prefix, conn.TLS)
+	if !conn.VerifyCerts {
+		return nil
+	}
+	if conn.Cert == "" {
+		return configError(prefix + ".cert is required when verify_certs is true")
+	}
+	if conn.Key == "" {
+		return configError(prefix + ".key is required when verify_certs is true")
+	}
+	if conn.MTLS && conn.CA == "" {
+		return configError(prefix + ".ca is required when mtls is true")
+	}
+	if (conn.Client.Cert == "") != (conn.Client.Key == "") {
+		return configError(prefix + ".client.cert and " + prefix + ".client.key must be set together")
 	}
 	return nil
 }
@@ -47,6 +65,7 @@ func ValidateGRPCConn(prefix string, conn GRPCConn) error {
 // Registered flags and their env equivalents (prefix = "service.conn"):
 //
 //	service.conn.verify_certs → SERVICE_CONN_VERIFY_CERTS
+//	service.conn.mtls         → SERVICE_CONN_MTLS
 //	service.conn.ca           → SERVICE_CONN_CA
 //	service.conn.cert         → SERVICE_CONN_CERT
 //	service.conn.key          → SERVICE_CONN_KEY
@@ -54,7 +73,8 @@ func ValidateGRPCConn(prefix string, conn GRPCConn) error {
 //	service.conn.client.cert  → SERVICE_CONN_CLIENT_CERT
 //	service.conn.client.key   → SERVICE_CONN_CLIENT_KEY
 func RegisterGRPCConnFlags(fs *pflag.FlagSet, prefix string, verifyDefault bool) {
-	fs.Bool(prefix+".verify_certs", verifyDefault, "Verify TLS certificates on outbound gRPC connections")
+	fs.Bool(prefix+".verify_certs", verifyDefault, "Enable TLS with certificate verification for the gRPC server and client")
+	fs.Bool(prefix+".mtls", true, "Require and verify client certificates (mutual TLS)")
 	fs.String(prefix+".ca", "", "CA certificate path")
 	fs.String(prefix+".cert", "", "Server certificate path")
 	fs.String(prefix+".key", "", "Server certificate key path")
