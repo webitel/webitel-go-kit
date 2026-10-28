@@ -1,13 +1,9 @@
-// Package pgwfx wires a pgw.PoolManager into an fx application: it opens the
-// pool on start, closes it on stop, and can register an informational health
-// check from the primary pool state (no SELECT 1). The module provides *Pool.
+// Package pgwfx wires pgw.PoolManager into an fx application.
 package pgwfx
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"sync"
 
 	"go.uber.org/fx"
 
@@ -15,29 +11,14 @@ import (
 	"github.com/webitel/webitel-go-kit/infra/pgw"
 )
 
-// Config tunes the module. DSN is required. Zero pool limits leave pgw defaults.
+// Config for Module.
 type Config struct {
-	// ApplicationName sets PostgreSQL application_name on every connection.
 	ApplicationName string
-	// DSN is the primary database URL.
-	DSN string
-	// MaxConns maps to pgw PrimaryConfig.MaxConns. Zero keeps the pgw default.
-	MaxConns int
-	// MinConns maps to pgw PrimaryConfig.MinConns. Zero keeps the pgw default.
-	MinConns int
-	// StandbyDSN lists read-only replica URLs. Empty disables standbys.
-	StandbyDSN []string
-	// RegisterHealth registers Informational(SystemPostgreSQL) when a
-	// *health.Registry is in the graph. The check uses Primary() pool state.
-	RegisterHealth bool
-}
-
-func (c Config) validate() error {
-	if c.DSN == "" {
-		return errors.New("pgwfx: DSN is required")
-	}
-
-	return nil
+	DSN             string
+	MaxConns        int
+	MinConns        int
+	StandbyDSN      []string
+	RegisterHealth  bool
 }
 
 func (c Config) options(extra []pgw.ConfigOption) []pgw.ConfigOption {
@@ -69,104 +50,45 @@ type params struct {
 	Health    *health.Registry `optional:"true"`
 }
 
-// Module provides *Pool. It dials the primary during OnStart and closes it
-// during OnStop — the same lifecycle as webitel-ai-hub / webitel-kb
-// postgres.Module. With RegisterHealth and a *health.Registry in the graph it
-// registers an informational PostgreSQL check based on primary pool state.
+// Module provides *pgw.PoolManager.
 func Module(cfg Config, opts ...pgw.ConfigOption) fx.Option {
 	return fx.Module("pgw",
-		fx.Provide(func(p params) (*Pool, error) {
+		fx.Provide(func(p params) (*pgw.PoolManager, error) {
 			return provide(cfg, p, opts)
 		}),
-		fx.Invoke(func(*Pool) {}),
+		fx.Invoke(func(*pgw.PoolManager) {}),
 	)
 }
 
-// Pool owns the pgw pool manager.
-//
-// Ready fails with pgw.ErrUnreachable until OnStart connects the primary.
-// A later outage makes Primary return the same error while pgw reconnects.
-//
-// mu guards the manager pointer so Close can take ownership once: health
-// checks may still call Ready while shutdown runs Close.
-type Pool struct {
-	mu      sync.RWMutex
-	manager *pgw.PoolManager
-}
-
-func provide(cfg Config, p params, opts []pgw.ConfigOption) (*Pool, error) {
-	if err := cfg.validate(); err != nil {
-		return nil, err
+func provide(cfg Config, p params, opts []pgw.ConfigOption) (*pgw.PoolManager, error) {
+	manager, err := pgw.New(cfg.options(opts)...)
+	if err != nil {
+		return nil, fmt.Errorf("create pgw pool manager: %w", err)
 	}
-
-	db := &Pool{}
 
 	p.Lifecycle.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			return db.open(ctx, cfg, opts)
+			if err := manager.Start(ctx); err != nil {
+				manager.Close() // fx skips OnStop when this OnStart fails
+				return fmt.Errorf("start pgw pool: %w", err)
+			}
+
+			return nil
 		},
 		OnStop: func(context.Context) error {
-			db.close()
+			manager.Close()
 
 			return nil
 		},
 	})
 
 	if cfg.RegisterHealth && p.Health != nil {
-		p.Health.Informational(health.SystemPostgreSQL, db.Ready)
+		p.Health.Informational(health.SystemPostgreSQL, func(context.Context) error {
+			_, err := manager.Primary()
+
+			return err
+		})
 	}
 
-	return db, nil
-}
-
-func (p *Pool) open(ctx context.Context, cfg Config, opts []pgw.ConfigOption) error {
-	manager, err := pgw.NewPoolManager(ctx, cfg.options(opts)...)
-	if err != nil {
-		return fmt.Errorf("open pgw pool: %w", err)
-	}
-
-	p.mu.Lock()
-	p.manager = manager
-	p.mu.Unlock()
-
-	return nil
-}
-
-func (p *Pool) close() {
-	p.mu.Lock()
-	manager := p.manager
-	p.manager = nil
-	p.mu.Unlock()
-
-	if manager == nil {
-		return
-	}
-
-	manager.Close()
-}
-
-// Manager returns the live *pgw.PoolManager, or nil before OnStart / after OnStop.
-func (p *Pool) Manager() *pgw.PoolManager {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	return p.manager
-}
-
-// Primary returns the read-write pool, or pgw.ErrUnreachable when it is down.
-func (p *Pool) Primary() (*pgw.Pool, error) {
-	manager := p.Manager()
-	if manager == nil {
-		return nil, pgw.ErrUnreachable
-	}
-
-	return manager.Primary()
-}
-
-// Ready reports whether the primary pool is in the connected state.
-// Prefer this over a round-trip ping: pgw already health-checks the pool.
-func (p *Pool) Ready(context.Context) error {
-	_, err := p.Primary()
-
-	return err
+	return manager, nil
 }

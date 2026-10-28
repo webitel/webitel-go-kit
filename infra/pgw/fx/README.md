@@ -1,17 +1,18 @@
 # pgwfx
 
-PostgreSQL pool manager for an fx application. The module opens a `pgw.PoolManager`
-on start, closes it on stop, and optionally registers an informational health
-check from the primary pool state (no `SELECT 1`).
+PostgreSQL pool manager for an fx application. The module starts a
+`pgw.PoolManager` on application start, closes it on stop, and optionally
+registers an informational health check from the primary pool state (no
+`SELECT 1`).
 
-The graph receives `*pgwfx.Pool`. Call `Manager()` for `*pgw.PoolManager`, or
-`Primary()` / `Ready()` directly — the same shell pattern as the former
-service-local `postgres.Module`.
+The graph receives `*pgw.PoolManager`. Constraint processors can be registered
+in constructors before `OnStart`; call `Primary()` per request.
 
 ## Usage
 
 ```go
 import (
+    "github.com/webitel/webitel-go-kit/infra/pgw"
     pgwfx "github.com/webitel/webitel-go-kit/infra/pgw/fx"
     healthfx "github.com/webitel/webitel-go-kit/infra/health/fx"
 )
@@ -26,15 +27,13 @@ fx.New(
         MinConns:        cfg.Postgres.MaxIdleConns,
         RegisterHealth:  true,
     }),
-    fx.Provide(func(p *pgwfx.Pool) *Store {
-        return NewStore(p) // hold *Pool; call Manager() / Primary() per request
+    fx.Provide(func(m *pgw.PoolManager) *Store {
+        _ = m.RegisterUniqueViolation("users_email_key", mapEmailTaken)
+        return NewStore(m)
     }),
     healthfx.Shutdown(),
 )
 ```
-
-Hold `*pgwfx.Pool` in the store — `Manager()` is nil until `OnStart` finishes.
-Call `Manager()` / `Primary()` per request, not in the constructor.
 
 `DSN` is required. Zero `MaxConns` / `MinConns` leave pgw defaults. Pass extra
 `pgw.ConfigOption` values after the config for tracer, standby, migration
@@ -48,8 +47,8 @@ pgwfx.Module(cfg, pgw.WithTracer(myTracer))
 
 With `RegisterHealth: true` and a `*health.Registry` in the graph (for example
 from `healthfx.Module`), the module registers
-`Informational(SystemPostgreSQL)` using `Pool.Ready` — primary `GetState` /
-`Primary()`, not a round-trip ping. Without a registry the flag is a no-op.
+`Informational(SystemPostgreSQL)` using `Primary()` — pool state, not a
+round-trip ping. Without a registry the flag is a no-op.
 
 Separate primary vs standby checks are out of scope for this module.
 
@@ -67,8 +66,8 @@ pgwfx.Module(pgwfx.Config{
     MinConns:        cfg.Postgres.MaxIdleConns,
     RegisterHealth:  true,
 }),
-fx.Provide(func(p *pgwfx.Pool) *Store {
-    return NewStore(p)
+fx.Provide(func(m *pgw.PoolManager) *Store {
+    return NewStore(m)
 }),
 ```
 
