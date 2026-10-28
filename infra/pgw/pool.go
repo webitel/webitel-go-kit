@@ -107,27 +107,34 @@ func (h *Pool) verifyMigration(ctx context.Context) error {
 	return nil
 }
 
-func (h *Pool) ConnectWithRetry(maxAttempts int, strategy RetryStrategy, baseValue int) error {
+func (h *Pool) ConnectWithRetry(ctx context.Context, maxAttempts int, strategy RetryStrategy, baseValue int) error {
 	h.reconnectMu.Lock()
 	defer h.reconnectMu.Unlock()
 
 	var lastErr error
 	for i := 1; i <= maxAttempts; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), h.config.HealthCheckTimeout)
-		err := h.Connect(ctx)
+		attemptCtx, cancel := context.WithTimeout(ctx, h.config.HealthCheckTimeout)
+		err := h.Connect(attemptCtx)
 		cancel()
 		if err == nil {
 			return nil
 		}
 
 		lastErr = err
-		if i < maxAttempts {
-			timeToWait := strategy(baseValue, i)
-			select {
-			case <-time.After(timeToWait):
-			case <-h.closeChan:
-				return errors.New("pool closed while waiting for reconnect")
-			}
+		if i >= maxAttempts {
+			break
+		}
+
+		timeToWait := strategy(baseValue, i)
+		timer := time.NewTimer(timeToWait)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-h.closeChan:
+			timer.Stop()
+			return errors.New("pool closed while waiting for reconnect")
 		}
 	}
 	return lastErr

@@ -20,8 +20,6 @@ github.com/webitel/webitel-go-kit/infra/health v0.4.0 h1:X8t4UDUjZg7HC8jqqB5lF3U
 github.com/webitel/webitel-go-kit/infra/health v0.4.0/go.mod h1:qumOZfpiFfBSIxGd3CMiEyiNKY4xNaVpUh6nlnTgoPk=
 github.com/webitel/webitel-go-kit/infra/health/fx v0.2.0 h1:uOUsvzomDYzrutVe1GJKWgCIfb0M3ddzaA9rd0cvCdk=
 github.com/webitel/webitel-go-kit/infra/health/fx v0.2.0/go.mod h1:13ea4gkmeS6xAOqHotMxkKorBfTEPAWPx7kWxGsQaJ0=
-github.com/webitel/webitel-go-kit/infra/pgw v0.1.0 h1:mlIpO5HeQnsSVgayCgC64JSEAh70ZGs5Y2kciEIhXXI=
-github.com/webitel/webitel-go-kit/infra/pgw v0.1.0/go.mod h1:qCx9C8/4jpG4BgzLNkE6yuQjGN7URfMoPxCFU1nvE4A=
 github.com/webitel/webitel-go-kit/pkg/safemap v0.1.1-0.20260617101709-72b6b829c7ef h1:fQ7a4mqj2jXz/6AnBU6yfCxMVn7XJcTryQCwz+nAD0Y=
 github.com/webitel/webitel-go-kit/pkg/safemap v0.1.1-0.20260617101709-72b6b829c7ef/go.mod h1:0mRzFyKLNDA+WAiWPHPdURYvdCJ1nGdPELZaeuJwJxE=
 go.uber.org/dig v1.19.0 h1:BACLhebsYdpQ7IROQ1AGPjrXcP5dF80U3gKoFzbaq/4=

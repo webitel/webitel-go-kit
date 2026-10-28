@@ -17,32 +17,6 @@ import (
 	"github.com/webitel/webitel-go-kit/infra/pgw"
 )
 
-func TestConfigValidate(t *testing.T) {
-	tests := []struct {
-		name    string
-		cfg     Config
-		wantErr string
-	}{
-		{name: "empty DSN", cfg: Config{}, wantErr: "DSN is required"},
-		{name: "ok", cfg: Config{DSN: "postgres://localhost/db"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.cfg.validate()
-			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("validate() = %v, want nil", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("validate() = %v, want error containing %q", err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestConfigOptions(t *testing.T) {
 	cfg := Config{
 		ApplicationName: "svc",
@@ -93,44 +67,31 @@ func TestModule_RequiresDSN(t *testing.T) {
 	)
 
 	if err := app.Err(); err == nil || !strings.Contains(err.Error(), "DSN is required") {
-		t.Fatalf("app.Err() = %v, want a missing DSN error", err)
+		t.Fatalf("app.Err() = %v, want DSN required from pgw.New", err)
 	}
 }
 
-func TestPool_ReadyBeforeOpen(t *testing.T) {
-	db := &Pool{}
-
-	err := db.Ready(context.Background())
-	if !errors.Is(err, pgw.ErrUnreachable) {
-		t.Fatalf("Ready() error = %v, want ErrUnreachable", err)
-	}
-}
-
-func TestPool_CloseBeforeOpen(t *testing.T) {
-	(&Pool{}).close()
-}
-
-func TestModule_ProvidesPool(t *testing.T) {
-	var got *Pool
+func TestModule_ProvidesManagerBeforeStart(t *testing.T) {
+	var got *pgw.PoolManager
 
 	app := fx.New(
 		fx.NopLogger,
-		Module(Config{DSN: "postgres://invalid:1/db"}),
+		Module(Config{DSN: "postgres://localhost/db"}),
 		fx.Populate(&got),
 	)
 
 	if err := app.Err(); err != nil {
-		t.Fatalf("app.Err() = %v, want nil (open deferred to OnStart)", err)
+		t.Fatalf("app.Err() = %v, want nil (Start deferred to OnStart)", err)
 	}
 	if got == nil {
-		t.Fatal("Pool was not provided")
+		t.Fatal("PoolManager was not provided")
 	}
-	if got.Manager() != nil {
-		t.Fatal("Manager() before Start = non-nil, want nil")
+	if _, err := got.Primary(); !errors.Is(err, pgw.ErrUnreachable) {
+		t.Fatalf("Primary() before Start = %v, want ErrUnreachable", err)
 	}
 }
 
-func TestModule_LifecycleOpenFails(t *testing.T) {
+func TestModule_LifecycleStartFails(t *testing.T) {
 	dsn := "postgres://127.0.0.1:1/db?connect_timeout=1"
 	app := fxtest.New(t,
 		Module(Config{DSN: dsn}, pgw.WithPrimaryConfig(pgw.PrimaryConfig{
@@ -143,10 +104,10 @@ func TestModule_LifecycleOpenFails(t *testing.T) {
 	err := app.Start(context.Background())
 	if err == nil {
 		app.RequireStop()
-		t.Fatal("Start() = nil, want open error")
+		t.Fatal("Start() = nil, want start error")
 	}
-	if !strings.Contains(err.Error(), "open pgw pool") {
-		t.Fatalf("Start() error = %v, want open pgw pool", err)
+	if !strings.Contains(err.Error(), "start pgw pool") {
+		t.Fatalf("Start() error = %v, want start pgw pool", err)
 	}
 }
 
@@ -158,7 +119,7 @@ func TestModule_RegisterHealthOptional(t *testing.T) {
 		fx.Supply(slog.New(slog.NewTextHandler(io.Discard, nil))),
 		healthfx.Module(healthfx.Config{}),
 		Module(Config{
-			DSN:            "postgres://invalid:1/db",
+			DSN:            "postgres://localhost/db",
 			RegisterHealth: true,
 		}),
 		fx.Populate(&registry),
@@ -171,7 +132,6 @@ func TestModule_RegisterHealthOptional(t *testing.T) {
 		t.Fatal("health registry was not provided")
 	}
 
-	// Check is registered; before Start it reports unreachable via pool state.
 	snap := registry.Snapshot()
 	found := false
 	for _, c := range snap.Checks {
@@ -192,7 +152,7 @@ func TestModule_RegisterHealthSkippedWithoutFlag(t *testing.T) {
 		fx.NopLogger,
 		fx.Supply(slog.New(slog.NewTextHandler(io.Discard, nil))),
 		healthfx.Module(healthfx.Config{}),
-		Module(Config{DSN: "postgres://invalid:1/db"}),
+		Module(Config{DSN: "postgres://localhost/db"}),
 		fx.Populate(&registry),
 	)
 
@@ -204,12 +164,5 @@ func TestModule_RegisterHealthSkippedWithoutFlag(t *testing.T) {
 		if c.System == health.SystemPostgreSQL {
 			t.Fatal("postgresql check registered without RegisterHealth")
 		}
-	}
-}
-
-func TestPool_PrimaryBeforeOpen(t *testing.T) {
-	_, err := (&Pool{}).Primary()
-	if !errors.Is(err, pgw.ErrUnreachable) {
-		t.Fatalf("Primary() error = %v, want ErrUnreachable", err)
 	}
 }
