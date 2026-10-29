@@ -3,6 +3,9 @@ package pgw
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,28 +19,33 @@ const (
 
 var (
 	ErrUnreachable = errors.New("the resource is unreachable now")
+	ErrClosed      = errors.New("pgw: pool manager is closed")
+	ErrStarted     = errors.New("pgw: pool manager is already started")
 )
 
 type PoolManager struct {
 	config *Config
 
-	master *Pool
+	master atomic.Pointer[Pool]
 
 	standbyManager *standbyManager
 
 	errorsManager *errorsManager
 
 	closeChan chan struct{}
+	closeOnce sync.Once
+	started   atomic.Bool
 }
 
 // Primary returns the primary pool.
 // It returns an error if the primary pool is not connected.
 func (c *PoolManager) Primary() (*Pool, error) {
-	if c.master == nil || c.master.GetState() != HostStateConnected {
+	master := c.master.Load()
+	if master == nil || master.GetState() != HostStateConnected {
 		return nil, ErrUnreachable
 	}
 
-	return c.master, nil
+	return master, nil
 }
 
 // Standby returns the standby pool.
@@ -82,16 +90,21 @@ func (e *PoolManager) RegisterNotNullViolation(table string, column string, proc
 	return e.errorsManager.RegisterNotNullViolationProcessor(table, column, processor)
 }
 
-// Close closes the pool manager and all its pools.
+// Close closes the pool manager and all its pools. It is safe to call more than once.
 func (c *PoolManager) Close() {
-	close(c.closeChan)
-	if c.master != nil {
-		c.master.Close()
-	}
-	c.standbyManager.Close()
+	c.closeOnce.Do(func() {
+		close(c.closeChan)
+		if master := c.master.Swap(nil); master != nil {
+			master.Close()
+		}
+		if c.standbyManager != nil {
+			c.standbyManager.Close()
+		}
+	})
 }
 
-func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager, error) {
+// New builds a PoolManager without connecting.
+func New(options ...ConfigOption) (*PoolManager, error) {
 	cfg := &Config{
 		PrimaryConfig: DefaultPrimaryPoolConfig,
 		StandbyConfig: DefaultStandbyPoolConfig,
@@ -100,27 +113,74 @@ func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager,
 	for _, opt := range options {
 		opt(cfg)
 	}
+
+	if cfg.PrimaryConfig.DSN == "" {
+		return nil, errors.New("primary config DSN is required")
+	}
+
 	cfg.PrimaryConfig = mergePrimaryPoolConfigWithDefault(cfg.PrimaryConfig)
 	cfg.StandbyConfig = mergeStandbyPoolConfigWithDefault(cfg.StandbyConfig)
 
-	conn := &PoolManager{
-		config:        cfg,
-		closeChan:     make(chan struct{}),
-		errorsManager: newErrorsManager(),
-	}
-
-	err := conn.initPrimary(ctx, cfg)
+	errorsMgr := newErrorsManager()
+	standby, err := newStandbyManager(standbyManagerConfig{
+		PickStrategy:                  cfg.StandbyConfig.PickStrategy,
+		UnhealthyStandbyRetryInterval: cfg.StandbyConfig.UnhealthyReplicaRetryInterval,
+		RetriesBeforeUnhealthy:        cfg.StandbyConfig.RetriesBeforeUnhealthy,
+		RetryStrategy:                 cfg.StandbyConfig.RetryStrategy,
+		RetryStrategyBaseValue:        cfg.StandbyConfig.RetryStrategyBaseValue,
+		HostHealthCheckInterval:       cfg.StandbyConfig.HealthCheckInterval,
+		HostHealthCheckTimeout:        cfg.StandbyConfig.HealthCheckTimeout,
+		ErrorParser:                   errorsMgr,
+		MigrationVerifier:             cfg.MigrationVerifier,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	err = conn.initStandby(ctx, cfg)
+	return &PoolManager{
+		config:         cfg,
+		closeChan:      make(chan struct{}),
+		errorsManager:  errorsMgr,
+		standbyManager: standby,
+	}, nil
+}
+
+// NewPoolManager is New followed by Start.
+func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager, error) {
+	m, err := New(options...)
 	if err != nil {
-		conn.master.Close()
+		return nil, err
+	}
+	if err := m.Start(ctx); err != nil {
+		m.Close()
 		return nil, err
 	}
 
-	return conn, nil
+	return m, nil
+}
+
+// Start dials the primary and standbys.
+// Returns ErrStarted on a second call, ErrClosed after Close.
+func (c *PoolManager) Start(ctx context.Context) error {
+	if c.isClosed() {
+		return ErrClosed
+	}
+	if !c.started.CompareAndSwap(false, true) {
+		return ErrStarted
+	}
+
+	if err := c.initPrimary(ctx, c.config); err != nil {
+		return err
+	}
+
+	if err := c.addStandbys(ctx, c.config); err != nil {
+		if master := c.master.Swap(nil); master != nil {
+			master.Close()
+		}
+		return err
+	}
+
+	return nil
 }
 
 func mergePrimaryPoolConfigWithDefault(primaryConfig PrimaryConfig) PrimaryConfig {
@@ -208,6 +268,7 @@ func (c *PoolManager) initPrimary(ctx context.Context, config *Config) error {
 	}
 
 	err = defaultPool.ConnectWithRetry(
+		ctx,
 		primaryConfig.RetryAttempts,
 		primaryConfig.RetryStrategy,
 		primaryConfig.RetryStrategyBaseValue)
@@ -217,17 +278,29 @@ func (c *PoolManager) initPrimary(ctx context.Context, config *Config) error {
 		return err
 	}
 
-	c.master = defaultPool
+	c.master.Store(defaultPool)
+	if c.isClosed() {
+		if master := c.master.Swap(nil); master != nil {
+			master.Close()
+		}
+		return ErrClosed
+	}
 	go c.startMasterMonitor()
 
 	return nil
 }
 
+func (c *PoolManager) isClosed() bool {
+	select {
+	case <-c.closeChan:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *PoolManager) buildPrimaryPgxPool(ctx context.Context, config *Config) (*pgxpool.Pool, error) {
 	primaryConfig := config.PrimaryConfig
-	if primaryConfig.DSN == "" {
-		return nil, errors.New("primary config DSN is required")
-	}
 
 	poolConfig, err := pgxpool.ParseConfig(primaryConfig.DSN)
 	if err != nil {
@@ -258,8 +331,13 @@ func (c *PoolManager) buildPrimaryPgxPool(ctx context.Context, config *Config) (
 
 func (c *PoolManager) startMasterMonitor() {
 	go func() {
+		master := c.master.Load()
+		if master == nil {
+			return
+		}
+
 		ctx, cancel := context.WithCancel(context.Background())
-		ch := c.master.SubscribeStateChange(ctx)
+		ch := master.SubscribeStateChange(ctx)
 		defer cancel()
 		for {
 			select {
@@ -285,7 +363,12 @@ func (c *PoolManager) reconnectMasterLoop() {
 		case <-c.closeChan:
 			return
 		case <-time.After(masterCfg.RetryInterval):
-			err := c.master.ConnectWithRetry(
+			master := c.master.Load()
+			if master == nil {
+				return
+			}
+			err := master.ConnectWithRetry(
+				context.Background(),
 				masterCfg.RetryAttempts,
 				masterCfg.RetryStrategy,
 				masterCfg.RetryStrategyBaseValue)
@@ -297,27 +380,9 @@ func (c *PoolManager) reconnectMasterLoop() {
 	}
 }
 
-func (c *PoolManager) initStandby(ctx context.Context, config *Config) error {
-	var (
-		replicaConfig = config.StandbyConfig
-	)
-	manager, err := newStandbyManager(standbyManagerConfig{
-		PickStrategy:                  replicaConfig.PickStrategy,
-		UnhealthyStandbyRetryInterval: replicaConfig.UnhealthyReplicaRetryInterval,
-		RetriesBeforeUnhealthy:        replicaConfig.RetriesBeforeUnhealthy,
-		RetryStrategy:                 replicaConfig.RetryStrategy,
-		RetryStrategyBaseValue:        replicaConfig.RetryStrategyBaseValue,
-		HostHealthCheckInterval:       replicaConfig.HealthCheckInterval,
-		HostHealthCheckTimeout:        replicaConfig.HealthCheckTimeout,
-		ErrorParser:                   c.errorsManager,
-		MigrationVerifier:             config.MigrationVerifier,
-	})
-	if err != nil {
-		return err
-	}
-	c.standbyManager = manager
-
-	if len(config.StandbyConfig.DSN) == 0 {
+func (c *PoolManager) addStandbys(ctx context.Context, config *Config) error {
+	replicaConfig := config.StandbyConfig
+	if len(replicaConfig.DSN) == 0 {
 		return nil
 	}
 
@@ -351,13 +416,11 @@ func (c *PoolManager) initStandby(ctx context.Context, config *Config) error {
 			return err
 		}
 
-		err = c.standbyManager.AddStandby(ctx, pool)
-		if err != nil {
-			return err
+		if err := c.standbyManager.AddStandby(ctx, pool); err != nil {
+			return fmt.Errorf("add standby: %w", err)
 		}
 	}
 	return nil
-
 }
 
 func (c *PoolManager) setPoolApplicationName(poolConfig *pgxpool.Config, applicationName string) {

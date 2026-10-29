@@ -13,7 +13,7 @@ go get github.com/webitel/webitel-go-kit/infra/pgw
 ## Quick start
 
 ```go
-manager, err := pgw.NewPoolManager(ctx,
+manager, err := pgw.New(
     pgw.WithPrimaryConfig(pgw.PrimaryConfig{
         DSN:      "postgres://user:pass@localhost:5432/mydb",
         MaxConns: 20,
@@ -26,6 +26,13 @@ if err != nil {
 }
 defer manager.Close()
 
+// Optional: register constraint processors before Start.
+_ = manager.RegisterUniqueViolation("users_email_key", mapEmailTaken)
+
+if err := manager.Start(ctx); err != nil {
+    log.Fatal(err)
+}
+
 primary, err := manager.Primary()
 if err != nil {
     return err // pgw.ErrUnreachable if the primary is down
@@ -33,6 +40,11 @@ if err != nil {
 
 rows, err := primary.Query(ctx, "SELECT id, name FROM users WHERE active = $1", true)
 ```
+
+`New` builds the manager without dialing. `Start` connects the primary (and
+standbys). Until `Start` succeeds, `Primary` / `Standby` return `ErrUnreachable`.
+
+`NewPoolManager(ctx, opts...)` remains as `New` + `Start` for existing callers.
 
 ## Connection routing
 
@@ -45,7 +57,7 @@ rows, err := primary.Query(ctx, "SELECT id, name FROM users WHERE active = $1", 
 ## Configuration
 
 ```go
-manager, err := pgw.NewPoolManager(ctx,
+manager, err := pgw.New(
     pgw.WithApplicationName("my-service"),
     pgw.WithPrimaryConfig(pgw.PrimaryConfig{
         DSN:                    "postgres://...",
@@ -70,6 +82,12 @@ manager, err := pgw.NewPoolManager(ctx,
         RetryStrategyBaseValue:        2,
     }),
 )
+if err != nil {
+    log.Fatal(err)
+}
+if err := manager.Start(ctx); err != nil {
+    log.Fatal(err)
+}
 ```
 
 `DefaultPrimaryPoolConfig` and `DefaultStandbyPoolConfig` are applied automatically — only override the fields you need.
