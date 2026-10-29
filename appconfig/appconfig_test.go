@@ -2,6 +2,7 @@ package appconfig_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -298,6 +299,20 @@ func TestValidateGRPCConn(t *testing.T) {
 			t.Error("expected error for missing certs")
 		}
 	})
+	t.Run("server CA is required regardless of mtls", func(t *testing.T) {
+		for _, mtls := range []bool{false, true} {
+			conn := appconfig.GRPCConn{VerifyCerts: true, MTLS: mtls, TLS: appconfig.TLS{Cert: "cert.pem", Key: "key.pem"}}
+			if err := appconfig.ValidateGRPCConn("service.conn", conn); err == nil || !strings.Contains(err.Error(), "service.conn.ca") {
+				t.Errorf("mtls=%v: expected error about service.conn.ca, got %v", mtls, err)
+			}
+		}
+	})
+	t.Run("server-only config without client section is valid", func(t *testing.T) {
+		conn := appconfig.GRPCConn{VerifyCerts: true, MTLS: true, TLS: appconfig.TLS{CA: "ca.pem", Cert: "cert.pem", Key: "key.pem"}}
+		if err := appconfig.ValidateGRPCConn("service.conn", conn); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
 }
 
 // ── RegisterGRPCConnFlags ─────────────────────────────────────────────────────
@@ -308,6 +323,7 @@ func TestRegisterGRPCConnFlags(t *testing.T) {
 
 	expected := []string{
 		"service.conn.verify_certs",
+		"service.conn.mtls",
 		"service.conn.ca",
 		"service.conn.cert",
 		"service.conn.key",
@@ -325,6 +341,9 @@ func TestRegisterGRPCConnFlags(t *testing.T) {
 	f := fs.Lookup("service.conn.verify_certs")
 	if f.DefValue != "true" {
 		t.Errorf("verify_certs default: want true, got %q", f.DefValue)
+	}
+	if f := fs.Lookup("service.conn.mtls"); f.DefValue != "true" {
+		t.Errorf("mtls default: want true, got %q", f.DefValue)
 	}
 }
 
