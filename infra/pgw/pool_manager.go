@@ -285,7 +285,7 @@ func (c *PoolManager) initPrimary(ctx context.Context, config *Config) error {
 		}
 		return ErrClosed
 	}
-	go c.startMasterMonitor()
+	c.startMasterMonitor()
 
 	return nil
 }
@@ -373,7 +373,7 @@ func (c *PoolManager) reconnectMasterLoop() {
 				masterCfg.RetryStrategy,
 				masterCfg.RetryStrategyBaseValue)
 			if err == nil {
-				go c.startMasterMonitor()
+				c.startMasterMonitor()
 				return
 			}
 		}
