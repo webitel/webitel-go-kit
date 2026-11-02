@@ -48,9 +48,14 @@ const (
 	EtagArticle                                           // Article type
 )
 
+// Workforce-management ETag types.
+const (
+	EtagWorkingSchedule EtagType = iota + EtagArticle + 1 // Working Schedule type
+)
+
 // **maxWellKnownType** is updated after the latest block to track the highest value.
 // Future blocks for other business entities will start counting from this value.
-const maxWellKnownType = EtagArticle
+const maxWellKnownType = EtagWorkingSchedule
 
 // validType checks if the provided type is valid.
 func validType(typ EtagType) bool {
