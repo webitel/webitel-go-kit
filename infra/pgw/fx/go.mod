@@ -5,11 +5,9 @@ go 1.25.4
 require (
 	github.com/webitel/webitel-go-kit/infra/health v0.4.0
 	github.com/webitel/webitel-go-kit/infra/health/fx v0.2.0
-	github.com/webitel/webitel-go-kit/infra/pgw v0.1.0
+	github.com/webitel/webitel-go-kit/infra/pgw v1.0.0
 	go.uber.org/fx v1.24.0
 )
-
-replace github.com/webitel/webitel-go-kit/infra/pgw => ../
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
