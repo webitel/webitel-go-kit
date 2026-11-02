@@ -47,6 +47,7 @@ on:
           - infra/logger_client
           - infra/otel
           - infra/pgw
+          - infra/pgw/fx
           - infra/profiler
           - infra/pubsub/rabbitmq
           - infra/ratelimit
