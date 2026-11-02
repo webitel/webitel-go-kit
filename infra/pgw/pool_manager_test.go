@@ -54,7 +54,7 @@ func TestStart_AfterClose(t *testing.T) {
 	}
 }
 
-func TestStart_Twice(t *testing.T) {
+func TestStart_FailedAllowsRetry(t *testing.T) {
 	m, err := New(WithPrimaryConfig(PrimaryConfig{
 		DSN:                "postgres://127.0.0.1:1/db?connect_timeout=1",
 		RetryAttempts:      1,
@@ -68,8 +68,9 @@ func TestStart_Twice(t *testing.T) {
 	if err := m.Start(context.Background()); err == nil {
 		t.Fatal("first Start() = nil, want connect error")
 	}
-	if err := m.Start(context.Background()); !errors.Is(err, ErrStarted) {
-		t.Fatalf("second Start() = %v, want ErrStarted", err)
+	// Failed Start must not stick as "started"; retry should dial again.
+	if err := m.Start(context.Background()); err == nil || errors.Is(err, ErrStarted) {
+		t.Fatalf("second Start() = %v, want connect error (not ErrStarted)", err)
 	}
 }
 

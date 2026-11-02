@@ -160,7 +160,8 @@ func NewPoolManager(ctx context.Context, options ...ConfigOption) (*PoolManager,
 }
 
 // Start dials the primary and standbys.
-// Returns ErrStarted on a second call, ErrClosed after Close.
+// Returns ErrStarted on a second successful call, ErrClosed after Close.
+// A failed Start resets the started flag so the caller may retry.
 func (c *PoolManager) Start(ctx context.Context) error {
 	if c.isClosed() {
 		return ErrClosed
@@ -170,6 +171,7 @@ func (c *PoolManager) Start(ctx context.Context) error {
 	}
 
 	if err := c.initPrimary(ctx, c.config); err != nil {
+		c.started.Store(false)
 		return err
 	}
 
@@ -177,6 +179,7 @@ func (c *PoolManager) Start(ctx context.Context) error {
 		if master := c.master.Swap(nil); master != nil {
 			master.Close()
 		}
+		c.started.Store(false)
 		return err
 	}
 
