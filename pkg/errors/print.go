@@ -3,34 +3,46 @@ package errors
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
 // Details returns err.Error() and any additional details.
 // The details of each error cause chain will also be printed.
+// String keys from Values are emitted in sorted order for stable output.
 func Details(err error) string {
 	if err == nil {
 		return ""
 	}
 
-	var det string
+	var b strings.Builder
+
+	if id := ID(err); id != "" {
+		fmt.Fprintf(&b, "%s: ", id)
+	}
+
+	b.WriteString(err.Error())
+
 	values := Values(err)
-	for key, value := range values {
+	keys := make([]string, 0, len(values))
+
+	for key := range values {
 		if k, ok := key.(string); ok {
-			det = fmt.Sprintf("%s; %s = %s", det, k, value)
+			keys = append(keys, k)
 		}
 	}
 
-	msg := err.Error() + det
-	if id := ID(err); id != "" {
-		msg = id + ": " + msg
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		fmt.Fprintf(&b, "; %s = %v", key, values[key])
 	}
 
 	if cause := Cause(err); cause != nil {
-		msg += "; caused by: " + Details(cause)
+		fmt.Fprintf(&b, "; caused by: %s", Details(cause))
 	}
 
-	return msg
+	return b.String()
 }
 
 // Format adapts errors to fmt.Formatter interface.

@@ -28,13 +28,8 @@ func TestErrWithValue_Format(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s", err), "Hi: Bye")
 
 	err = werror.Wrap(err, werror.WithValue("raw", "blue"))
-	// %+v and Details() both range Values independently; assert content, not key order.
-	for _, got := range []string{fmt.Sprintf("%+v", err), werror.Details(err)} {
-		assert.Contains(t, got, "Hi")
-		assert.Contains(t, got, "color = red")
-		assert.Contains(t, got, "raw = blue")
-		assert.Contains(t, got, "caused by: Bye")
-	}
+	assert.Equal(t, fmt.Sprintf("%+v", err), werror.Details(err))
+	assert.Equal(t, "Hi; color = red; raw = blue; caused by: Bye", werror.Details(err))
 }
 
 func TestErrWithCause_Format(t *testing.T) {
