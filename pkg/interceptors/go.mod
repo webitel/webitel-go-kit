@@ -3,7 +3,7 @@ module github.com/webitel/webitel-go-kit/pkg/interceptors
 go 1.25.3
 
 require (
-	github.com/webitel/webitel-go-kit/pkg/errors v0.1.0
+	github.com/webitel/webitel-go-kit/pkg/errors v0.2.0
 	go.opentelemetry.io/otel/trace v1.39.0
 	google.golang.org/grpc v1.80.0
 )
