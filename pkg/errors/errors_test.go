@@ -29,6 +29,7 @@ func TestErrWithValue_Format(t *testing.T) {
 
 	err = werror.Wrap(err, werror.WithValue("raw", "blue"))
 	assert.Equal(t, fmt.Sprintf("%+v", err), werror.Details(err))
+	assert.Equal(t, "Hi; color = red; raw = blue; caused by: Bye", werror.Details(err))
 }
 
 func TestErrWithCause_Format(t *testing.T) {
