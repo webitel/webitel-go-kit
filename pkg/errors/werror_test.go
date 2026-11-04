@@ -166,6 +166,20 @@ func TestValues(t *testing.T) {
 	}, values)
 }
 
+func TestValuesUnderACause(t *testing.T) {
+	cause := werror.New("cause", werror.WithValue("shared", "from cause"), werror.WithValue("cause only", "c"))
+	err := werror.New("boom", werror.WithValue("shared", "from err"), werror.WithValue("err only", "e"))
+	err = werror.Wrap(err, werror.WithCause(cause))
+	err = werror.Wrap(err, werror.WithValue("outer", "o"))
+
+	values := werror.Values(err)
+
+	assert.Equal(t, "o", values["outer"])
+	assert.Equal(t, "e", values["err only"], "a value under a WithCause is found, as Lookup finds it")
+	assert.Equal(t, "c", values["cause only"], "the cause's values are still returned")
+	assert.Equal(t, "from cause", values["shared"], "a key Values returned before keeps its value")
+}
+
 func BenchmarkValues(b *testing.B) {
 	// create an error chain with a few values attached
 	// and a non-werror in the middle

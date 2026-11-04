@@ -213,14 +213,31 @@ func Lookup(err error, key interface{}) (interface{}, bool) {
 // contain the last value mapped.
 func Values(err error) map[interface{}]interface{} {
 	values := map[any]any{}
-	for err != nil {
-		if e, ok := err.(*errWithValue); ok {
-			if _, ok := values[e.key]; !ok {
-				values[e.key] = e.value
-			}
+	add := func(e *errWithValue) {
+		if _, ok := values[e.key]; !ok {
+			values[e.key] = e.value
 		}
+	}
 
-		err = errors.Unwrap(err)
+	for next := err; next != nil; next = errors.Unwrap(next) {
+		if e, ok := next.(*errWithValue); ok {
+			add(e)
+		}
+	}
+
+	// Unwrapping an errWithCause yields only shims and then the cause, never the errors it
+	// wraps, so the walk above misses every value under a WithCause. Walk that chain the
+	// way Lookup does and add them, never replacing a key found above.
+	for next := err; next != nil; {
+		switch t := next.(type) {
+		case *errWithValue:
+			add(t)
+			next = t.err
+		case *errWithCause:
+			next = t.err
+		default:
+			next = errors.Unwrap(next)
+		}
 	}
 
 	return values
