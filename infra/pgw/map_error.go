@@ -6,26 +6,20 @@ import (
 )
 
 func notFoundError(err error) error {
-	return werror.NotFound(
-		"entity does not exist or access is denied",
-		werror.WithID("pgw.not_found"),
-		werror.WithCause(err),
-	)
+	return werror.Wrap(ErrNotFound, werror.WithCause(err))
 }
 
 func uniqueViolationError(err error, pgErr *pgconn.PgError) error {
-	return werror.AlreadyExists(
-		"invalid input: entity already exists",
-		werror.WithID("pgw.unique"),
+	return werror.Wrap(
+		ErrUnique,
 		werror.WithCause(err),
 		werror.WithValue("constraint", pgErr.ConstraintName),
 	)
 }
 
 func foreignKeyViolationError(err error, pgErr *pgconn.PgError) error {
-	return werror.FailedPrecondition(
-		"invalid input: referenced entity does not exist or is still referenced",
-		werror.WithID("pgw.foreign_key"),
+	return werror.Wrap(
+		ErrForeignKey,
 		werror.WithCause(err),
 		werror.WithValue("constraint", pgErr.ConstraintName),
 		werror.WithValue("table", pgErr.TableName),
@@ -33,18 +27,16 @@ func foreignKeyViolationError(err error, pgErr *pgconn.PgError) error {
 }
 
 func checkViolationError(err error, pgErr *pgconn.PgError) error {
-	return werror.InvalidArgument(
-		"invalid input: value violates a constraint",
-		werror.WithID("pgw.check"),
+	return werror.Wrap(
+		ErrCheck,
 		werror.WithCause(err),
 		werror.WithValue("constraint", pgErr.ConstraintName),
 	)
 }
 
 func notNullViolationError(err error, pgErr *pgconn.PgError) error {
-	return werror.InvalidArgument(
-		"invalid input: required value is missing",
-		werror.WithID("pgw.not_null"),
+	return werror.Wrap(
+		ErrNotNull,
 		werror.WithCause(err),
 		werror.WithValue("table", pgErr.TableName),
 		werror.WithValue("column", pgErr.ColumnName),
@@ -52,9 +44,8 @@ func notNullViolationError(err error, pgErr *pgconn.PgError) error {
 }
 
 func dataExceptionError(err error, pgErr *pgconn.PgError) error {
-	return werror.InvalidArgument(
-		"invalid input: value violates a constraint",
-		werror.WithID("pgw.data"),
+	return werror.Wrap(
+		ErrData,
 		werror.WithCause(err),
 		werror.WithValue("schema", pgErr.SchemaName),
 		werror.WithValue("table", pgErr.TableName),
@@ -63,50 +54,29 @@ func dataExceptionError(err error, pgErr *pgconn.PgError) error {
 }
 
 func connectionUnavailableError(err error, pgErr *pgconn.PgError) error {
-	return werror.Unavailable(
-		"database connection error",
-		werror.WithID("pgw.connection"),
+	return werror.Wrap(
+		ErrConnection,
 		werror.WithCause(err),
 		werror.WithValue("sqlstate", pgErr.Code),
 	)
 }
 
 func transactionAbortedError(err error) error {
-	return werror.Aborted(
-		"transaction conflict; retry the operation",
-		werror.WithID("pgw.aborted"),
-		werror.WithCause(err),
-	)
+	return werror.Wrap(ErrAborted, werror.WithCause(err))
 }
 
 func programLimitExceededError(err error) error {
-	return werror.InvalidArgument(
-		"invalid input: program limit exceeded",
-		werror.WithID("pgw.program_limit"),
-		werror.WithCause(err),
-	)
+	return werror.Wrap(ErrProgramLimit, werror.WithCause(err))
 }
 
 func canceledError(err error) error {
-	return werror.Canceled(
-		"operation canceled",
-		werror.WithID("pgw.canceled"),
-		werror.WithCause(err),
-	)
+	return werror.Wrap(ErrCanceled, werror.WithCause(err))
 }
 
 func deadlineExceededError(err error) error {
-	return werror.DeadlineExceeded(
-		"operation deadline exceeded",
-		werror.WithID("pgw.deadline_exceeded"),
-		werror.WithCause(err),
-	)
+	return werror.Wrap(ErrDeadlineExceeded, werror.WithCause(err))
 }
 
 func internalError(err error) error {
-	return werror.Internal(
-		"storage error",
-		werror.WithID("pgw.internal"),
-		werror.WithCause(err),
-	)
+	return werror.Wrap(ErrInternal, werror.WithCause(err))
 }

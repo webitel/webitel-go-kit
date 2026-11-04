@@ -158,28 +158,33 @@ manager.RegisterNotNullViolation("users", "email", func(e *pgconn.PgError) error
 })
 ```
 
-Defaults below apply when no constraint processor is registered.
+Defaults below apply when no constraint processor is registered. Mapped results wrap the package sentinels (`ErrNotFound`, `ErrUnique`, …), so callers can match with `errors.Is(err, pgw.ErrNotFound)` (and still with `pgx.ErrNoRows` / `*pgconn.PgError` via the cause).
 
-| Input | gRPC code | ID |
-|---|---|---|
-| `pgx.ErrNoRows` | NotFound | `pgw.not_found` |
-| `pgerrcode.UniqueViolation` | AlreadyExists | `pgw.unique` |
-| `pgerrcode.ForeignKeyViolation` | FailedPrecondition | `pgw.foreign_key` |
-| `pgerrcode.CheckViolation` | InvalidArgument | `pgw.check` |
-| `pgerrcode.NotNullViolation` | InvalidArgument | `pgw.not_null` |
-| `pgerrcode.IsDataException` | InvalidArgument | `pgw.data` |
-| `pgerrcode.IsConnectionException` | Unavailable | `pgw.connection` |
-| `pgerrcode.IsProgramLimitExceeded` | InvalidArgument | `pgw.program_limit` |
-| `pgerrcode.SerializationFailure` | Aborted | `pgw.aborted` |
-| `pgerrcode.DeadlockDetected` | Aborted | `pgw.aborted` |
-| `pgw.ErrUnreachable` | Unavailable | `pgw.unreachable` |
-| `context.Canceled` | Canceled | `pgw.canceled` |
-| `context.DeadlineExceeded` | DeadlineExceeded | `pgw.deadline_exceeded` |
-| other `*pgconn.PgError` | Internal | `pgw.internal` |
+| Input | gRPC code | Sentinel | ID |
+|---|---|---|---|
+| `pgx.ErrNoRows` | NotFound | `ErrNotFound` | `pgw.not_found` |
+| `pgerrcode.UniqueViolation` | AlreadyExists | `ErrUnique` | `pgw.unique` |
+| `pgerrcode.ForeignKeyViolation` | FailedPrecondition | `ErrForeignKey` | `pgw.foreign_key` |
+| `pgerrcode.CheckViolation` | InvalidArgument | `ErrCheck` | `pgw.check` |
+| `pgerrcode.NotNullViolation` | InvalidArgument | `ErrNotNull` | `pgw.not_null` |
+| `pgerrcode.IsDataException` | InvalidArgument | `ErrData` | `pgw.data` |
+| `pgerrcode.IsConnectionException` | Unavailable | `ErrConnection` | `pgw.connection` |
+| `AdminShutdown` / `CrashShutdown` / `CannotConnectNow` / `ReadOnlySQLTransaction` | Unavailable | `ErrConnection` | `pgw.connection` |
+| `pgerrcode.IsProgramLimitExceeded` | InvalidArgument | `ErrProgramLimit` | `pgw.program_limit` |
+| `pgerrcode.SerializationFailure` | Aborted | `ErrAborted` | `pgw.aborted` |
+| `pgerrcode.DeadlockDetected` | Aborted | `ErrAborted` | `pgw.aborted` |
+| `pgw.ErrUnreachable` | Unavailable | `ErrUnreachable` | `pgw.unreachable` |
+| `context.Canceled` | Canceled | `ErrCanceled` | `pgw.canceled` |
+| `context.DeadlineExceeded` | DeadlineExceeded | `ErrDeadlineExceeded` | `pgw.deadline_exceeded` |
+| other `*pgconn.PgError` | Internal | `ErrInternal` | `pgw.internal` |
 
 Already-coded errors (for example from a constraint processor) and non-Postgres sentinels such as `pgx.ErrTxClosed` pass through unchanged. Mapped errors keep the original driver error as cause — use `errors.As` / `errors.Is`, not a type assertion:
 
 ```go
+if errors.Is(err, pgw.ErrNotFound) {
+    // also true for the underlying pgx.ErrNoRows cause
+}
+
 var pgErr *pgconn.PgError
 if errors.As(err, &pgErr) {
     // pgErr.Code, pgErr.ConstraintName

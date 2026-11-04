@@ -77,6 +77,8 @@ func (e *errorsManager) ParsePgError(err error) error {
 		return e.parseCheckViolation(err, pgErr)
 	case pgerrcode.SerializationFailure, pgerrcode.DeadlockDetected:
 		return transactionAbortedError(err)
+	case pgerrcode.AdminShutdown, pgerrcode.CrashShutdown, pgerrcode.CannotConnectNow, pgerrcode.ReadOnlySQLTransaction:
+		return connectionUnavailableError(err, pgErr)
 	default:
 		return internalError(err)
 	}

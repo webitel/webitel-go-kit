@@ -11,10 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var (
-	ErrMigrationVerify = errors.New("pgw: migration unverified")
-)
-
 type PoolConfig struct {
 	HealthCheckInterval time.Duration
 	HealthCheckTimeout  time.Duration

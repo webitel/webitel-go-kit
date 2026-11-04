@@ -11,22 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	werror "github.com/webitel/webitel-go-kit/pkg/errors"
 )
 
 const (
 	postgresApplicationNameKey = "application_name"
-)
-
-var (
-	// ErrUnreachable is returned when the primary or standby pool is not connected.
-	// It is a coded Unavailable error so callers do not need an extra mapping step.
-	ErrUnreachable = werror.Unavailable(
-		"the resource is unreachable now",
-		werror.WithID("pgw.unreachable"),
-	)
-	ErrClosed  = errors.New("pgw: pool manager is closed")
-	ErrStarted = errors.New("pgw: pool manager is already started")
 )
 
 type PoolManager struct {

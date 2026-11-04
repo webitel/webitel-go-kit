@@ -39,6 +39,7 @@ func TestParsePgError(t *testing.T) {
 		in         error
 		wantCode   codes.Code
 		wantID     string
+		wantIs     error
 		wantValues map[string]string
 	}{
 		{
@@ -46,30 +47,35 @@ func TestParsePgError(t *testing.T) {
 			in:       pgx.ErrNoRows,
 			wantCode: codes.NotFound,
 			wantID:   "pgw.not_found",
+			wantIs:   ErrNotFound,
 		},
 		{
 			name:     "wrapped no rows is not found",
 			in:       fmt.Errorf("scan: %w", pgx.ErrNoRows),
 			wantCode: codes.NotFound,
 			wantID:   "pgw.not_found",
+			wantIs:   ErrNotFound,
 		},
 		{
 			name:     "context canceled",
 			in:       context.Canceled,
 			wantCode: codes.Canceled,
 			wantID:   "pgw.canceled",
+			wantIs:   ErrCanceled,
 		},
 		{
 			name:     "context deadline exceeded",
 			in:       context.DeadlineExceeded,
 			wantCode: codes.DeadlineExceeded,
 			wantID:   "pgw.deadline_exceeded",
+			wantIs:   ErrDeadlineExceeded,
 		},
 		{
 			name:     "unique violation",
 			in:       &pgconn.PgError{Code: pgerrcode.UniqueViolation, ConstraintName: "space_name_uq"},
 			wantCode: codes.AlreadyExists,
 			wantID:   "pgw.unique",
+			wantIs:   ErrUnique,
 			wantValues: map[string]string{
 				"constraint": "space_name_uq",
 			},
@@ -83,6 +89,7 @@ func TestParsePgError(t *testing.T) {
 			},
 			wantCode: codes.FailedPrecondition,
 			wantID:   "pgw.foreign_key",
+			wantIs:   ErrForeignKey,
 			wantValues: map[string]string{
 				"constraint": "space_model_fk",
 				"table":      "space",
@@ -93,6 +100,7 @@ func TestParsePgError(t *testing.T) {
 			in:       &pgconn.PgError{Code: pgerrcode.CheckViolation, ConstraintName: "dim_check"},
 			wantCode: codes.InvalidArgument,
 			wantID:   "pgw.check",
+			wantIs:   ErrCheck,
 			wantValues: map[string]string{
 				"constraint": "dim_check",
 			},
@@ -106,6 +114,7 @@ func TestParsePgError(t *testing.T) {
 			},
 			wantCode: codes.InvalidArgument,
 			wantID:   "pgw.not_null",
+			wantIs:   ErrNotNull,
 			wantValues: map[string]string{
 				"table":  "space",
 				"column": "name",
@@ -121,6 +130,7 @@ func TestParsePgError(t *testing.T) {
 			},
 			wantCode: codes.InvalidArgument,
 			wantID:   "pgw.data",
+			wantIs:   ErrData,
 			wantValues: map[string]string{
 				"schema": "ai_hub",
 				"table":  "space",
@@ -132,8 +142,49 @@ func TestParsePgError(t *testing.T) {
 			in:       &pgconn.PgError{Code: pgerrcode.ConnectionFailure},
 			wantCode: codes.Unavailable,
 			wantID:   "pgw.connection",
+			wantIs:   ErrConnection,
 			wantValues: map[string]string{
 				"sqlstate": pgerrcode.ConnectionFailure,
+			},
+		},
+		{
+			name:     "admin shutdown is unavailable",
+			in:       &pgconn.PgError{Code: pgerrcode.AdminShutdown},
+			wantCode: codes.Unavailable,
+			wantID:   "pgw.connection",
+			wantIs:   ErrConnection,
+			wantValues: map[string]string{
+				"sqlstate": pgerrcode.AdminShutdown,
+			},
+		},
+		{
+			name:     "crash shutdown is unavailable",
+			in:       &pgconn.PgError{Code: pgerrcode.CrashShutdown},
+			wantCode: codes.Unavailable,
+			wantID:   "pgw.connection",
+			wantIs:   ErrConnection,
+			wantValues: map[string]string{
+				"sqlstate": pgerrcode.CrashShutdown,
+			},
+		},
+		{
+			name:     "cannot connect now is unavailable",
+			in:       &pgconn.PgError{Code: pgerrcode.CannotConnectNow},
+			wantCode: codes.Unavailable,
+			wantID:   "pgw.connection",
+			wantIs:   ErrConnection,
+			wantValues: map[string]string{
+				"sqlstate": pgerrcode.CannotConnectNow,
+			},
+		},
+		{
+			name:     "read only sql transaction is unavailable",
+			in:       &pgconn.PgError{Code: pgerrcode.ReadOnlySQLTransaction},
+			wantCode: codes.Unavailable,
+			wantID:   "pgw.connection",
+			wantIs:   ErrConnection,
+			wantValues: map[string]string{
+				"sqlstate": pgerrcode.ReadOnlySQLTransaction,
 			},
 		},
 		{
@@ -141,24 +192,28 @@ func TestParsePgError(t *testing.T) {
 			in:       &pgconn.PgError{Code: pgerrcode.SerializationFailure},
 			wantCode: codes.Aborted,
 			wantID:   "pgw.aborted",
+			wantIs:   ErrAborted,
 		},
 		{
 			name:     "deadlock is aborted",
 			in:       &pgconn.PgError{Code: pgerrcode.DeadlockDetected},
 			wantCode: codes.Aborted,
 			wantID:   "pgw.aborted",
+			wantIs:   ErrAborted,
 		},
 		{
 			name:     "program limit exceeded is invalid argument",
 			in:       &pgconn.PgError{Code: pgerrcode.ProgramLimitExceeded},
 			wantCode: codes.InvalidArgument,
 			wantID:   "pgw.program_limit",
+			wantIs:   ErrProgramLimit,
 		},
 		{
 			name:     "unknown pg error is internal",
 			in:       &pgconn.PgError{Code: pgerrcode.InternalError},
 			wantCode: codes.Internal,
 			wantID:   "pgw.internal",
+			wantIs:   ErrInternal,
 		},
 	}
 
@@ -173,6 +228,9 @@ func TestParsePgError(t *testing.T) {
 			}
 			if id := werror.ID(got); id != tt.wantID {
 				t.Fatalf("ParsePgError() id = %q, want %q", id, tt.wantID)
+			}
+			if tt.wantIs != nil && !errors.Is(got, tt.wantIs) {
+				t.Fatalf("ParsePgError() errors.Is(..., %v) = false", tt.wantIs)
 			}
 			for key, want := range tt.wantValues {
 				gotValue, _ := werror.Value(got, key).(string)
@@ -202,6 +260,29 @@ func TestParsePgErrorKeepsCause(t *testing.T) {
 	var cause *pgconn.PgError
 	if !errors.As(got, &cause) || cause.ConstraintName != "space_name_uq" {
 		t.Fatalf("ParsePgError() lost driver cause: %v", got)
+	}
+	if !errors.Is(got, ErrUnique) {
+		t.Fatalf("ParsePgError() must match ErrUnique: %v", got)
+	}
+}
+
+func TestParsePgErrorNotFoundKeepsErrNoRows(t *testing.T) {
+	got := newErrorsManager().ParsePgError(pgx.ErrNoRows)
+	if !errors.Is(got, ErrNotFound) {
+		t.Fatalf("ParsePgError() must match ErrNotFound: %v", got)
+	}
+	if !errors.Is(got, pgx.ErrNoRows) {
+		t.Fatalf("ParsePgError() must keep pgx.ErrNoRows cause: %v", got)
+	}
+	if got.Error() != ErrNotFound.Error() {
+		t.Fatalf("ParsePgError() message = %q, want %q", got.Error(), ErrNotFound.Error())
+	}
+}
+
+func TestParsePgErrorDataMessage(t *testing.T) {
+	got := newErrorsManager().ParsePgError(&pgconn.PgError{Code: pgerrcode.InvalidTextRepresentation})
+	if got.Error() != ErrData.Error() {
+		t.Fatalf("ParsePgError() message = %q, want %q", got.Error(), ErrData.Error())
 	}
 }
 
