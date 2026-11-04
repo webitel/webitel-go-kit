@@ -6,15 +6,19 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
+
+	werror "github.com/webitel/webitel-go-kit/pkg/errors"
 )
 
 var errDomain = errors.New("domain")
 
 func uniqueErr() error {
-	return &pgconn.PgError{Code: "23505", ConstraintName: "users_email_key", TableName: "users"}
+	return &pgconn.PgError{Code: pgerrcode.UniqueViolation, ConstraintName: "users_email_key", TableName: "users"}
 }
 
 func parser() *errorsManager {
@@ -29,44 +33,158 @@ func TestParsePgError(t *testing.T) {
 	if m.ParsePgError(nil) != nil {
 		t.Fatal("nil must stay nil")
 	}
-	for _, err := range []error{pgx.ErrNoRows, context.Canceled, pgx.ErrTxClosed, fmt.Errorf("w: %w", pgx.ErrNoRows)} {
-		if got := m.ParsePgError(err); got != err {
-			t.Fatalf("%v must pass through, got %v", err, got)
-		}
+
+	tests := []struct {
+		name       string
+		in         error
+		wantCode   codes.Code
+		wantID     string
+		wantValues map[string]string
+	}{
+		{
+			name:     "no rows is not found",
+			in:       pgx.ErrNoRows,
+			wantCode: codes.NotFound,
+			wantID:   "pgw.not_found",
+		},
+		{
+			name:     "wrapped no rows is not found",
+			in:       fmt.Errorf("scan: %w", pgx.ErrNoRows),
+			wantCode: codes.NotFound,
+			wantID:   "pgw.not_found",
+		},
+		{
+			name:     "context canceled",
+			in:       context.Canceled,
+			wantCode: codes.Canceled,
+			wantID:   "pgw.canceled",
+		},
+		{
+			name:     "context deadline exceeded",
+			in:       context.DeadlineExceeded,
+			wantCode: codes.DeadlineExceeded,
+			wantID:   "pgw.deadline_exceeded",
+		},
+		{
+			name:     "unique violation",
+			in:       &pgconn.PgError{Code: pgerrcode.UniqueViolation, ConstraintName: "space_name_uq"},
+			wantCode: codes.AlreadyExists,
+			wantID:   "pgw.unique",
+			wantValues: map[string]string{
+				"constraint": "space_name_uq",
+			},
+		},
+		{
+			name: "foreign key violation",
+			in: &pgconn.PgError{
+				Code:           pgerrcode.ForeignKeyViolation,
+				ConstraintName: "space_model_fk",
+				TableName:      "space",
+			},
+			wantCode: codes.FailedPrecondition,
+			wantID:   "pgw.foreign_key",
+			wantValues: map[string]string{
+				"constraint": "space_model_fk",
+				"table":      "space",
+			},
+		},
+		{
+			name:     "check violation",
+			in:       &pgconn.PgError{Code: pgerrcode.CheckViolation, ConstraintName: "dim_check"},
+			wantCode: codes.InvalidArgument,
+			wantID:   "pgw.check",
+			wantValues: map[string]string{
+				"constraint": "dim_check",
+			},
+		},
+		{
+			name: "not null violation",
+			in: &pgconn.PgError{
+				Code:       pgerrcode.NotNullViolation,
+				TableName:  "space",
+				ColumnName: "name",
+			},
+			wantCode: codes.InvalidArgument,
+			wantID:   "pgw.not_null",
+			wantValues: map[string]string{
+				"table":  "space",
+				"column": "name",
+			},
+		},
+		{
+			name: "class 22 data exception is invalid argument",
+			in: &pgconn.PgError{
+				Code:       pgerrcode.InvalidTextRepresentation,
+				SchemaName: "ai_hub",
+				TableName:  "space",
+				ColumnName: "id",
+			},
+			wantCode: codes.InvalidArgument,
+			wantID:   "pgw.data",
+			wantValues: map[string]string{
+				"schema": "ai_hub",
+				"table":  "space",
+				"column": "id",
+			},
+		},
+		{
+			name:     "connection exception is unavailable",
+			in:       &pgconn.PgError{Code: pgerrcode.ConnectionFailure},
+			wantCode: codes.Unavailable,
+			wantID:   "pgw.connection",
+			wantValues: map[string]string{
+				"sqlstate": pgerrcode.ConnectionFailure,
+			},
+		},
+		{
+			name:     "serialization failure is aborted",
+			in:       &pgconn.PgError{Code: pgerrcode.SerializationFailure},
+			wantCode: codes.Aborted,
+			wantID:   "pgw.aborted",
+		},
+		{
+			name:     "deadlock is aborted",
+			in:       &pgconn.PgError{Code: pgerrcode.DeadlockDetected},
+			wantCode: codes.Aborted,
+			wantID:   "pgw.aborted",
+		},
+		{
+			name:     "program limit exceeded is invalid argument",
+			in:       &pgconn.PgError{Code: pgerrcode.ProgramLimitExceeded},
+			wantCode: codes.InvalidArgument,
+			wantID:   "pgw.program_limit",
+		},
+		{
+			name:     "unknown pg error is internal",
+			in:       &pgconn.PgError{Code: pgerrcode.InternalError},
+			wantCode: codes.Internal,
+			wantID:   "pgw.internal",
+		},
 	}
 
-	for _, code := range []string{"23502", "23503", "23505", "23514"} {
-		src := &pgconn.PgError{Code: code, ConstraintName: "c", TableName: "t", ColumnName: "col"}
-		var de *DataExceptionError
-		if !errors.As(m.ParsePgError(fmt.Errorf("wrapped: %w", src)), &de) {
-			t.Fatalf("%s: want DataExceptionError", code)
-		}
-		if de.Code != code || de.ConstraintName != "c" {
-			t.Fatalf("%s: Code/ConstraintName lost: %+v", code, de)
-		}
-		var pg *pgconn.PgError
-		if !errors.As(de, &pg) || pg != src {
-			t.Fatalf("%s: Unwrap must return the original PgError", code)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := m.ParsePgError(tt.in)
+			if got == nil {
+				t.Fatal("ParsePgError returned nil")
+			}
+			if code := werror.Code(got); code != tt.wantCode {
+				t.Fatalf("ParsePgError() code = %v, want %v", code, tt.wantCode)
+			}
+			if id := werror.ID(got); id != tt.wantID {
+				t.Fatalf("ParsePgError() id = %q, want %q", id, tt.wantID)
+			}
+			for key, want := range tt.wantValues {
+				gotValue, _ := werror.Value(got, key).(string)
+				if gotValue != want {
+					t.Fatalf("ParsePgError() value %s = %q, want %q", key, gotValue, want)
+				}
+			}
+		})
 	}
 
-	for _, code := range []string{"08000", "08001", "08006", "08P01"} {
-		var ce *ConnectionExceptionError
-		src := &pgconn.PgError{Code: code}
-		if !errors.As(m.ParsePgError(src), &ce) || ce.Code != code {
-			t.Fatalf("%s: want ConnectionExceptionError", code)
-		}
-		var pg *pgconn.PgError
-		if !errors.As(ce, &pg) || pg != src {
-			t.Fatalf("%s: Unwrap must return the original PgError", code)
-		}
-	}
-
-	for _, code := range []string{"23P01", "40001", "22001"} {
-		src := &pgconn.PgError{Code: code}
-		if m.ParsePgError(src) != error(src) {
-			t.Fatalf("%s must pass through", code)
-		}
+	if got := m.ParsePgError(pgx.ErrTxClosed); got != pgx.ErrTxClosed {
+		t.Fatalf("non-pg sentinel must pass through, got %v", got)
 	}
 
 	// a second pass must not wrap the already mapped error again
@@ -76,10 +194,36 @@ func TestParsePgError(t *testing.T) {
 	}
 }
 
-func TestUnwrapOfHandmadeError(t *testing.T) {
-	var pg *pgconn.PgError
-	if errors.As(&DataExceptionError{}, &pg) || errors.As(&ConnectionExceptionError{}, &pg) {
-		t.Fatal("an error created by hand has no PgError to unwrap")
+func TestParsePgErrorKeepsCause(t *testing.T) {
+	pgErr := &pgconn.PgError{Code: pgerrcode.UniqueViolation, ConstraintName: "space_name_uq"}
+
+	got := newErrorsManager().ParsePgError(pgErr)
+
+	var cause *pgconn.PgError
+	if !errors.As(got, &cause) || cause.ConstraintName != "space_name_uq" {
+		t.Fatalf("ParsePgError() lost driver cause: %v", got)
+	}
+}
+
+func TestParsePgErrorPassesThroughCodedError(t *testing.T) {
+	in := werror.New(
+		"domain conflict",
+		werror.WithCode(codes.AlreadyExists),
+		werror.WithID("service.space.exists"),
+	)
+
+	got := newErrorsManager().ParsePgError(in)
+	if got != in {
+		t.Fatalf("ParsePgError() = %v, want same coded error", got)
+	}
+}
+
+func TestErrUnreachableIsUnavailable(t *testing.T) {
+	if code := werror.Code(ErrUnreachable); code != codes.Unavailable {
+		t.Fatalf("ErrUnreachable code = %v, want %v", code, codes.Unavailable)
+	}
+	if id := werror.ID(ErrUnreachable); id != "pgw.unreachable" {
+		t.Fatalf("ErrUnreachable id = %q, want %q", id, "pgw.unreachable")
 	}
 }
 
@@ -127,8 +271,11 @@ func TestWrappers(t *testing.T) {
 	if err := (row{fakeRow{uniqueErr()}, p}).Scan(); err != errDomain {
 		t.Fatalf("row.Scan: %v", err)
 	}
-	if err := (row{fakeRow{pgx.ErrNoRows}, p}).Scan(); err != pgx.ErrNoRows {
-		t.Fatalf("row.Scan must keep ErrNoRows: %v", err)
+	if err := (row{fakeRow{pgx.ErrNoRows}, p}).Scan(); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("row.Scan must keep ErrNoRows cause: %v", err)
+	}
+	if code := werror.Code((row{fakeRow{pgx.ErrNoRows}, p}).Scan()); code != codes.NotFound {
+		t.Fatalf("row.Scan ErrNoRows code = %v, want NotFound", code)
 	}
 
 	// pgx.CollectRows reports the error from rows.Err()

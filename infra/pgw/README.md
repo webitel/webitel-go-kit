@@ -136,9 +136,9 @@ if errors.Is(err, pgw.ErrMigrationVerify) {
 }
 ```
 
-## Constraint error mapping
+## Constraint / driver error mapping
 
-Register processors for specific PostgreSQL constraint violations so that raw `pgconn.PgError` values are translated to your own error types before being returned from any pool method.
+Every pool method runs errors through `ParsePgError` before returning them. Registered processors win for specific constraints; everything else gets a default coded [`pkg/errors`](https://github.com/webitel/webitel-go-kit/tree/main/pkg/errors) mapping, so stores do not need an extra wrap step.
 
 ```go
 manager.RegisterUniqueViolation("users_email_key", func(e *pgconn.PgError) error {
@@ -158,9 +158,26 @@ manager.RegisterNotNullViolation("users", "email", func(e *pgconn.PgError) error
 })
 ```
 
-Unregistered violations and connection exceptions (any SQLSTATE `08xxx`) are wrapped in `DataExceptionError` and `ConnectionExceptionError` respectively, both implementing the `pgw.Error` interface. An already wrapped error is not wrapped again.
+Defaults below apply when no constraint processor is registered.
 
-Both unwrap to the original `*pgconn.PgError`, and `DataExceptionError` also has `Code` and `ConstraintName`. Use `errors.As`, not a type assertion:
+| Input | gRPC code | ID |
+|---|---|---|
+| `pgx.ErrNoRows` | NotFound | `pgw.not_found` |
+| `pgerrcode.UniqueViolation` | AlreadyExists | `pgw.unique` |
+| `pgerrcode.ForeignKeyViolation` | FailedPrecondition | `pgw.foreign_key` |
+| `pgerrcode.CheckViolation` | InvalidArgument | `pgw.check` |
+| `pgerrcode.NotNullViolation` | InvalidArgument | `pgw.not_null` |
+| `pgerrcode.IsDataException` | InvalidArgument | `pgw.data` |
+| `pgerrcode.IsConnectionException` | Unavailable | `pgw.connection` |
+| `pgerrcode.IsProgramLimitExceeded` | InvalidArgument | `pgw.program_limit` |
+| `pgerrcode.SerializationFailure` | Aborted | `pgw.aborted` |
+| `pgerrcode.DeadlockDetected` | Aborted | `pgw.aborted` |
+| `pgw.ErrUnreachable` | Unavailable | `pgw.unreachable` |
+| `context.Canceled` | Canceled | `pgw.canceled` |
+| `context.DeadlineExceeded` | DeadlineExceeded | `pgw.deadline_exceeded` |
+| other `*pgconn.PgError` | Internal | `pgw.internal` |
+
+Already-coded errors (for example from a constraint processor) and non-Postgres sentinels such as `pgx.ErrTxClosed` pass through unchanged. Mapped errors keep the original driver error as cause — use `errors.As` / `errors.Is`, not a type assertion:
 
 ```go
 var pgErr *pgconn.PgError
