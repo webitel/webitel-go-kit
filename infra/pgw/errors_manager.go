@@ -1,11 +1,14 @@
 package pgw
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	werror "github.com/webitel/webitel-go-kit/pkg/errors"
 	"github.com/webitel/webitel-go-kit/pkg/safemap"
 )
 
@@ -32,115 +35,84 @@ func (e *errorsManager) ParsePgError(err error) error {
 		return nil
 	}
 
-	// already mapped: errors.As below would find the PgError behind Unwrap and map it twice
-	var mapped Error
-	if errors.As(err, &mapped) {
+	// already coded (registered processor or a previous pass)
+	if _, ok := werror.Lookup(err, werror.ErrKeyCode); ok {
 		return err
+	}
+
+	switch {
+	case errors.Is(err, context.Canceled):
+		return canceledError(err)
+	case errors.Is(err, context.DeadlineExceeded):
+		return deadlineExceededError(err)
+	case errors.Is(err, pgx.ErrNoRows):
+		return notFoundError(err)
 	}
 
 	var pgErr *pgconn.PgError
-	ok := errors.As(err, &pgErr)
-	if !ok {
+	if !errors.As(err, &pgErr) {
 		return err
 	}
 
-	// class 08: connection exceptions
-	if strings.HasPrefix(pgErr.Code, "08") {
-		return e.parseConnectionException(pgErr)
+	if pgerrcode.IsConnectionException(pgErr.Code) {
+		return connectionUnavailableError(err, pgErr)
+	}
+
+	if pgerrcode.IsDataException(pgErr.Code) {
+		return dataExceptionError(err, pgErr)
+	}
+
+	if pgerrcode.IsProgramLimitExceeded(pgErr.Code) {
+		return programLimitExceededError(err)
 	}
 
 	switch pgErr.Code {
-	case "23502":
-		// data exception: not null violation
-		return e.parseNotNullViolation(pgErr)
-	case "23503":
-		// data exception: foreign key violation
-		return e.parseForeignKeyViolation(pgErr)
-	case "23505":
-		// data exception: unique violation
-		return e.parseUniqueViolation(pgErr)
-	case "23514":
-		// data exception: check violation
-		return e.parseCheckViolation(pgErr)
-	}
-
-	return err
-}
-
-func (e *errorsManager) parseConnectionException(pgErr *pgconn.PgError) error {
-	return &ConnectionExceptionError{
-		Code:   pgErr.Code,
-		Detail: pgErr.Message,
-		pgErr:  pgErr,
+	case pgerrcode.NotNullViolation:
+		return e.parseNotNullViolation(err, pgErr)
+	case pgerrcode.ForeignKeyViolation:
+		return e.parseForeignKeyViolation(err, pgErr)
+	case pgerrcode.UniqueViolation:
+		return e.parseUniqueViolation(err, pgErr)
+	case pgerrcode.CheckViolation:
+		return e.parseCheckViolation(err, pgErr)
+	case pgerrcode.SerializationFailure, pgerrcode.DeadlockDetected:
+		return transactionAbortedError(err)
+	case pgerrcode.AdminShutdown, pgerrcode.CrashShutdown, pgerrcode.CannotConnectNow, pgerrcode.ReadOnlySQLTransaction:
+		return connectionUnavailableError(err, pgErr)
+	default:
+		return internalError(err)
 	}
 }
 
-func (e *errorsManager) parseNotNullViolation(pgErr *pgconn.PgError) error {
-	processor, ok := e.getNotNullViolation(pgErr.TableName, pgErr.ColumnName)
-	if ok {
+func (e *errorsManager) parseNotNullViolation(err error, pgErr *pgconn.PgError) error {
+	if processor, ok := e.getNotNullViolation(pgErr.TableName, pgErr.ColumnName); ok {
 		return processor(pgErr)
 	}
-	return &DataExceptionError{
-		Code:           pgErr.Code,
-		ConstraintName: pgErr.ConstraintName,
-		Schema:         pgErr.SchemaName,
-		Table:          pgErr.TableName,
-		Column:         pgErr.ColumnName,
-		Detail:         pgErr.Message,
-		pgErr:          pgErr,
-	}
+	return notNullViolationError(err, pgErr)
 }
 
-func (e *errorsManager) parseForeignKeyViolation(pgErr *pgconn.PgError) error {
-	processor, ok := e.getForeignKeyViolation(pgErr.ConstraintName)
-	if ok {
+func (e *errorsManager) parseForeignKeyViolation(err error, pgErr *pgconn.PgError) error {
+	if processor, ok := e.getForeignKeyViolation(pgErr.ConstraintName); ok {
 		return processor(pgErr)
 	}
-	return &DataExceptionError{
-		Code:           pgErr.Code,
-		ConstraintName: pgErr.ConstraintName,
-		Schema:         pgErr.SchemaName,
-		Table:          pgErr.TableName,
-		Column:         pgErr.ColumnName,
-		Detail:         pgErr.Message,
-		pgErr:          pgErr,
-	}
+	return foreignKeyViolationError(err, pgErr)
 }
 
-func (e *errorsManager) parseUniqueViolation(pgErr *pgconn.PgError) error {
-	processor, ok := e.getUniqueViolation(pgErr.ConstraintName)
-	if ok {
+func (e *errorsManager) parseUniqueViolation(err error, pgErr *pgconn.PgError) error {
+	if processor, ok := e.getUniqueViolation(pgErr.ConstraintName); ok {
 		return processor(pgErr)
 	}
-	return &DataExceptionError{
-		Code:           pgErr.Code,
-		ConstraintName: pgErr.ConstraintName,
-		Schema:         pgErr.SchemaName,
-		Table:          pgErr.TableName,
-		Column:         pgErr.ColumnName,
-		Detail:         pgErr.Message,
-		pgErr:          pgErr,
-	}
+	return uniqueViolationError(err, pgErr)
 }
 
-func (e *errorsManager) parseCheckViolation(pgErr *pgconn.PgError) error {
-	processor, ok := e.getCheckViolation(pgErr.ConstraintName)
-	if ok {
+func (e *errorsManager) parseCheckViolation(err error, pgErr *pgconn.PgError) error {
+	if processor, ok := e.getCheckViolation(pgErr.ConstraintName); ok {
 		return processor(pgErr)
 	}
-	return &DataExceptionError{
-		Code:           pgErr.Code,
-		ConstraintName: pgErr.ConstraintName,
-		Schema:         pgErr.SchemaName,
-		Table:          pgErr.TableName,
-		Column:         pgErr.ColumnName,
-		Detail:         pgErr.Message,
-		pgErr:          pgErr,
-	}
+	return checkViolationError(err, pgErr)
 }
 
 func (e *errorsManager) RegisterNotNullViolationProcessor(table string, column string, processor ErrorProcessor) error {
-
 	columnsMap, ok := e.notNullViolations.Get(table)
 	if !ok {
 		columnsMap = safemap.New[string, ErrorProcessor](nil)

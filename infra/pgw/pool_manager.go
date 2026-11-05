@@ -17,12 +17,6 @@ const (
 	postgresApplicationNameKey = "application_name"
 )
 
-var (
-	ErrUnreachable = errors.New("the resource is unreachable now")
-	ErrClosed      = errors.New("pgw: pool manager is closed")
-	ErrStarted     = errors.New("pgw: pool manager is already started")
-)
-
 type PoolManager struct {
 	config *Config
 
