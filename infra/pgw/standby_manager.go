@@ -31,7 +31,11 @@ type standbyManager struct {
 
 	unhealthyStore *safemap.SafeMap[string, *Pool]
 
-	closeChan chan struct{}
+	// ctx is canceled in Close so in-flight ConnectWithRetry calls stop.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	closeOnce sync.Once
 }
 
 func (cfg *standbyManagerConfig) normalizeConfig() {
@@ -61,13 +65,15 @@ func (cfg *standbyManagerConfig) normalizeConfig() {
 func newStandbyManager(cfg standbyManagerConfig) (*standbyManager, error) {
 	cfg.normalizeConfig()
 
+	ctx, cancel := context.WithCancel(context.Background())
 	manager := &standbyManager{
 		config: &cfg,
 
 		store:          safemap.New[string, *Pool](nil),
 		unhealthyStore: safemap.New[string, *Pool](nil),
 
-		closeChan: make(chan struct{}),
+		ctx:    ctx,
+		cancel: cancel,
 	}
 
 	go manager.monitorUnhealthy()
@@ -93,34 +99,43 @@ func (rm *standbyManager) AddStandby(ctx context.Context, pool *pgxpool.Pool) er
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		host.Close()
+		return err
+	}
+	if rm.isClosed() {
+		host.Close()
+		return ErrClosed
+	}
 
-	go func() {
-		key := rm.buildMapKeyFromPool(pool)
+	key := rm.buildMapKey(host)
+	// Register before connect so Close can always find and shut the host down.
+	rm.unhealthyStore.Set(key, host)
+	if rm.isClosed() {
+		rm.unhealthyStore.Remove(key)
+		host.Close()
+		return ErrClosed
+	}
 
-		err := host.ConnectWithRetry(
-			context.Background(),
-			rm.config.RetriesBeforeUnhealthy,
-			rm.config.RetryStrategy,
-			rm.config.RetryStrategyBaseValue)
-
-		if err != nil {
-			rm.unhealthyStore.Set(key, host)
-			return
-		}
-
-		rm.store.Set(key, host)
-
-		go rm.monitorStateChange(key, host)
-	}()
-
+	go rm.connectStandby(key, host)
 	return nil
+}
 
+func (rm *standbyManager) connectStandby(key string, host *Pool) {
+	err := host.ConnectWithRetry(
+		rm.ctx,
+		rm.config.RetriesBeforeUnhealthy,
+		rm.config.RetryStrategy,
+		rm.config.RetryStrategyBaseValue,
+	)
+	if err != nil || rm.isClosed() {
+		return
+	}
+	rm.promoteHealthy(key, host)
 }
 
 func (rm *standbyManager) monitorStateChange(key string, host *Pool) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	subscribedChan := host.SubscribeStateChange(ctx)
+	subscribedChan := host.SubscribeStateChange(rm.ctx)
 	for {
 		select {
 		case state, ok := <-subscribedChan:
@@ -136,7 +151,7 @@ func (rm *standbyManager) monitorStateChange(key string, host *Pool) {
 				return
 			}
 
-		case <-rm.closeChan:
+		case <-rm.ctx.Done():
 			return
 		}
 	}
@@ -163,56 +178,60 @@ func (rm *standbyManager) monitorUnhealthy() {
 	for {
 		select {
 		case <-ticker.C:
-			if rm.unhealthyStore.Len() == 0 {
-				continue
-			}
-
-			var (
-				wg                = sync.WaitGroup{}
-				needMoveToHealthy = safemap.New[string, *Pool](nil)
-			)
-
-			rm.unhealthyStore.Range(func(key string, replica *Pool) error {
-				wg.Add(1)
-				go func(host *Pool) {
-					defer wg.Done()
-					if host.GetState() == HostStateClosed {
-						rm.unhealthyStore.Remove(key)
-						return
-					}
-					err := host.ConnectWithRetry(
-						context.Background(),
-						rm.config.RetriesBeforeUnhealthy,
-						rm.config.RetryStrategy,
-						rm.config.RetryStrategyBaseValue)
-
-					if err != nil {
-						// TODO: log error
-						return
-					}
-					needMoveToHealthy.Set(rm.buildMapKey(host), host)
-				}(replica)
-
-				return nil
-			})
-			wg.Wait()
-
-			needMoveToHealthy.Range(func(key string, host *Pool) error {
-				go func(k string, h *Pool) {
-					go rm.monitorStateChange(k, host)
-
-					rm.unhealthyStore.Remove(k)
-					rm.store.Set(k, h)
-				}(key, host)
-
-				return nil
-			})
-
-		case <-rm.closeChan:
+			rm.reconnectUnhealthy()
+		case <-rm.ctx.Done():
 			return
 		}
-
 	}
+}
+
+func (rm *standbyManager) reconnectUnhealthy() {
+	if rm.isClosed() || rm.unhealthyStore.Len() == 0 {
+		return
+	}
+
+	var wg sync.WaitGroup
+	_ = rm.unhealthyStore.Range(func(key string, replica *Pool) error {
+		wg.Add(1)
+		go func(k string, host *Pool) {
+			defer wg.Done()
+			rm.retryUnhealthy(k, host)
+		}(key, replica)
+		return nil
+	})
+	wg.Wait()
+}
+
+func (rm *standbyManager) retryUnhealthy(key string, host *Pool) {
+	if host == nil || host.GetState() == HostStateClosed {
+		rm.unhealthyStore.Remove(key)
+		return
+	}
+
+	err := host.ConnectWithRetry(
+		rm.ctx,
+		rm.config.RetriesBeforeUnhealthy,
+		rm.config.RetryStrategy,
+		rm.config.RetryStrategyBaseValue,
+	)
+	if err != nil || rm.isClosed() {
+		return
+	}
+	rm.promoteHealthy(key, host)
+}
+
+// promoteHealthy moves a connected host into the healthy store.
+// Store-then-recheck mirrors PoolManager.initPrimary so a concurrent Close
+// cannot leave an open pool invisible to shutdown.
+func (rm *standbyManager) promoteHealthy(key string, host *Pool) {
+	rm.unhealthyStore.Remove(key)
+	rm.store.Set(key, host)
+	if rm.isClosed() {
+		rm.store.Remove(key)
+		host.Close()
+		return
+	}
+	go rm.monitorStateChange(key, host)
 }
 
 func (rm *standbyManager) buildMapKey(host *Pool) string {
@@ -224,16 +243,29 @@ func (rm *standbyManager) buildMapKeyFromPool(pool *pgxpool.Pool) string {
 }
 
 func (rm *standbyManager) Close() {
-	close(rm.closeChan)
+	rm.closeOnce.Do(rm.shutdown)
+}
 
-	_ = rm.store.Range(func(s string, h *Pool) error {
-		h.Close()
-		return nil
-	})
-	_ = rm.unhealthyStore.Range(func(s string, h *Pool) error {
-		h.Close()
-		return nil
-	})
+func (rm *standbyManager) isClosed() bool {
+	return rm.ctx.Err() != nil
+}
 
-	// TODO: track and  log error
+func (rm *standbyManager) shutdown() {
+	rm.cancel()
+
+	closeTrackedPools(rm.store)
+	closeTrackedPools(rm.unhealthyStore)
+}
+
+func closeTrackedPools(store *safemap.SafeMap[string, *Pool]) {
+	hosts, err := store.Copy()
+	if err != nil {
+		return
+	}
+	for key, host := range hosts {
+		if host != nil {
+			host.Close()
+		}
+		store.Remove(key)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,5 +105,67 @@ func TestConnectWithRetry_CanceledContext(t *testing.T) {
 	err = host.ConnectWithRetry(cancelCtx, 5, RetryStrategyLinear, 1)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ConnectWithRetry() = %v, want context.Canceled", err)
+	}
+}
+
+func TestReconnectMasterLoop_CloseCancelsRetry(t *testing.T) {
+	inRetry := make(chan struct{})
+	release := make(chan struct{})
+	var signalOnce sync.Once
+	var releaseOnce sync.Once
+	releaseRetry := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+	t.Cleanup(releaseRetry)
+
+	m, err := New(WithPrimaryConfig(PrimaryConfig{
+		DSN:           "postgres://127.0.0.1:1/db?connect_timeout=1",
+		RetryInterval: 10 * time.Millisecond,
+		RetryAttempts: 2,
+		RetryStrategy: func(int, int) time.Duration {
+			signalOnce.Do(func() { close(inRetry) })
+			<-release
+			return time.Hour
+		},
+		RetryStrategyBaseValue: 1,
+		HealthCheckInterval:    time.Hour,
+		HealthCheckTimeout:     200 * time.Millisecond,
+	}))
+	if err != nil {
+		t.Fatalf("New() = %v", err)
+	}
+	t.Cleanup(m.Close)
+
+	host := newTestHost(t)
+	m.master.Store(host)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		m.reconnectMasterLoop()
+	}()
+
+	select {
+	case <-inRetry:
+	case <-time.After(3 * time.Second):
+		t.Fatal("master reconnect did not start")
+	}
+
+	m.Close()
+	releaseRetry()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("reconnectMasterLoop did not exit after Close")
+	}
+	if host.GetState() != HostStateClosed {
+		t.Fatalf("state = %s, want %s", host.GetState(), HostStateClosed)
+	}
+	if m.master.Load() != nil {
+		t.Fatal("master pointer still set after Close")
+	}
+	if !m.isClosed() {
+		t.Fatal("manager not marked closed")
 	}
 }

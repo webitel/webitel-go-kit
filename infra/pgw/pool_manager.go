@@ -26,7 +26,10 @@ type PoolManager struct {
 
 	errorsManager *errorsManager
 
-	closeChan chan struct{}
+	// ctx is canceled in Close so reconnect/monitor work stops promptly.
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	closeOnce sync.Once
 	started   atomic.Bool
 }
@@ -87,7 +90,7 @@ func (e *PoolManager) RegisterNotNullViolation(table string, column string, proc
 // Close closes the pool manager and all its pools. It is safe to call more than once.
 func (c *PoolManager) Close() {
 	c.closeOnce.Do(func() {
-		close(c.closeChan)
+		c.cancel()
 		if master := c.master.Swap(nil); master != nil {
 			master.Close()
 		}
@@ -131,9 +134,11 @@ func New(options ...ConfigOption) (*PoolManager, error) {
 		return nil, err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	return &PoolManager{
 		config:         cfg,
-		closeChan:      make(chan struct{}),
+		ctx:            ctx,
+		cancel:         cancel,
 		errorsManager:  errorsMgr,
 		standbyManager: standby,
 	}, nil
@@ -288,12 +293,7 @@ func (c *PoolManager) initPrimary(ctx context.Context, config *Config) error {
 }
 
 func (c *PoolManager) isClosed() bool {
-	select {
-	case <-c.closeChan:
-		return true
-	default:
-		return false
-	}
+	return c.ctx.Err() != nil
 }
 
 func (c *PoolManager) buildPrimaryPgxPool(ctx context.Context, config *Config) (*pgxpool.Pool, error) {
@@ -329,13 +329,11 @@ func (c *PoolManager) buildPrimaryPgxPool(ctx context.Context, config *Config) (
 func (c *PoolManager) startMasterMonitor() {
 	go func() {
 		master := c.master.Load()
-		if master == nil {
+		if master == nil || c.isClosed() {
 			return
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		ch := master.SubscribeStateChange(ctx)
-		defer cancel()
+		ch := master.SubscribeStateChange(c.ctx)
 		for {
 			select {
 			case state, ok := <-ch:
@@ -346,7 +344,7 @@ func (c *PoolManager) startMasterMonitor() {
 					c.reconnectMasterLoop()
 					return
 				}
-			case <-c.closeChan:
+			case <-c.ctx.Done():
 				return
 			}
 		}
@@ -357,22 +355,26 @@ func (c *PoolManager) reconnectMasterLoop() {
 	masterCfg := c.config.PrimaryConfig
 	for {
 		select {
-		case <-c.closeChan:
+		case <-c.ctx.Done():
 			return
 		case <-time.After(masterCfg.RetryInterval):
 			master := c.master.Load()
-			if master == nil {
+			if master == nil || c.isClosed() {
 				return
 			}
 			err := master.ConnectWithRetry(
-				context.Background(),
+				c.ctx,
 				masterCfg.RetryAttempts,
 				masterCfg.RetryStrategy,
 				masterCfg.RetryStrategyBaseValue)
-			if err == nil {
-				c.startMasterMonitor()
+			if c.isClosed() {
 				return
 			}
+			if err != nil {
+				continue
+			}
+			c.startMasterMonitor()
+			return
 		}
 	}
 }
