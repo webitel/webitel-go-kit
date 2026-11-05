@@ -333,7 +333,9 @@ func (c *PoolManager) startMasterMonitor() {
 			return
 		}
 
-		ch := master.SubscribeStateChange(c.ctx)
+		ctx, cancel := context.WithCancel(c.ctx)
+		defer cancel()
+		ch := master.SubscribeStateChange(ctx)
 		for {
 			select {
 			case state, ok := <-ch:
@@ -344,7 +346,7 @@ func (c *PoolManager) startMasterMonitor() {
 					c.reconnectMasterLoop()
 					return
 				}
-			case <-c.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}

@@ -6,106 +6,121 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestAddStandby_RegistersBeforeConnect(t *testing.T) {
-	inRetry := make(chan struct{})
-	release := make(chan struct{})
-	var signalOnce sync.Once
-	var releaseOnce sync.Once
-	releaseRetry := func() {
-		releaseOnce.Do(func() { close(release) })
-	}
-	t.Cleanup(releaseRetry)
+	synctest.Test(t, func(t *testing.T) {
+		inRetry := make(chan struct{})
+		release := make(chan struct{})
+		var signalOnce sync.Once
+		var releaseOnce sync.Once
+		releaseRetry := func() {
+			releaseOnce.Do(func() { close(release) })
+		}
+		t.Cleanup(releaseRetry)
 
-	rm := newTestStandbyManager(t, standbyManagerConfig{
-		UnhealthyStandbyRetryInterval: time.Hour,
-		RetriesBeforeUnhealthy:        2,
-		RetryStrategy: func(int, int) time.Duration {
-			signalOnce.Do(func() { close(inRetry) })
-			<-release
-			return time.Hour
-		},
-		RetryStrategyBaseValue:  1,
-		HostHealthCheckInterval: time.Hour,
-		HostHealthCheckTimeout:  200 * time.Millisecond,
-		ErrorParser:             newErrorsManager(),
-	})
+		rm := newTestStandbyManager(t, standbyManagerConfig{
+			UnhealthyStandbyRetryInterval: time.Hour,
+			RetriesBeforeUnhealthy:        2,
+			RetryStrategy: func(int, int) time.Duration {
+				signalOnce.Do(func() { close(inRetry) })
+				<-release
+				return time.Hour
+			},
+			RetryStrategyBaseValue:  1,
+			HostHealthCheckInterval: time.Hour,
+			HostHealthCheckTimeout:  200 * time.Millisecond,
+			ErrorParser:             newErrorsManager(),
+		})
 
-	if err := rm.AddStandby(context.Background(), newTestPgxPool(t)); err != nil {
-		t.Fatalf("AddStandby() = %v", err)
-	}
+		if err := rm.AddStandby(context.Background(), newTestPgxPool(t)); err != nil {
+			t.Fatalf("AddStandby() = %v", err)
+		}
 
-	select {
-	case <-inRetry:
-	case <-time.After(3 * time.Second):
-		t.Fatal("connect retry did not start")
-	}
+		select {
+		case <-inRetry:
+		case <-time.After(3 * time.Second):
+			t.Fatal("connect retry did not start")
+		}
 
-	host := onlyUnhealthyHost(t, rm)
-	if host.GetState() == HostStateClosed {
-		t.Fatal("host closed while still owned by the manager")
-	}
-	healthy, unhealthy := rm.Stats()
-	if healthy != 0 || unhealthy != 1 {
-		t.Fatalf("Stats() during retry = (%d, %d), want (0, 1)", healthy, unhealthy)
-	}
+		host := onlyUnhealthyHost(t, rm)
+		if host.GetState() == HostStateClosed {
+			t.Fatal("host closed while still owned by the manager")
+		}
+		healthy, unhealthy := rm.Stats()
+		if healthy != 0 || unhealthy != 1 {
+			t.Fatalf("Stats() during retry = (%d, %d), want (0, 1)", healthy, unhealthy)
+		}
 
-	rm.Close()
-	releaseRetry()
+		rm.Close()
+		releaseRetry()
+		synctest.Wait()
 
-	waitFor(t, 3*time.Second, func() bool {
 		healthy, unhealthy = rm.Stats()
-		return healthy == 0 && unhealthy == 0 && host.GetState() == HostStateClosed
+		if healthy != 0 || unhealthy != 0 || host.GetState() != HostStateClosed {
+			t.Fatalf("after Close: stats=(%d,%d) state=%s", healthy, unhealthy, host.GetState())
+		}
 	})
 }
 
 func TestAddStandby_FailedConnectStaysUnhealthy(t *testing.T) {
-	rm := newTestStandbyManager(t, standbyManagerConfig{
-		UnhealthyStandbyRetryInterval: time.Hour,
-		RetriesBeforeUnhealthy:        1,
-		RetryStrategy:                 func(int, int) time.Duration { return time.Millisecond },
-		RetryStrategyBaseValue:        1,
-		HostHealthCheckInterval:       time.Hour,
-		HostHealthCheckTimeout:        200 * time.Millisecond,
-		ErrorParser:                   newErrorsManager(),
-	})
+	synctest.Test(t, func(t *testing.T) {
+		rm := newTestStandbyManager(t, standbyManagerConfig{
+			UnhealthyStandbyRetryInterval: time.Hour,
+			RetriesBeforeUnhealthy:        1,
+			RetryStrategy:                 func(int, int) time.Duration { return time.Millisecond },
+			RetryStrategyBaseValue:        1,
+			HostHealthCheckInterval:       time.Hour,
+			HostHealthCheckTimeout:        200 * time.Millisecond,
+			ErrorParser:                   newErrorsManager(),
+		})
 
-	if err := rm.AddStandby(context.Background(), newTestPgxPool(t)); err != nil {
-		t.Fatalf("AddStandby() = %v", err)
-	}
-
-	var host *Pool
-	waitFor(t, 3*time.Second, func() bool {
-		healthy, unhealthy := rm.Stats()
-		if healthy != 0 || unhealthy != 1 {
-			return false
+		if err := rm.AddStandby(context.Background(), newTestPgxPool(t)); err != nil {
+			t.Fatalf("AddStandby() = %v", err)
 		}
-		host = onlyUnhealthyHost(t, rm)
-		return true
-	})
-	if host.GetState() == HostStateClosed {
-		t.Fatal("host closed while tracked as unhealthy")
-	}
 
-	rm.Close()
-	if host.GetState() != HostStateClosed {
-		t.Fatalf("state = %s, want %s", host.GetState(), HostStateClosed)
-	}
-	healthy, unhealthy := rm.Stats()
-	if healthy != 0 || unhealthy != 0 {
-		t.Fatalf("Stats() after Close = (%d, %d), want (0, 0)", healthy, unhealthy)
-	}
+		// Connect attempts use real network I/O (not durably blocked); give them
+		// wall time to fail, then wait for the bubble to quiesce.
+		deadline := time.Now().Add(3 * time.Second)
+		var host *Pool
+		for {
+			synctest.Wait()
+			healthy, unhealthy := rm.Stats()
+			if healthy == 0 && unhealthy == 1 {
+				host = onlyUnhealthyHost(t, rm)
+				break
+			}
+			if !time.Now().Before(deadline) {
+				t.Fatal("host did not remain unhealthy after failed connect")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if host.GetState() == HostStateClosed {
+			t.Fatal("host closed while tracked as unhealthy")
+		}
+
+		rm.Close()
+		synctest.Wait()
+
+		if host.GetState() != HostStateClosed {
+			t.Fatalf("state = %s, want %s", host.GetState(), HostStateClosed)
+		}
+		healthy, unhealthy := rm.Stats()
+		if healthy != 0 || unhealthy != 0 {
+			t.Fatalf("Stats() after Close = (%d, %d), want (0, 0)", healthy, unhealthy)
+		}
+	})
 }
 
 func TestAddStandby_AfterClose(t *testing.T) {
 	rm := newTestStandbyManager(t, fastStandbyConfig())
 	rm.Close()
 
-	// Host never enters a store on this path, so assert via the underlying pgx pool.
+	// Registration is rolled back before return; assert via the underlying pgx pool.
 	pool := newTestPgxPool(t)
 	err := rm.AddStandby(context.Background(), pool)
 	if !errors.Is(err, ErrClosed) {
@@ -189,45 +204,72 @@ func TestPromoteHealthy_RacesClose(t *testing.T) {
 	}
 }
 
-func TestRetryUnhealthy_CloseDuringRetryDoesNotPromote(t *testing.T) {
-	inRetry := make(chan struct{})
-	release := make(chan struct{})
-	var signalOnce sync.Once
-	var releaseOnce sync.Once
-	releaseRetry := func() {
-		releaseOnce.Do(func() { close(release) })
-	}
-	t.Cleanup(releaseRetry)
+func TestPromoteHealthy_SkipsIfAlreadyPromoted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rm := newTestStandbyManager(t, fastStandbyConfig())
+		host := newTestHost(t)
+		key := rm.buildMapKey(host)
+		rm.unhealthyStore.Set(key, host)
 
-	rm := newTestStandbyManager(t, standbyManagerConfig{
-		UnhealthyStandbyRetryInterval: 10 * time.Millisecond,
-		RetriesBeforeUnhealthy:        2,
-		RetryStrategy: func(int, int) time.Duration {
-			signalOnce.Do(func() { close(inRetry) })
-			<-release
-			return time.Hour
-		},
-		RetryStrategyBaseValue:  1,
-		HostHealthCheckInterval: time.Hour,
-		HostHealthCheckTimeout:  200 * time.Millisecond,
-		ErrorParser:             newErrorsManager(),
-	})
+		rm.promoteHealthy(key, host)
+		rm.promoteHealthy(key, host) // second call must no-op: already left unhealthyStore
+		synctest.Wait()
 
-	host := newTestHost(t)
-	rm.unhealthyStore.Set(rm.buildMapKey(host), host)
-
-	select {
-	case <-inRetry:
-	case <-time.After(3 * time.Second):
-		t.Fatal("unhealthy retry did not start")
-	}
-
-	rm.Close()
-	releaseRetry()
-
-	waitFor(t, 3*time.Second, func() bool {
 		healthy, unhealthy := rm.Stats()
-		return healthy == 0 && unhealthy == 0 && host.GetState() == HostStateClosed
+		if unhealthy != 0 || healthy != 1 {
+			t.Fatalf("Stats() = (%d, %d), want (1, 0)", healthy, unhealthy)
+		}
+		if n := len(host.state.notifyChangeChannels); n != 1 {
+			t.Fatalf("state subscriptions = %d, want 1", n)
+		}
+
+		rm.Close()
+		synctest.Wait()
+	})
+}
+
+func TestRetryUnhealthy_CloseDuringRetryDoesNotPromote(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		inRetry := make(chan struct{})
+		release := make(chan struct{})
+		var signalOnce sync.Once
+		var releaseOnce sync.Once
+		releaseRetry := func() {
+			releaseOnce.Do(func() { close(release) })
+		}
+		t.Cleanup(releaseRetry)
+
+		rm := newTestStandbyManager(t, standbyManagerConfig{
+			UnhealthyStandbyRetryInterval: 10 * time.Millisecond,
+			RetriesBeforeUnhealthy:        2,
+			RetryStrategy: func(int, int) time.Duration {
+				signalOnce.Do(func() { close(inRetry) })
+				<-release
+				return time.Hour
+			},
+			RetryStrategyBaseValue:  1,
+			HostHealthCheckInterval: time.Hour,
+			HostHealthCheckTimeout:  200 * time.Millisecond,
+			ErrorParser:             newErrorsManager(),
+		})
+
+		host := newTestHost(t)
+		rm.unhealthyStore.Set(rm.buildMapKey(host), host)
+
+		select {
+		case <-inRetry:
+		case <-time.After(3 * time.Second):
+			t.Fatal("unhealthy retry did not start")
+		}
+
+		rm.Close()
+		releaseRetry()
+		synctest.Wait()
+
+		healthy, unhealthy := rm.Stats()
+		if healthy != 0 || unhealthy != 0 || host.GetState() != HostStateClosed {
+			t.Fatalf("after Close: stats=(%d,%d) state=%s", healthy, unhealthy, host.GetState())
+		}
 	})
 }
 
@@ -308,16 +350,4 @@ func pgxPoolClosed(pool *pgxpool.Pool) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "closed pool")
-}
-
-func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("condition not met before timeout")
 }

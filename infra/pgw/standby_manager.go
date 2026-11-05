@@ -103,10 +103,6 @@ func (rm *standbyManager) AddStandby(ctx context.Context, pool *pgxpool.Pool) er
 		host.Close()
 		return err
 	}
-	if rm.isClosed() {
-		host.Close()
-		return ErrClosed
-	}
 
 	key := rm.buildMapKey(host)
 	// Register before connect so Close can always find and shut the host down.
@@ -135,7 +131,9 @@ func (rm *standbyManager) connectStandby(key string, host *Pool) {
 }
 
 func (rm *standbyManager) monitorStateChange(key string, host *Pool) {
-	subscribedChan := host.SubscribeStateChange(rm.ctx)
+	ctx, cancel := context.WithCancel(rm.ctx)
+	defer cancel()
+	subscribedChan := host.SubscribeStateChange(ctx)
 	for {
 		select {
 		case state, ok := <-subscribedChan:
@@ -151,7 +149,7 @@ func (rm *standbyManager) monitorStateChange(key string, host *Pool) {
 				return
 			}
 
-		case <-rm.ctx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}
@@ -224,6 +222,10 @@ func (rm *standbyManager) retryUnhealthy(key string, host *Pool) {
 // Store-then-recheck mirrors PoolManager.initPrimary so a concurrent Close
 // cannot leave an open pool invisible to shutdown.
 func (rm *standbyManager) promoteHealthy(key string, host *Pool) {
+	current, found := rm.unhealthyStore.Get(key)
+	if !found || current != host {
+		return
+	}
 	rm.unhealthyStore.Remove(key)
 	rm.store.Set(key, host)
 	if rm.isClosed() {
