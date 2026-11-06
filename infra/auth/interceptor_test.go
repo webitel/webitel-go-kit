@@ -42,7 +42,7 @@ func validSession() *Session {
 	return &Session{
 		UserID:   7,
 		Licenses: []License{{Prod: "AUDIT", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}},
-		Scopes:   map[string]Scope{"forms": {Class: "forms", Obac: true, Access: "r"}},
+		Scopes:   map[string]Scope{"forms": {Class: "forms", OBAC: true, Access: "r"}},
 	}
 }
 
@@ -91,23 +91,24 @@ func TestInterceptor(t *testing.T) {
 		authErr    error
 		wantCode   codes.Code
 		wantID     string
+		wantIs     error
 		wantAuthed bool // the Authorizer must have been asked
 	}{
 		{name: "allowed", method: "/webitel.audit.Forms/Search", ctx: withToken("tok"), session: validSession(), wantAuthed: true},
 		{name: "health is public", method: "/grpc.health.v1.Health/Check", ctx: context.Background()},
-		{name: "reflection is public", method: "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo", ctx: context.Background()},
-		{name: "unknown service", method: "/webitel.audit.Nope/Search", ctx: withToken("tok"), wantCode: codes.PermissionDenied, wantID: "auth.method.unknown"},
-		{name: "unknown method", method: "/webitel.audit.Forms/Nope", ctx: withToken("tok"), wantCode: codes.PermissionDenied, wantID: "auth.method.unknown"},
-		{name: "service without class", method: "/webitel.audit.NoClass/Do", ctx: withToken("tok"), wantCode: codes.PermissionDenied, wantID: "auth.method.unknown"},
-		{name: "access out of range", method: "/webitel.audit.Forms/Bad", ctx: withToken("tok"), wantCode: codes.PermissionDenied, wantID: "auth.method.unknown"},
-		{name: "no token", method: "/webitel.audit.Forms/Search", ctx: context.Background(), wantCode: codes.Unauthenticated, wantID: "auth.token.missing"},
-		{name: "empty token", method: "/webitel.audit.Forms/Search", ctx: withToken(""), wantCode: codes.Unauthenticated, wantID: "auth.token.missing"},
+		{name: "reflection is not public", method: "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo", ctx: context.Background(), wantCode: codes.PermissionDenied, wantID: "auth.method.unknown", wantIs: ErrMethodUnknown},
+		{name: "unknown service", method: "/webitel.audit.Nope/Search", ctx: withToken("tok"), wantCode: codes.PermissionDenied, wantID: "auth.method.unknown", wantIs: ErrMethodUnknown},
+		{name: "unknown method", method: "/webitel.audit.Forms/Nope", ctx: withToken("tok"), wantCode: codes.PermissionDenied, wantID: "auth.method.unknown", wantIs: ErrMethodUnknown},
+		{name: "service without class", method: "/webitel.audit.NoClass/Do", ctx: withToken("tok"), wantCode: codes.PermissionDenied, wantID: "auth.method.unknown", wantIs: ErrMethodUnknown},
+		{name: "access out of range", method: "/webitel.audit.Forms/Bad", ctx: withToken("tok"), wantCode: codes.PermissionDenied, wantID: "auth.method.unknown", wantIs: ErrMethodUnknown},
+		{name: "no token", method: "/webitel.audit.Forms/Search", ctx: context.Background(), wantCode: codes.Unauthenticated, wantID: "auth.token.missing", wantIs: ErrTokenMissing},
+		{name: "empty token", method: "/webitel.audit.Forms/Search", ctx: withToken(""), wantCode: codes.Unauthenticated, wantID: "auth.token.missing", wantIs: ErrTokenMissing},
 		{name: "invalid token", method: "/webitel.audit.Forms/Search", ctx: withToken("tok"), authErr: errors.Unauthenticated("bad", errors.WithID("auth.token.invalid")), wantCode: codes.Unauthenticated, wantID: "auth.token.invalid", wantAuthed: true},
 		{name: "auth service down", method: "/webitel.audit.Forms/Search", ctx: withToken("tok"), authErr: errors.Unavailable("down", errors.WithID("auth.provider.unavailable")), wantCode: codes.Unavailable, wantID: "auth.provider.unavailable", wantAuthed: true},
-		{name: "authorizer returns no session", method: "/webitel.audit.Forms/Search", ctx: withToken("tok"), wantCode: codes.Unauthenticated, wantID: "auth.session.expired", wantAuthed: true},
-		{name: "expired session", method: "/webitel.audit.Forms/Search", ctx: withToken("tok"), session: expired, wantCode: codes.Unauthenticated, wantID: "auth.session.expired", wantAuthed: true},
-		{name: "missing license", method: "/webitel.audit.Forms/Search", ctx: withToken("tok"), session: noLicense, wantCode: codes.PermissionDenied, wantID: "auth.license", wantAuthed: true},
-		{name: "obac denies create", method: "/webitel.audit.Forms/Create", ctx: withToken("tok"), session: validSession(), wantCode: codes.PermissionDenied, wantID: "auth.permission", wantAuthed: true},
+		{name: "authorizer returns no session", method: "/webitel.audit.Forms/Search", ctx: withToken("tok"), wantCode: codes.Unauthenticated, wantID: "auth.session.expired", wantIs: ErrSessionExpired, wantAuthed: true},
+		{name: "expired session", method: "/webitel.audit.Forms/Search", ctx: withToken("tok"), session: expired, wantCode: codes.Unauthenticated, wantID: "auth.session.expired", wantIs: ErrSessionExpired, wantAuthed: true},
+		{name: "missing license", method: "/webitel.audit.Forms/Search", ctx: withToken("tok"), session: noLicense, wantCode: codes.PermissionDenied, wantID: "auth.license", wantIs: ErrLicense, wantAuthed: true},
+		{name: "obac denies create", method: "/webitel.audit.Forms/Create", ctx: withToken("tok"), session: validSession(), wantCode: codes.PermissionDenied, wantID: "auth.permission", wantIs: ErrPermission, wantAuthed: true},
 	}
 
 	for kind, run := range calls {
@@ -138,6 +139,9 @@ func TestInterceptor(t *testing.T) {
 				}
 				assert.Equal(t, tt.wantCode, errors.Code(err))
 				assert.Equal(t, tt.wantID, errors.ID(err))
+				if tt.wantIs != nil {
+					assert.ErrorIs(t, err, tt.wantIs)
+				}
 			})
 		}
 	}
@@ -168,7 +172,18 @@ func TestInterceptorListsAllMissingLicenses(t *testing.T) {
 	_, err = calls["unary"](t, i, withToken("tok"), "/webitel.audit.Forms/Search")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "AUDIT, OTHER")
+	assert.ErrorIs(t, err, ErrLicense)
+	assert.Equal(t, []string{"AUDIT", "OTHER"}, errors.Value(err, ValueLicenses))
+}
+
+func TestInterceptorPermissionCarriesClass(t *testing.T) {
+	i, err := NewInterceptor(&fakeAuthorizer{s: validSession()}, testAPI)
+	require.NoError(t, err)
+
+	_, err = calls["unary"](t, i, withToken("tok"), "/webitel.audit.Forms/Create")
+
+	require.ErrorIs(t, err, ErrPermission)
+	assert.Equal(t, "forms", errors.Value(err, ValueClass))
 }
 
 func TestInterceptorPublicMethods(t *testing.T) {
@@ -180,6 +195,16 @@ func TestInterceptorPublicMethods(t *testing.T) {
 	require.NoError(t, err)
 	_, err = calls["unary"](t, i, context.Background(), "/grpc.health.v1.Health/Check")
 	require.NoError(t, err, "defaults stay public")
+	assert.Zero(t, a.calls)
+}
+
+func TestInterceptorPublicReflectionOptIn(t *testing.T) {
+	a := &fakeAuthorizer{}
+	i, err := NewInterceptor(a, testAPI, WithPublicMethods("/grpc.reflection.v1.ServerReflection/"))
+	require.NoError(t, err)
+
+	_, err = calls["unary"](t, i, context.Background(), "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo")
+	require.NoError(t, err)
 	assert.Zero(t, a.calls)
 }
 

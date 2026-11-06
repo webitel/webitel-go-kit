@@ -1,33 +1,50 @@
 package auth
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
 
-// Access is the action a method performs; values match the proto option.Action enum.
-type Access uint8
+// Action is what a method does; values match the proto option.Action enum.
+type Action uint8
 
 const (
-	Create Access = iota
-	Read
-	Update
-	Delete
+	ActionCreate Action = iota
+	ActionRead
+	ActionUpdate
+	ActionDelete
 )
 
-// letter is the Scope.Access flag; super is the permission granting it on any class in scope.
-func (a Access) letter() (byte, string) {
+// flag is the Scope.Access letter of the action, 0 if unknown.
+func (a Action) flag() byte {
 	switch a {
-	case Create:
-		return 'x', "add"
-	case Read:
-		return 'r', "read"
-	case Update:
-		return 'w', "write"
-	case Delete:
-		return 'd', "delete"
+	case ActionCreate:
+		return 'x'
+	case ActionRead:
+		return 'r'
+	case ActionUpdate:
+		return 'w'
+	case ActionDelete:
+		return 'd'
 	default:
-		return 0, ""
+		return 0
+	}
+}
+
+// superPermission grants the action on any class in scope, "" if unknown.
+func (a Action) superPermission() string {
+	switch a {
+	case ActionCreate:
+		return "add"
+	case ActionRead:
+		return "read"
+	case ActionUpdate:
+		return "write"
+	case ActionDelete:
+		return "delete"
+	default:
+		return ""
 	}
 }
 
@@ -36,10 +53,10 @@ type Scope struct {
 	Class string
 	// Access is a mask of the flags r, w, x, d.
 	Access string
-	// Obac enables the operation-based check of Access.
-	Obac bool
-	// Rbac enables the record-based check; see Session.RequiresRBAC.
-	Rbac bool
+	// OBAC enables the operation-based check of Access.
+	OBAC bool
+	// RBAC enables the record-based check; see Session.RequiresRBAC.
+	RBAC bool
 }
 
 // License is a product license; a zero IssuedAt or ExpiresAt means no bound.
@@ -55,8 +72,8 @@ type Session struct {
 	DomainID int64
 	Name     string
 	Username string
-	// Roles holds role ids only; ACLRoles adds the user id.
-	Roles       []int64
+	// RoleIDs excludes the user id; ACLRoles adds it.
+	RoleIDs     []int64
 	Permissions []string
 	Licenses    []License
 	// Scopes is keyed by object class.
@@ -86,45 +103,35 @@ func (s *Session) HasLicense(prod string) bool {
 
 // HasPermission reports whether the user has the named permission.
 func (s *Session) HasPermission(name string) bool {
-	for _, p := range s.Permissions {
-		if p == name {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(s.Permissions, name)
 }
 
-func (s *Session) hasSuper(a Access) bool {
-	_, super := a.letter()
-
-	return s.HasPermission(super)
+func (s *Session) hasSuper(a Action) bool {
+	return s.HasPermission(a.superPermission())
 }
 
 // CanAccess is the obac check for the action on the class.
-func (s *Session) CanAccess(class string, a Access) bool {
+func (s *Session) CanAccess(class string, a Action) bool {
 	scope, ok := s.Scopes[class]
-	if !ok || a > Delete {
+	if !ok || a > ActionDelete {
 		return false
 	}
-	if !scope.Obac || s.hasSuper(a) {
+	if !scope.OBAC || s.hasSuper(a) {
 		return true
 	}
-	letter, _ := a.letter()
-
-	return strings.IndexByte(scope.Access, letter) >= 0
+	return strings.IndexByte(scope.Access, a.flag()) >= 0
 }
 
 // RequiresRBAC reports whether the handler must restrict records to ACLRoles.
-func (s *Session) RequiresRBAC(class string, a Access) bool {
+func (s *Session) RequiresRBAC(class string, a Action) bool {
 	scope, ok := s.Scopes[class]
 
-	return ok && scope.Rbac && !s.hasSuper(a)
+	return ok && scope.RBAC && !s.hasSuper(a)
 }
 
 // ACLRoles returns the user id followed by the role ids, as record ACLs match them.
 func (s *Session) ACLRoles() []int64 {
-	roles := make([]int64, 0, 1+len(s.Roles))
+	roles := make([]int64, 0, 1+len(s.RoleIDs))
 
-	return append(append(roles, s.UserID), s.Roles...)
+	return append(append(roles, s.UserID), s.RoleIDs...)
 }

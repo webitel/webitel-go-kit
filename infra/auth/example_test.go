@@ -41,7 +41,7 @@ func Example() {
 	info := &grpc.UnaryServerInfo{FullMethod: "/webitel.audit.Forms/Search"}
 	_, err = interceptor.Unary()(ctx, nil, info, func(ctx context.Context, _ any) (any, error) {
 		s, _ := SessionFromContext(ctx)
-		fmt.Println("user", s.UserID, "may read forms:", s.CanAccess("forms", Read))
+		fmt.Println("user", s.UserID, "may read forms:", s.CanAccess("forms", ActionRead))
 
 		return nil, nil
 	})

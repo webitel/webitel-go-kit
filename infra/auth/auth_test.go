@@ -84,10 +84,10 @@ func TestAuthorizeBuildsSession(t *testing.T) {
 	assert.Equal(t, int64(3), s.DomainID)
 	assert.Equal(t, "Ann", s.Name)
 	assert.Equal(t, "ann", s.Username)
-	assert.Equal(t, []int64{10, 11}, s.Roles)
+	assert.Equal(t, []int64{10, 11}, s.RoleIDs)
 	assert.Equal(t, []string{"read", "playback_record_file"}, s.Permissions)
 	assert.True(t, s.HasLicense("AUDIT"))
-	assert.Equal(t, Scope{Class: "forms", Access: "rw", Obac: true, Rbac: true}, s.Scopes["forms"])
+	assert.Equal(t, Scope{Class: "forms", Access: "rw", OBAC: true, RBAC: true}, s.Scopes["forms"])
 	assert.True(t, exp.Equal(s.ExpiresAt))
 	assert.False(t, s.Expired())
 }
@@ -278,6 +278,11 @@ func TestErrorMapping(t *testing.T) {
 			require.Error(t, err)
 			assert.Equal(t, tt.code, errors.Code(err))
 			assert.Equal(t, tt.id, errors.ID(err))
+			if tt.code == codes.Unavailable {
+				assert.ErrorIs(t, err, ErrUnavailable)
+			} else {
+				assert.ErrorIs(t, err, ErrInvalidToken)
+			}
 		})
 	}
 }

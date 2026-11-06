@@ -70,10 +70,10 @@ func TestLookup(t *testing.T) {
 		want   rule
 		ok     bool
 	}{
-		{"/webitel.audit.Forms/Create", rule{"forms", []string{"AUDIT"}, Create}, true},
-		{"/webitel.audit.Forms/Search", rule{"forms", []string{"AUDIT"}, Read}, true},
-		{"/Forms/Update", rule{"forms", []string{"AUDIT"}, Update}, true},
-		{"/webitel.audit.Forms/Delete", rule{"forms", []string{"AUDIT"}, Delete}, true},
+		{"/webitel.audit.Forms/Create", rule{"forms", []string{"AUDIT"}, ActionCreate}, true},
+		{"/webitel.audit.Forms/Search", rule{"forms", []string{"AUDIT"}, ActionRead}, true},
+		{"/Forms/Update", rule{"forms", []string{"AUDIT"}, ActionUpdate}, true},
+		{"/webitel.audit.Forms/Delete", rule{"forms", []string{"AUDIT"}, ActionDelete}, true},
 		{"/webitel.audit.Forms/Bad", rule{}, false},
 		{"/webitel.audit.Forms/Missing", rule{}, false},
 		{"/webitel.audit.Unknown/Create", rule{}, false},

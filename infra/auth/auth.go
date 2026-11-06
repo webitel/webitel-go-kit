@@ -1,3 +1,12 @@
+// Package auth authenticates and authorizes gRPC calls of Webitel services.
+//
+// The access token (metadata key x-webitel-access) is exchanged for a Session
+// through Auth.UserInfo of go.webitel.app. The interceptor checks the call
+// against the generated WebitelAPI map: licenses first, then obac for the
+// object class and action; methods missing from the map are denied. Handlers
+// read the caller with SessionFromContext.
+//
+// See the package example for wiring.
 package auth
 
 import (
@@ -189,15 +198,9 @@ func (a *authorizer) store(key [sha256.Size]byte, s *Session) {
 func mapError(err error) error {
 	switch status.Code(err) {
 	case codes.Unauthenticated, codes.PermissionDenied, codes.NotFound:
-		return errors.Unauthenticated("invalid access token",
-			errors.WithID("auth.token.invalid"),
-			errors.WithCause(err),
-		)
+		return errors.Wrap(ErrInvalidToken, errors.WithCause(err))
 	default:
-		return errors.Unavailable("authorization service is unavailable",
-			errors.WithID("auth.provider.unavailable"),
-			errors.WithCause(err),
-		)
+		return errors.Wrap(ErrUnavailable, errors.WithCause(err))
 	}
 }
 
@@ -220,7 +223,7 @@ func newSession(info *authpb.Userinfo) *Session {
 	}
 	s.ExpiresAt = millis(info.GetExpiresAt())
 	for _, r := range info.GetRoles() {
-		s.Roles = append(s.Roles, r.GetId())
+		s.RoleIDs = append(s.RoleIDs, r.GetId())
 	}
 	for _, p := range info.GetPermissions() {
 		s.Permissions = append(s.Permissions, p.GetId())
@@ -236,8 +239,8 @@ func newSession(info *authpb.Userinfo) *Session {
 		s.Scopes[sc.GetClass()] = Scope{
 			Class:  sc.GetClass(),
 			Access: sc.GetAccess(),
-			Obac:   sc.GetObac(),
-			Rbac:   sc.GetRbac(),
+			OBAC:   sc.GetObac(),
+			RBAC:   sc.GetRbac(),
 		}
 	}
 

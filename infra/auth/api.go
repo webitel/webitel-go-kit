@@ -21,7 +21,7 @@ type rules map[string]service
 type rule struct {
 	class    string
 	licenses []string
-	access   Access
+	access   Action
 }
 
 func parseRules(webitelAPI any) (rules, error) {
@@ -51,7 +51,7 @@ func (r rules) authorizable() bool {
 			continue
 		}
 		for _, m := range svc.WebitelMethods {
-			if m.Access >= int(Create) && m.Access <= int(Delete) {
+			if m.Access >= int(ActionCreate) && m.Access <= int(ActionDelete) {
 				return true
 			}
 		}
@@ -77,9 +77,9 @@ func (r rules) lookup(fullMethod string) (rule, bool) {
 		return rule{}, false
 	}
 	m, ok := svc.WebitelMethods[method]
-	if !ok || m.Access < int(Create) || m.Access > int(Delete) {
+	if !ok || m.Access < int(ActionCreate) || m.Access > int(ActionDelete) {
 		return rule{}, false
 	}
 
-	return rule{class: svc.ObjClass, licenses: svc.AdditionalLicenses, access: Access(m.Access)}, true
+	return rule{class: svc.ObjClass, licenses: svc.AdditionalLicenses, access: Action(m.Access)}, true
 }

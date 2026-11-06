@@ -17,24 +17,24 @@ func TestCanAccess(t *testing.T) {
 		name   string
 		s      *Session
 		class  string
-		access Access
+		access Action
 		want   bool
 	}{
-		{"unknown class", sess(Scope{Obac: true, Access: "rwxd"}), "other", Read, false},
-		{"obac off allows without flags", sess(Scope{}), "forms", Delete, true},
-		{"create needs x", sess(Scope{Obac: true, Access: "rwd"}), "forms", Create, false},
-		{"create with x", sess(Scope{Obac: true, Access: "x"}), "forms", Create, true},
-		{"read needs r", sess(Scope{Obac: true, Access: "wxd"}), "forms", Read, false},
-		{"read with r", sess(Scope{Obac: true, Access: "r"}), "forms", Read, true},
-		{"update needs w", sess(Scope{Obac: true, Access: "rxd"}), "forms", Update, false},
-		{"update with w", sess(Scope{Obac: true, Access: "w"}), "forms", Update, true},
-		{"delete needs d", sess(Scope{Obac: true, Access: "rwx"}), "forms", Delete, false},
-		{"delete with d", sess(Scope{Obac: true, Access: "d"}), "forms", Delete, true},
-		{"super add bypasses", sess(Scope{Obac: true}, "add"), "forms", Create, true},
-		{"super read does not cover update", sess(Scope{Obac: true}, "read"), "forms", Update, false},
-		{"super write bypasses", sess(Scope{Obac: true}, "write"), "forms", Update, true},
-		{"super delete bypasses", sess(Scope{Obac: true}, "delete"), "forms", Delete, true},
-		{"unknown access is denied", sess(Scope{Access: "rwxd"}, "read", "write", "add", "delete"), "forms", Access(9), false},
+		{"unknown class", sess(Scope{OBAC: true, Access: "rwxd"}), "other", ActionRead, false},
+		{"obac off allows without flags", sess(Scope{}), "forms", ActionDelete, true},
+		{"create needs x", sess(Scope{OBAC: true, Access: "rwd"}), "forms", ActionCreate, false},
+		{"create with x", sess(Scope{OBAC: true, Access: "x"}), "forms", ActionCreate, true},
+		{"read needs r", sess(Scope{OBAC: true, Access: "wxd"}), "forms", ActionRead, false},
+		{"read with r", sess(Scope{OBAC: true, Access: "r"}), "forms", ActionRead, true},
+		{"update needs w", sess(Scope{OBAC: true, Access: "rxd"}), "forms", ActionUpdate, false},
+		{"update with w", sess(Scope{OBAC: true, Access: "w"}), "forms", ActionUpdate, true},
+		{"delete needs d", sess(Scope{OBAC: true, Access: "rwx"}), "forms", ActionDelete, false},
+		{"delete with d", sess(Scope{OBAC: true, Access: "d"}), "forms", ActionDelete, true},
+		{"super add bypasses", sess(Scope{OBAC: true}, "add"), "forms", ActionCreate, true},
+		{"super read does not cover update", sess(Scope{OBAC: true}, "read"), "forms", ActionUpdate, false},
+		{"super write bypasses", sess(Scope{OBAC: true}, "write"), "forms", ActionUpdate, true},
+		{"super delete bypasses", sess(Scope{OBAC: true}, "delete"), "forms", ActionDelete, true},
+		{"unknown access is denied", sess(Scope{Access: "rwxd"}, "read", "write", "add", "delete"), "forms", Action(9), false},
 	}
 
 	for _, tt := range tests {
@@ -45,14 +45,14 @@ func TestCanAccess(t *testing.T) {
 }
 
 func TestRequiresRBAC(t *testing.T) {
-	rbac := map[string]Scope{"forms": {Rbac: true}}
+	rbac := map[string]Scope{"forms": {RBAC: true}}
 	plain := map[string]Scope{"forms": {}}
 
-	assert.True(t, (&Session{Scopes: rbac}).RequiresRBAC("forms", Read))
-	assert.False(t, (&Session{Scopes: plain}).RequiresRBAC("forms", Read))
-	assert.False(t, (&Session{Scopes: rbac, Permissions: []string{"read"}}).RequiresRBAC("forms", Read))
-	assert.True(t, (&Session{Scopes: rbac, Permissions: []string{"read"}}).RequiresRBAC("forms", Update))
-	assert.False(t, (&Session{Scopes: rbac}).RequiresRBAC("other", Read))
+	assert.True(t, (&Session{Scopes: rbac}).RequiresRBAC("forms", ActionRead))
+	assert.False(t, (&Session{Scopes: plain}).RequiresRBAC("forms", ActionRead))
+	assert.False(t, (&Session{Scopes: rbac, Permissions: []string{"read"}}).RequiresRBAC("forms", ActionRead))
+	assert.True(t, (&Session{Scopes: rbac, Permissions: []string{"read"}}).RequiresRBAC("forms", ActionUpdate))
+	assert.False(t, (&Session{Scopes: rbac}).RequiresRBAC("other", ActionRead))
 }
 
 func TestHasLicense(t *testing.T) {
@@ -84,10 +84,10 @@ func TestExpired(t *testing.T) {
 }
 
 func TestACLRoles(t *testing.T) {
-	s := &Session{UserID: 7, Roles: []int64{1, 2}}
+	s := &Session{UserID: 7, RoleIDs: []int64{1, 2}}
 
 	assert.Equal(t, []int64{7, 1, 2}, s.ACLRoles())
-	assert.Equal(t, []int64{1, 2}, s.Roles, "must not alias Roles")
+	assert.Equal(t, []int64{1, 2}, s.RoleIDs, "must not alias RoleIDs")
 }
 
 func TestSessionFromContext(t *testing.T) {

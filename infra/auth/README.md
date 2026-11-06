@@ -1,14 +1,12 @@
 # auth
 
-Authentication and authorization of gRPC calls for Webitel services. It replaces
-the copies of `internal/auth` and `interceptors/auth.go` that lived in every
-service.
+Authentication and authorization of gRPC calls for Webitel services.
 
 The caller's access token (`x-webitel-access`) is exchanged for a `Session`
 through `Auth.UserInfo` of go.webitel.app. The interceptor then checks the call
 against the `WebitelAPI` map that `protoc-gen-go-webitel` generates:
 
-1. public methods (health checks, reflection) pass without a token;
+1. public methods (health checks) pass without a token;
 2. the method must be in the map, otherwise it is denied (`PermissionDenied`);
 3. the token must be present and the session not expired;
 4. every license in the service's `additional_license` must be valid now
@@ -47,7 +45,7 @@ if !ok {
     // only on public methods, which the interceptor lets through without a session
     return nil, errors.Unauthenticated("no session")
 }
-if s.RequiresRBAC("forms", auth.Read) {
+if s.RequiresRBAC("forms", auth.ActionRead) {
     // restrict records to those reachable by s.ACLRoles()
 }
 ```
@@ -59,24 +57,26 @@ In tests build the handler context with `auth.ContextWithSession`.
 A stream is authorized once, when it opens. A token that is revoked or expires
 later does not close a stream that is already running.
 
-Health checks and server reflection need no token. Add more with
-`auth.WithPublicMethods("/pkg.Service/")`; any other prefix shape, such as
-`"/pkg.Pub"` or `"/"`, makes `NewInterceptor` fail. Service-internal APIs that use their
-own credentials belong to the service: make them public here and put your own
-guard in the chain before this interceptor.
+Health checks need no token. Add more with
+`auth.WithPublicMethods("/pkg.Service/")`, e.g.
+`"/grpc.reflection.v1.ServerReflection/"` for reflection; any other prefix
+shape, such as `"/pkg.Pub"` or `"/"`, makes `NewInterceptor` fail.
+Service-internal APIs that use their own credentials belong to the service:
+make them public here and put your own guard in the chain before this
+interceptor.
 
 ## Access and permissions
 
-| `access` in proto | `Access` | Flag in `Scope.Access` | Super permission |
+| `access` in proto | `Action` | Flag in `Scope.Access` | Super permission |
 |---|---|---|---|
-| create (also when unset) | `Create` | `x` | `add` |
-| read | `Read` | `r` | `read` |
-| update | `Update` | `w` | `write` |
-| delete | `Delete` | `d` | `delete` |
+| create (also when unset) | `ActionCreate` | `x` | `add` |
+| read | `ActionRead` | `r` | `read` |
+| update | `ActionUpdate` | `w` | `write` |
+| delete | `ActionDelete` | `d` | `delete` |
 
-A method without an `access` option is generated as `Create`, so it needs `x`.
+A method without an `access` option is generated as `ActionCreate`, so it needs `x`.
 A class missing from the user's scope (go.webitel.app omits classes without
-read) is denied. With `Obac` off for the class the action is allowed; with it
+read) is denied. With `OBAC` off for the class the action is allowed; with it
 on the user needs the flag or the super permission.
 
 ## Errors
@@ -92,8 +92,12 @@ HTTP statuses.
 | session expired | `Unauthenticated` | `auth.session.expired` |
 | go.webitel.app unavailable, timeout or other error | `Unavailable` | `auth.provider.unavailable` |
 | caller gave up while waiting | `Canceled` / `DeadlineExceeded` | `auth.request.canceled` |
-| missing license (all missing are listed) | `PermissionDenied` | `auth.license` |
+| missing license (all missing are in the `licenses` value) | `PermissionDenied` | `auth.license` |
 | obac denied | `PermissionDenied` | `auth.permission` |
+
+Each row is an exported `Err*` variable, so callers check with `errors.Is`;
+`ErrLicense` and `ErrPermission` carry `ValueLicenses` and `ValueClass`, read
+with `errors.Value`.
 
 An outage of go.webitel.app answers `Unavailable`, not `Unauthenticated`, so
 clients are not logged out by it.

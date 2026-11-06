@@ -13,8 +13,8 @@ import (
 	"github.com/webitel/webitel-go-kit/pkg/errors"
 )
 
-// Methods that never need a session: health checks and server reflection.
-var defaultPublic = []string{"/grpc.health.", "/grpc.reflection."}
+// Methods that never need a session; reflection is opt-in, it would list every method.
+var defaultPublic = []string{"/grpc.health."}
 
 type interceptorOptions struct {
 	public []string
@@ -101,9 +101,7 @@ func (i *Interceptor) authorize(ctx context.Context, fullMethod string) (context
 	r, ok := i.rules.lookup(fullMethod)
 	if !ok {
 		// Fail closed on methods the map does not describe.
-		return nil, errors.Forbidden("method is not exposed for authorization",
-			errors.WithID("auth.method.unknown"),
-		)
+		return nil, ErrMethodUnknown
 	}
 
 	md, _ := metadata.FromIncomingContext(ctx)
@@ -112,9 +110,7 @@ func (i *Interceptor) authorize(ctx context.Context, fullMethod string) (context
 		token = v[0]
 	}
 	if token == "" {
-		return nil, errors.Unauthenticated("authorization token is missing",
-			errors.WithID("auth.token.missing"),
-		)
+		return nil, ErrTokenMissing
 	}
 
 	s, err := i.authorizer.Authorize(ctx, token)
@@ -122,9 +118,7 @@ func (i *Interceptor) authorize(ctx context.Context, fullMethod string) (context
 		return nil, err
 	}
 	if s == nil || s.Expired() {
-		return nil, errors.Unauthenticated("session has expired",
-			errors.WithID("auth.session.expired"),
-		)
+		return nil, ErrSessionExpired
 	}
 
 	var missing []string
@@ -134,15 +128,11 @@ func (i *Interceptor) authorize(ctx context.Context, fullMethod string) (context
 		}
 	}
 	if len(missing) > 0 {
-		return nil, errors.Forbidden("missing required licenses: "+strings.Join(missing, ", "),
-			errors.WithID("auth.license"),
-		)
+		return nil, errors.Wrap(ErrLicense, errors.WithValue(ValueLicenses, missing))
 	}
 
 	if !s.CanAccess(r.class, r.access) {
-		return nil, errors.Forbidden("missing required permissions: "+r.class,
-			errors.WithID("auth.permission"),
-		)
+		return nil, errors.Wrap(ErrPermission, errors.WithValue(ValueClass, r.class))
 	}
 
 	return ContextWithSession(ctx, s), nil
