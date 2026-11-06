@@ -38,6 +38,11 @@ type poolState struct {
 func (s *poolState) Set(state PoolState) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
+	// HostStateClosed is absorbing. Close races with Connect/healthCheck; once the
+	// host is shut down, later Set(Error|Connected|…) must not revive it.
+	if s.state == HostStateClosed {
+		return
+	}
 	if state == s.state {
 		return
 	}

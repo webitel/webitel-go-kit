@@ -25,6 +25,8 @@ github.com/webitel/webitel-go-kit/pkg/errors v0.2.0 h1:VKR8Hk1e/9QhTvL6+8iidx5vE
 github.com/webitel/webitel-go-kit/pkg/errors v0.2.0/go.mod h1:v6cQFLuiwx6vHJuRo+TNi7qMEg3iymI1isoG0eKLW1E=
 github.com/webitel/webitel-go-kit/pkg/safemap v0.1.1-0.20260617101709-72b6b829c7ef h1:fQ7a4mqj2jXz/6AnBU6yfCxMVn7XJcTryQCwz+nAD0Y=
 github.com/webitel/webitel-go-kit/pkg/safemap v0.1.1-0.20260617101709-72b6b829c7ef/go.mod h1:0mRzFyKLNDA+WAiWPHPdURYvdCJ1nGdPELZaeuJwJxE=
+go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
+go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
 golang.org/x/sync v0.21.0 h1:HLII4xRRTtCRkxYp4HNFF0Js/Og6q2i++KXbg0gHCwM=
 golang.org/x/sync v0.21.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
 golang.org/x/sys v0.42.0 h1:omrd2nAlyT5ESRdCLYdm3+fMfNFE/+Rf4bDIQImRJeo=
