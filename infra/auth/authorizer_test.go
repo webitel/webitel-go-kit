@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	authpb "buf.build/gen/go/webitel/webitel-go/protocolbuffers/go"
@@ -35,7 +36,7 @@ func serverCtx(ctx context.Context, method string) context.Context {
 func newTestAuthorizer(t *testing.T, c UserInfoClient, api any) *Authorizer {
 	t.Helper()
 
-	a, err := NewAuthorizer(New(c), api)
+	a, err := NewAuthorizer(newClient(t, c), api)
 	require.NoError(t, err)
 
 	return a
@@ -138,7 +139,7 @@ func TestRequiresRBACFromContext(t *testing.T) {
 
 func TestRequiresRBACFailsSafe(t *testing.T) {
 	// Authenticate stores no rule; the session alone is not enough to answer.
-	ctx, err := New(&fakeClient{resp: testInfo()}).Authenticate(withIncomingToken("tok"))
+	ctx, err := newClient(t, &fakeClient{resp: testInfo()}).Authenticate(withIncomingToken("tok"))
 	require.NoError(t, err)
 	_, ok := SessionFromContext(ctx)
 	require.True(t, ok)
@@ -149,20 +150,23 @@ func TestRequiresRBACFailsSafe(t *testing.T) {
 }
 
 func TestAuthorizeKeepsCachedSession(t *testing.T) {
-	c := New(&fakeClient{resp: testInfo()})
-	a, err := NewAuthorizer(c, testAPI)
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		c := newClient(t, &fakeClient{resp: testInfo()})
+		a, err := NewAuthorizer(c, testAPI)
+		require.NoError(t, err)
 
-	cached, err := c.Session(context.Background(), "tok")
-	require.NoError(t, err)
-	before := *cached
+		cached, err := c.Session(context.Background(), "tok")
+		require.NoError(t, err)
+		synctest.Wait() // the ristretto cache admits entries asynchronously
+		before := *cached
 
-	ctx, err := a.Authorize(serverCtx(withIncomingToken("tok"), "/webitel.audit.Forms/Search"))
-	require.NoError(t, err)
+		ctx, err := a.Authorize(serverCtx(withIncomingToken("tok"), "/webitel.audit.Forms/Search"))
+		require.NoError(t, err)
 
-	s, _ := SessionFromContext(ctx)
-	assert.Same(t, cached, s)
-	assert.Equal(t, before, *cached)
+		s, _ := SessionFromContext(ctx)
+		assert.Same(t, cached, s)
+		assert.Equal(t, before, *cached)
+	})
 }
 
 func TestAuthorizeOutsideServer(t *testing.T) {
@@ -206,27 +210,30 @@ func TestAuthorizePermissionCarriesClass(t *testing.T) {
 	assert.Equal(t, "forms", errors.Value(err, ValueClass))
 }
 
-// A server may hand back a session that has already expired; it must be refused and not cached.
+// A server may hand back a session that has already expired; it is cached like any other but refused on every call.
 func TestAuthorizeRefusesExpiredSessionFromServer(t *testing.T) {
-	info := testInfo()
-	info.ExpiresAt = time.Now().Add(-time.Minute).UnixMilli()
-	f := &fakeClient{resp: info}
-	a := newTestAuthorizer(t, f, testAPI)
+	synctest.Test(t, func(t *testing.T) {
+		info := testInfo()
+		info.ExpiresAt = time.Now().Add(-time.Minute).UnixMilli()
+		f := &fakeClient{resp: info}
+		a := newTestAuthorizer(t, f, testAPI)
 
-	for range 2 {
-		_, err := a.Authorize(serverCtx(withIncomingToken("tok"), "/webitel.audit.Forms/Search"))
+		for range 2 {
+			_, err := a.Authorize(serverCtx(withIncomingToken("tok"), "/webitel.audit.Forms/Search"))
 
-		require.ErrorIs(t, err, ErrSessionExpired)
-		assert.Equal(t, "auth.session.expired", errors.ID(err))
-	}
-	assert.Equal(t, 2, f.count(), "an expired session must not be cached")
+			require.ErrorIs(t, err, ErrSessionExpired)
+			assert.Equal(t, "auth.session.expired", errors.ID(err))
+			synctest.Wait() // ristretto admits the entry asynchronously
+		}
+		assert.Equal(t, 1, f.count())
+	})
 }
 
 func TestNewAuthorizerRejectsBadInput(t *testing.T) {
-	_, err := NewAuthorizer(New(&fakeClient{}), "nope")
+	_, err := NewAuthorizer(newClient(t, &fakeClient{}), "nope")
 	assert.Error(t, err)
 
-	_, err = NewAuthorizer(New(&fakeClient{}), genServicesInfo{})
+	_, err = NewAuthorizer(newClient(t, &fakeClient{}), genServicesInfo{})
 	assert.Error(t, err)
 
 	_, err = NewAuthorizer(nil, testAPI)

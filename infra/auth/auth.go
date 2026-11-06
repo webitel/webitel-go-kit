@@ -12,16 +12,14 @@ package auth
 
 import (
 	"context"
-	"crypto/sha256"
-	"sync"
 	"time"
 
 	authpb "buf.build/gen/go/webitel/webitel-go/protocolbuffers/go"
-	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/webitel/webitel-go-kit/pkg/cache"
 	"github.com/webitel/webitel-go-kit/pkg/errors"
 )
 
@@ -41,13 +39,12 @@ type UserInfoClient interface {
 }
 
 // Client turns an access token into a Session through Auth.UserInfo, with a cache.
+// The owner of the Client must Close it.
 type Client struct {
 	client UserInfoClient
 	opts   options
-	group  singleflight.Group
-
-	mu    sync.Mutex
-	cache map[[sha256.Size]byte]cacheEntry
+	// nil when the cache is disabled.
+	cache cache.Cache[string, *Session]
 }
 
 // New returns a Client that resolves sessions through Auth.UserInfo.
@@ -55,37 +52,47 @@ func New(c UserInfoClient, opts ...Option) *Client {
 	a := &Client{
 		client: c,
 		opts:   options{cacheTTL: DefaultCacheTTL, cacheSize: DefaultCacheSize, callTimeout: DefaultCallTimeout},
-		cache:  make(map[[sha256.Size]byte]cacheEntry),
 	}
 	for _, o := range opts {
 		o(&a.opts)
 	}
+	a.cache = a.newCache()
 
 	return a
 }
 
+// Close releases the cache; the Client must not be used afterwards.
+func (a *Client) Close() error {
+	if a.cache == nil {
+		return nil
+	}
+
+	return a.cache.Close()
+}
+
 // Session returns the session of the token, from the cache when possible.
 func (a *Client) Session(ctx context.Context, token string) (*Session, error) {
-	// Hashed so raw tokens never sit in the map keys.
-	key := sha256.Sum256([]byte(token))
-	if s := a.cached(key); s != nil {
-		return s, nil
+	var (
+		s   *Session
+		err error
+	)
+	if a.cache == nil {
+		s, err = a.load(ctx, token)
+	} else {
+		s, _, err = a.cache.Get(ctx, token)
 	}
-
-	ch := a.group.DoChan(string(key[:]), func() (any, error) { return a.fetch(ctx, key, token) })
-	select {
-	case res := <-ch:
-		if res.Err != nil {
-			return nil, res.Err
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, errors.Wrap(ctx.Err(),
+				errors.WithCode(status.FromContextError(ctx.Err()).Code()),
+				errors.WithID(idCanceled),
+			)
 		}
 
-		return res.Val.(*Session), nil
-	case <-ctx.Done():
-		return nil, errors.Wrap(ctx.Err(),
-			errors.WithCode(status.FromContextError(ctx.Err()).Code()),
-			errors.WithID("auth.request.canceled"),
-		)
+		return nil, err
 	}
+
+	return s, nil
 }
 
 // Authenticate puts the session of the incoming token into the context; it has the shape of go-grpc-middleware's AuthFunc.
@@ -128,7 +135,7 @@ type Option func(*options)
 // effective that long. A non-positive value disables the cache.
 func WithCacheTTL(d time.Duration) Option { return func(o *options) { o.cacheTTL = d } }
 
-// WithCacheSize bounds cached sessions; non-positive keeps the default.
+// WithCacheSize is the ristretto MaxCost of the cache; non-positive keeps the default.
 func WithCacheSize(n int) Option {
 	return func(o *options) {
 		if n > 0 {
@@ -144,76 +151,4 @@ func WithCallTimeout(d time.Duration) Option {
 			o.callTimeout = d
 		}
 	}
-}
-
-type cacheEntry struct {
-	session *Session
-	until   time.Time
-}
-
-// fetch must not die with the context of the caller that started the flight.
-func (a *Client) fetch(ctx context.Context, key [sha256.Size]byte, token string) (any, error) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), a.opts.callTimeout)
-	defer cancel()
-
-	// Only the token is forwarded, so the cached result depends on nothing else.
-	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs(TokenHeader, token))
-
-	info, err := a.client.UserInfo(ctx, &authpb.UserinfoRequest{})
-	if err != nil {
-		return nil, mapError(err)
-	}
-
-	s := newSession(info)
-	a.store(key, s)
-
-	return s, nil
-}
-
-func (a *Client) cached(key [sha256.Size]byte) *Session {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	e, ok := a.cache[key]
-	if !ok {
-		return nil
-	}
-	if !time.Now().Before(e.until) {
-		delete(a.cache, key)
-
-		return nil
-	}
-
-	return e.session
-}
-
-func (a *Client) store(key [sha256.Size]byte, s *Session) {
-	if a.opts.cacheTTL <= 0 {
-		return
-	}
-
-	now := time.Now()
-	until := now.Add(a.opts.cacheTTL)
-	if !s.ExpiresAt.IsZero() && s.ExpiresAt.Before(until) {
-		until = s.ExpiresAt
-	}
-	if !until.After(now) {
-		return
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if _, replace := a.cache[key]; !replace && len(a.cache) >= a.opts.cacheSize {
-		for k, e := range a.cache {
-			if !now.Before(e.until) {
-				delete(a.cache, k)
-			}
-		}
-		// shortcut: a full cache stops caching new tokens until entries expire, upgrade to LRU if the limit is hit.
-		if len(a.cache) >= a.opts.cacheSize {
-			return
-		}
-	}
-	a.cache[key] = cacheEntry{session: s, until: until}
 }

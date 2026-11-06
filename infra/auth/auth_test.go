@@ -57,6 +57,14 @@ func (f *fakeClient) count() int {
 	return f.calls
 }
 
+// newClient returns a Client that is closed with the test.
+func newClient(t *testing.T, f UserInfoClient, opts ...Option) *Client {
+	c := New(f, opts...)
+	t.Cleanup(func() { assert.NoError(t, c.Close()) })
+
+	return c
+}
+
 func testInfo() *authpb.Userinfo {
 	return &authpb.Userinfo{
 		Dc:          3,
@@ -77,7 +85,7 @@ func TestSessionBuildsSession(t *testing.T) {
 	info := testInfo()
 	info.ExpiresAt = exp.UnixMilli()
 
-	s, err := New(&fakeClient{resp: info}).Session(context.Background(), "tok")
+	s, err := newClient(t, &fakeClient{resp: info}).Session(context.Background(), "tok")
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(7), s.UserID)
@@ -96,7 +104,7 @@ func TestSessionUnboundedLicense(t *testing.T) {
 	info := testInfo()
 	info.License = []*authpb.LicenseUser{{Prod: "AUDIT"}}
 
-	s, err := New(&fakeClient{resp: info}).Session(context.Background(), "tok")
+	s, err := newClient(t, &fakeClient{resp: info}).Session(context.Background(), "tok")
 	require.NoError(t, err)
 
 	assert.True(t, s.Licenses[0].IssuedAt.IsZero())
@@ -105,7 +113,7 @@ func TestSessionUnboundedLicense(t *testing.T) {
 }
 
 func TestSessionNoExpiryWhenZero(t *testing.T) {
-	s, err := New(&fakeClient{resp: testInfo()}).Session(context.Background(), "tok")
+	s, err := newClient(t, &fakeClient{resp: testInfo()}).Session(context.Background(), "tok")
 	require.NoError(t, err)
 
 	assert.True(t, s.ExpiresAt.IsZero())
@@ -116,7 +124,7 @@ func TestSessionForwardsOnlyToken(t *testing.T) {
 	f := &fakeClient{resp: testInfo()}
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-real-ip", "1.2.3.4", TokenHeader, "other"))
 
-	_, err := New(f).Session(ctx, "tok")
+	_, err := newClient(t, f).Session(ctx, "tok")
 	require.NoError(t, err)
 
 	require.Len(t, f.md, 1)
@@ -126,7 +134,7 @@ func TestSessionForwardsOnlyToken(t *testing.T) {
 func TestSessionSingleflight(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeClient{resp: testInfo(), block: make(chan struct{})}
-		a := New(f)
+		a := newClient(t, f)
 
 		var wg sync.WaitGroup
 		var failed atomic.Int32
@@ -149,7 +157,7 @@ func TestSessionSingleflight(t *testing.T) {
 func TestSessionFirstCallerCancelDoesNotBreakOthers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeClient{resp: testInfo(), block: make(chan struct{})}
-		a := New(f)
+		a := newClient(t, f)
 
 		firstCtx, cancel := context.WithCancel(context.Background())
 		var firstErr, secondErr error
@@ -174,11 +182,12 @@ func TestSessionFirstCallerCancelDoesNotBreakOthers(t *testing.T) {
 func TestCacheTTL(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeClient{resp: testInfo()}
-		a := New(f, WithCacheTTL(10*time.Second))
+		a := newClient(t, f, WithCacheTTL(10*time.Second))
 		ctx := context.Background()
 
 		_, err := a.Session(ctx, "tok")
 		require.NoError(t, err)
+		synctest.Wait() // ristretto admits the entry asynchronously
 		time.Sleep(9 * time.Second)
 		_, err = a.Session(ctx, "tok")
 		require.NoError(t, err)
@@ -191,27 +200,9 @@ func TestCacheTTL(t *testing.T) {
 	})
 }
 
-func TestCacheLimitedByTokenExpiry(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		info := testInfo()
-		info.ExpiresAt = time.Now().Add(3 * time.Second).UnixMilli()
-		f := &fakeClient{resp: info}
-		a := New(f, WithCacheTTL(time.Minute))
-		ctx := context.Background()
-
-		_, err := a.Session(ctx, "tok")
-		require.NoError(t, err)
-		time.Sleep(4 * time.Second)
-		_, err = a.Session(ctx, "tok")
-		require.NoError(t, err)
-
-		assert.Equal(t, 2, f.count())
-	})
-}
-
 func TestCacheDisabled(t *testing.T) {
 	f := &fakeClient{resp: testInfo()}
-	a := New(f, WithCacheTTL(0))
+	a := newClient(t, f, WithCacheTTL(0))
 
 	for range 3 {
 		_, err := a.Session(context.Background(), "tok")
@@ -221,27 +212,39 @@ func TestCacheDisabled(t *testing.T) {
 	assert.Equal(t, 3, f.count())
 }
 
-func TestCacheIsBounded(t *testing.T) {
+func TestCacheKeyIsNotRawToken(t *testing.T) {
+	key := cacheKey("secret-token")
+
+	assert.NotContains(t, key, "secret-token")
+	assert.Len(t, key, 64)
+	assert.Equal(t, key, cacheKey("secret-token"))
+	assert.NotEqual(t, key, cacheKey("other-token"))
+}
+
+func TestCacheSizeIsBounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeClient{resp: testInfo()}
-		a := New(f, WithCacheSize(2))
+		a := newClient(t, f, WithCacheSize(100)) // holds about 100/57 entries, see DefaultCacheSize
 
-		for i := range 5 {
+		for i := range 20 {
+			_, err := a.Session(context.Background(), fmt.Sprint("tok", i))
+			require.NoError(t, err)
+			synctest.Wait()
+		}
+		before := f.count()
+		for i := range 20 {
 			_, err := a.Session(context.Background(), fmt.Sprint("tok", i))
 			require.NoError(t, err)
 		}
-		assert.Len(t, a.cache, 2)
 
-		time.Sleep(DefaultCacheTTL + time.Second)
-		_, err := a.Session(context.Background(), "fresh")
-		require.NoError(t, err)
-		assert.Len(t, a.cache, 1, "expired entries make room")
+		assert.Equal(t, 20, before)
+		assert.Greater(t, f.count(), before, "the size limit evicted sessions")
 	})
 }
 
 func TestErrorsAreNotCached(t *testing.T) {
 	f := &fakeClient{err: status.Error(codes.Unavailable, "down")}
-	a := New(f)
+	a := newClient(t, f)
 
 	_, err := a.Session(context.Background(), "tok")
 	require.Error(t, err)
@@ -273,7 +276,7 @@ func TestErrorMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(&fakeClient{err: tt.err}).Session(context.Background(), "tok")
+			_, err := newClient(t, &fakeClient{err: tt.err}).Session(context.Background(), "tok")
 
 			require.Error(t, err)
 			assert.Equal(t, tt.code, errors.Code(err))
@@ -291,7 +294,7 @@ func TestCallTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeClient{block: make(chan struct{})}
 
-		_, err := New(f, WithCallTimeout(time.Second)).Session(context.Background(), "tok")
+		_, err := newClient(t, f, WithCallTimeout(time.Second)).Session(context.Background(), "tok")
 
 		require.Error(t, err)
 		assert.Equal(t, codes.Unavailable, errors.Code(err))
@@ -304,25 +307,25 @@ func withIncomingToken(tok string) context.Context {
 
 func TestAuthenticate(t *testing.T) {
 	t.Run("puts the session into the context and caches it", func(t *testing.T) {
-		f := &fakeClient{resp: testInfo()}
-		c := New(f)
-		ctx := withIncomingToken("tok")
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeClient{resp: testInfo()}
+			c := newClient(t, f)
+			ctx := withIncomingToken("tok")
 
-		got, err := c.Authenticate(ctx)
-		require.NoError(t, err)
-		want, err := c.Session(ctx, "tok")
-		require.NoError(t, err)
-		s, ok := SessionFromContext(got)
-		require.True(t, ok)
-		assert.Same(t, want, s)
-
-		_, err = c.Authenticate(ctx)
-		require.NoError(t, err)
-		assert.Equal(t, 1, f.count(), "second call served from the cache")
+			got, err := c.Authenticate(ctx)
+			require.NoError(t, err)
+			synctest.Wait() // ristretto admits the entry asynchronously
+			want, err := c.Session(ctx, "tok")
+			require.NoError(t, err)
+			s, ok := SessionFromContext(got)
+			require.True(t, ok)
+			assert.Same(t, want, s)
+			assert.Equal(t, 1, f.count(), "second call served from the cache")
+		})
 	})
 
 	t.Run("token missing", func(t *testing.T) {
-		c := New(&fakeClient{resp: testInfo()})
+		c := newClient(t, &fakeClient{resp: testInfo()})
 
 		_, err := c.Authenticate(context.Background())
 		assert.ErrorIs(t, err, ErrTokenMissing)
@@ -331,22 +334,25 @@ func TestAuthenticate(t *testing.T) {
 	})
 
 	t.Run("UserInfo errors keep their sentinel", func(t *testing.T) {
-		_, err := New(&fakeClient{err: status.Error(codes.Unauthenticated, "bad")}).Authenticate(withIncomingToken("tok"))
+		_, err := newClient(t, &fakeClient{err: status.Error(codes.Unauthenticated, "bad")}).Authenticate(withIncomingToken("tok"))
 		assert.ErrorIs(t, err, ErrInvalidToken)
-		_, err = New(&fakeClient{err: status.Error(codes.Unavailable, "down")}).Authenticate(withIncomingToken("tok"))
+		_, err = newClient(t, &fakeClient{err: status.Error(codes.Unavailable, "down")}).Authenticate(withIncomingToken("tok"))
 		assert.ErrorIs(t, err, ErrUnavailable)
 	})
 
-	t.Run("expired session", func(t *testing.T) {
-		info := testInfo()
-		info.ExpiresAt = time.Now().Add(-time.Minute).UnixMilli()
-		f := &fakeClient{resp: info}
-		c := New(f)
+	t.Run("expired session is cached but refused every time", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			info := testInfo()
+			info.ExpiresAt = time.Now().Add(-time.Minute).UnixMilli()
+			f := &fakeClient{resp: info}
+			c := newClient(t, f)
 
-		for range 2 {
-			_, err := c.Authenticate(withIncomingToken("tok"))
-			assert.ErrorIs(t, err, ErrSessionExpired)
-		}
-		assert.Equal(t, 2, f.count(), "an expired session is not cached")
+			for range 2 {
+				_, err := c.Authenticate(withIncomingToken("tok"))
+				assert.ErrorIs(t, err, ErrSessionExpired)
+				synctest.Wait()
+			}
+			assert.Equal(t, 1, f.count(), "cached for the TTL like any session")
+		})
 	})
 }

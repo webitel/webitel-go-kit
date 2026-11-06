@@ -39,6 +39,7 @@ func ExampleNewAuthorizer() {
 	// In a service: New(authgrpc.NewAuthClient(conn)) and the generated pb.WebitelAPI;
 	// testAPI has the same shape.
 	client := New(exampleClient{})
+	defer client.Close()
 	authorizer, err := NewAuthorizer(client, testAPI)
 	if err != nil {
 		panic(err)
@@ -61,7 +62,9 @@ func ExampleNewAuthorizer() {
 //	interceptors.AuthUnaryServerInterceptor(client.Authenticate)
 func ExampleClient_Authenticate() {
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenHeader, "token"))
-	ctx, err := New(exampleClient{}).Authenticate(ctx)
+	client := New(exampleClient{})
+	defer client.Close()
+	ctx, err := client.Authenticate(ctx)
 	fmt.Println("error:", err)
 	handler(ctx)
 
@@ -75,7 +78,9 @@ func ExampleClient_Authenticate() {
 func ExampleRequiresRBAC() {
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenHeader, "token"))
 	ctx = grpc.NewContextWithServerTransportStream(ctx, fakeMethodStream{"/webitel.audit.Forms/Search"})
-	authorizer, err := NewAuthorizer(New(exampleClient{}), testAPI)
+	client := New(exampleClient{})
+	defer client.Close()
+	authorizer, err := NewAuthorizer(client, testAPI)
 	if err != nil {
 		panic(err)
 	}
