@@ -164,6 +164,9 @@ func TestValues(t *testing.T) {
 		werror.ErrKeyCode: codes.Code(4),
 		"color":           "red",
 	}, values)
+
+	err = werror.Wrap(err, werror.WithValue("raw", "outer"))
+	assert.Equal(t, "outer", werror.Values(err)["raw"], "a key attached twice keeps its outermost value")
 }
 
 func TestValuesUnderACause(t *testing.T) {
@@ -177,7 +180,8 @@ func TestValuesUnderACause(t *testing.T) {
 	assert.Equal(t, "o", values["outer"])
 	assert.Equal(t, "e", values["err only"], "a value under a WithCause is found, as Lookup finds it")
 	assert.Equal(t, "c", values["cause only"], "the cause's values are still returned")
-	assert.Equal(t, "from cause", values["shared"], "a key Values returned before keeps its value")
+	assert.Equal(t, "from err", values["shared"], "the error's own value wins over its cause's")
+	assert.Equal(t, werror.Value(err, "shared"), values["shared"], "Values and Value agree")
 }
 
 func BenchmarkValues(b *testing.B) {
