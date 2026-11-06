@@ -37,6 +37,7 @@ on:
         type: choice
         options:
           - appconfig
+          - infra/auth
           - infra/discovery
           - infra/discovery/fx
           - infra/errors
