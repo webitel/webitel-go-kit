@@ -34,3 +34,19 @@ func WithServiceChecks(checks ...*api.AgentServiceCheck) discovery.Option[discov
 		}
 	}
 }
+
+// WithReadiness returns an Option that sets the readiness verdict reported by
+// the TTL heartbeat. On each tick the heartbeat sends pass when fn reports
+// true, and critical with the error text as output otherwise. fn is called on
+// the heartbeat goroutine, so it must return quickly; health.Registry.ReadyFunc
+// reads a cached snapshot and qualifies. It only takes effect with the heartbeat
+// enabled. If fn is nil, the heartbeat always reports pass.
+func WithReadiness(fn func() (bool, error)) discovery.Option[discovery.DiscoveryProvider] {
+	return func(p discovery.DiscoveryProvider) {
+		if r, ok := p.(*Registry); ok {
+			if r.client != nil {
+				r.client.readiness = fn
+			}
+		}
+	}
+}

@@ -19,13 +19,13 @@ func TestNewWithoutSocket(t *testing.T) {
 	// otherwise break this silently.
 	t.Setenv("NOTIFY_SOCKET", "")
 
-	n := New(health.New(fastConfig(), nil))
+	n := New()
 	if n != nil {
 		t.Fatal("New returned a Notifier with NOTIFY_SOCKET unset")
 	}
 
 	ctx := context.Background()
-	if err := n.Start(ctx); err != nil {
+	if err := n.Start(ctx, nil); err != nil {
 		t.Fatalf("Start on a nil Notifier: %v", err)
 	}
 	if err := n.Stop(ctx); err != nil {
@@ -43,7 +43,7 @@ func TestReadyAndStopEndToEnd(t *testing.T) {
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
 
 	ctx := context.Background()
-	if err := n.Start(ctx); err != nil {
+	if err := n.Start(ctx, reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -68,7 +68,7 @@ func TestReadySentOnceOnReady(t *testing.T) {
 	waitState(t, reg, health.StateReady)
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -96,7 +96,7 @@ func TestReadyOnDegraded(t *testing.T) {
 	waitState(t, reg, health.StateDegraded)
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func TestNoReadyBeforeFirstRound(t *testing.T) {
 	})
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func TestStatusOnChange(t *testing.T) {
 	waitState(t, reg, health.StateReady)
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -184,7 +184,7 @@ func TestRedialAfterRebind(t *testing.T) {
 	waitState(t, reg, health.StateReady)
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	recv(t, ln, time.Second) // READY=1
@@ -220,7 +220,7 @@ func TestWriteDeadline(t *testing.T) {
 		WithLogger(lg.logger()))
 
 	ctx := context.Background()
-	if err := n.Start(ctx); err != nil {
+	if err := n.Start(ctx, reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -260,10 +260,10 @@ func TestLifecycleEdges(t *testing.T) {
 	}
 
 	// The burnt startOnce makes every later Start a no-op.
-	if err := n.Start(ctx); err != nil {
+	if err := n.Start(ctx, reg); err != nil {
 		t.Fatalf("Start after Stop: %v", err)
 	}
-	if err := n.Start(ctx); err != nil {
+	if err := n.Start(ctx, reg); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
 	if err := n.Stop(ctx); err != nil {
@@ -276,11 +276,11 @@ func TestLifecycleEdges(t *testing.T) {
 	// Registry.Snapshot is nil-safe, so a nil registry must not panic.
 	t.Setenv("NOTIFY_SOCKET", addr)
 
-	empty := New(nil, WithPollInterval(10*time.Millisecond))
+	empty := New(WithPollInterval(10 * time.Millisecond))
 	if empty == nil {
 		t.Fatal("New returned nil with NOTIFY_SOCKET set")
 	}
-	if err := empty.Start(ctx); err != nil {
+	if err := empty.Start(ctx, reg); err != nil {
 		t.Fatalf("Start with a nil registry: %v", err)
 	}
 	if err := empty.Stop(ctx); err != nil {
@@ -313,7 +313,7 @@ func TestAbstractSocket(t *testing.T) {
 	waitState(t, reg, health.StateReady)
 
 	n := newNotifier(t, reg, name, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -335,7 +335,7 @@ func TestStartTimeoutFallback(t *testing.T) {
 	n := newNotifier(t, reg, addr,
 		WithPollInterval(10*time.Millisecond),
 		WithStartTimeout(20*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -373,7 +373,7 @@ func TestStartTimeoutFallbackRestatesTruth(t *testing.T) {
 	n := newNotifier(t, reg, addr,
 		WithPollInterval(10*time.Millisecond),
 		WithStartTimeout(30*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -399,7 +399,7 @@ func TestStartOnADeadContextSendsNothing(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := n.Start(ctx); err != nil {
+	if err := n.Start(ctx, reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -419,7 +419,7 @@ func TestStopAfterTheLoopExitedIsNotAnError(t *testing.T) {
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
 
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := n.Start(ctx); err != nil {
+	if err := n.Start(ctx, reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -438,7 +438,7 @@ func TestStopRepeatsTheFirstVerdict(t *testing.T) {
 
 	t.Setenv("NOTIFY_SOCKET", addr)
 
-	n := New(nil)
+	n := New()
 	if n == nil {
 		t.Fatal("New returned nil with NOTIFY_SOCKET set")
 	}
@@ -468,7 +468,7 @@ func TestStartTimeoutDisabled(t *testing.T) {
 	waitState(t, reg, health.StateNotReady)
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 

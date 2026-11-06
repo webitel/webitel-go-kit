@@ -10,6 +10,10 @@ import (
 )
 
 func TestRabbitMQReconnect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("needs RabbitMQ on localhost:5672")
+	}
+
 	defer goleak.VerifyNone(t)
 
 	cfg := &Config{
@@ -17,9 +21,7 @@ func TestRabbitMQReconnect(t *testing.T) {
 		ConnectTimeout: time.Second,
 	}
 
-	logger := &NoopLogger{}
-
-	conn, err := NewConnection(cfg, logger)
+	conn, err := NewConnection(cfg, nil)
 	require.NoError(t, err)
 
 	for range 20 {

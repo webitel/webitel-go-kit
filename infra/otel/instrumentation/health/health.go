@@ -1,0 +1,153 @@
+package health
+
+import (
+	"context"
+	"errors"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/webitel/webitel-go-kit/infra/health"
+	"github.com/webitel/webitel-go-kit/infra/otel/semconv/v0.4.0/healthconv"
+)
+
+const scopeName = "github.com/webitel/webitel-go-kit/infra/otel/instrumentation/health"
+
+// Version is the current release version of this instrumentation.
+func Version() string {
+	return "0.0.0"
+}
+
+// snapshotter is what the binding reads; *health.Registry satisfies it.
+type snapshotter interface {
+	Snapshot() health.Snapshot
+}
+
+// register registers the metrics against snap and returns the registration as
+// the teardown handle.
+func register(snap snapshotter, opts ...Option) (metric.Registration, error) {
+	if snap == nil {
+		return nil, errors.New("otel/instrumentation/health: nil snapshotter")
+	}
+
+	cfg := &bindingConfig{mp: otel.GetMeterProvider()}
+	for _, opt := range opts {
+		opt.apply(cfg)
+	}
+
+	meter := cfg.mp.Meter(scopeName, metric.WithInstrumentationVersion(Version()))
+
+	status, err := healthconv.NewStatusObservable(meter)
+	if err != nil {
+		return nil, err
+	}
+
+	checkStatus, err := healthconv.NewCheckStatusObservable(meter)
+	if err != nil {
+		return nil, err
+	}
+
+	transitions, err := healthconv.NewCheckTransitionsObservable(meter)
+	if err != nil {
+		return nil, err
+	}
+
+	duration, err := healthconv.NewCheckDurationObservable(meter)
+	if err != nil {
+		return nil, err
+	}
+
+	return meter.RegisterCallback(
+		collect(snap, status, checkStatus, transitions, duration),
+		status.Inst(), checkStatus.Inst(), transitions.Inst(), duration.Inst(),
+	)
+}
+
+var (
+	nodeStates  = []healthconv.StateAttr{healthconv.StateReady, healthconv.StateDegraded, healthconv.StateNotReady}
+	checkStates = []healthconv.CheckStateAttr{healthconv.CheckStateOk, healthconv.CheckStateFail, healthconv.CheckStateUnknown}
+)
+
+func nodeState(s health.State) healthconv.StateAttr {
+	switch s {
+	case health.StateReady:
+		return healthconv.StateReady
+	case health.StateDegraded:
+		return healthconv.StateDegraded
+	default:
+		return healthconv.StateNotReady
+	}
+}
+
+func checkState(s health.Status) healthconv.CheckStateAttr {
+	switch s {
+	case health.StatusOK:
+		return healthconv.CheckStateOk
+	case health.StatusFail:
+		return healthconv.CheckStateFail
+	default:
+		return healthconv.CheckStateUnknown
+	}
+}
+
+func boolValue(b bool) int64 {
+	if b {
+		return 1
+	}
+
+	return 0
+}
+
+func collect(
+	snap snapshotter,
+	status healthconv.StatusObservable,
+	checkStatus healthconv.CheckStatusObservable,
+	transitions healthconv.CheckTransitionsObservable,
+	duration healthconv.CheckDurationObservable,
+) metric.Callback {
+	return func(_ context.Context, o metric.Observer) error {
+		snapshot := snap.Snapshot()
+
+		current := nodeState(snapshot.State)
+		for _, s := range nodeStates {
+			o.ObserveInt64(status.Inst(), boolValue(s == current), metric.WithAttributes(status.AttrState(s)))
+		}
+
+		for _, c := range snapshot.Checks {
+			// Every check metric carries the same identity; the name is
+			// conditionally required, so an unnamed check has no name attribute.
+			id := []attribute.KeyValue{
+				checkStatus.AttrCheckSystem(healthconv.CheckSystemAttr(c.System)),
+				checkStatus.AttrCheckGroup(healthconv.CheckGroupAttr(c.Group.String())),
+			}
+			if c.Name != "" {
+				id = append(id, checkStatus.AttrCheckName(c.Name))
+			}
+
+			cur := checkState(c.Status)
+			for _, s := range checkStates {
+				o.ObserveInt64(checkStatus.Inst(), boolValue(s == cur),
+					metric.WithAttributes(id...),
+					metric.WithAttributes(checkStatus.AttrCheckState(s)),
+				)
+			}
+
+			o.ObserveInt64(transitions.Inst(), int64(c.Transitions.OK),
+				metric.WithAttributes(id...),
+				metric.WithAttributes(transitions.AttrCheckState(healthconv.CheckStateOk)),
+			)
+
+			o.ObserveInt64(transitions.Inst(), int64(c.Transitions.Fail),
+				metric.WithAttributes(id...),
+				metric.WithAttributes(transitions.AttrCheckState(healthconv.CheckStateFail)),
+			)
+
+			if !c.LastRun.IsZero() {
+				o.ObserveFloat64(duration.Inst(), c.LastDuration.Seconds(), metric.WithAttributes(id...))
+			}
+		}
+
+		return nil
+	}
+}

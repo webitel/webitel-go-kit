@@ -7,7 +7,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 )
 
 var (
@@ -35,6 +40,7 @@ type PublisherConfig struct {
 	Confirmation        bool
 	Persistent          bool
 	Mandatory           bool
+	TracerProvider      trace.TracerProvider
 }
 
 // PublisherOption defines a function to modify PublisherConfig.
@@ -100,6 +106,14 @@ func WithMandatory(mandatory bool) PublisherOption {
 	}
 }
 
+// WithPublisherTracerProvider sets provider for publish spans.
+// Global provider is used when not set.
+func WithPublisherTracerProvider(tp trace.TracerProvider) PublisherOption {
+	return func(c *PublisherConfig) {
+		c.TracerProvider = tp
+	}
+}
+
 type MessagePublisher struct {
 	broker    *Connection
 	config    *PublisherConfig
@@ -107,18 +121,22 @@ type MessagePublisher struct {
 	confirmCh <-chan amqp.Confirmation
 	returnCh  <-chan amqp.Return
 	mu        sync.Mutex
-	logger    Logger
+	logger    *logging.Logger
+	tracer    trace.Tracer
 }
 
+// NewPublisher returns a publisher on its own channel. A nil logger uses
+// [logging.New].
 func NewPublisher(
 	broker *Connection,
 	config *PublisherConfig,
-	logger Logger,
+	logger *logging.Logger,
 ) (*MessagePublisher, error) {
 	p := &MessagePublisher{
 		broker: broker,
 		config: config,
-		logger: logger,
+		logger: componentLogger(logger),
+		tracer: newTracer(config.TracerProvider),
 	}
 
 	if err := p.ensureChannel(); err != nil && !broker.cfg.LazyConnect {
@@ -134,14 +152,25 @@ func (p *MessagePublisher) Publish(
 	routingKey string,
 	body []byte,
 	headers amqp.Table,
-) error {
+) (err error) {
+	messageID := uuid.NewString()
+	ctx, span, headers := startPublishSpan(ctx, p.tracer, exchange, routingKey, messageID, body, headers)
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
 	var lastErr error
 
 	for attempt := 0; attempt < p.config.MaxRetries; attempt++ {
-		err := p.doPublish(ctx, exchange, routingKey, body, headers)
+		err := p.doPublish(ctx, exchange, routingKey, messageID, body, headers)
 		if err == nil {
 			return nil
 		}
+
+		span.RecordError(err)
 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
@@ -153,7 +182,7 @@ func (p *MessagePublisher) Publish(
 
 		lastErr = err
 
-		p.logger.Warn("publish attempt failed", "attempt", attempt+1, "error", err)
+		p.logger.WarnCtx(ctx, "publish attempt failed", logging.Int("attempt", attempt+1), logging.Err(err))
 
 		backoff := time.Duration(attempt+1) * time.Second
 		select {
@@ -170,6 +199,7 @@ func (p *MessagePublisher) doPublish(
 	ctx context.Context,
 	exchange string,
 	routingKey string,
+	messageID string,
 	body []byte,
 	headers amqp.Table,
 ) error {
@@ -181,6 +211,7 @@ func (p *MessagePublisher) doPublish(
 	}
 
 	msg := amqp.Publishing{
+		MessageId:   messageID,
 		ContentType: "application/json",
 		Body:        body,
 		Headers:     headers,

@@ -82,6 +82,9 @@ func NewConsulRegistry(addr string, logger discovery.Logger) (*Registry, error) 
 // SetHealthCheck sets the enableHealthCheck flag of the Registry to the given value.
 // If set to true, the registry will enable health checks for services registered with it.
 func (r *Registry) SetHealthCheck(v bool) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	r.enableHealthCheck = v
 }
 
@@ -89,6 +92,9 @@ func (r *Registry) SetHealthCheck(v bool) {
 // The timeout is used as the timeout for all Consul API calls made by the registry.
 // If the timeout is zero, the default timeout of the registry is used.
 func (r *Registry) SetTimeout(d time.Duration) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	r.timeout = d
 }
 
@@ -98,6 +104,9 @@ func (r *Registry) SetTimeout(d time.Duration) {
 // Valid values for the data center are "SINGLE" and "MULTI".
 // If the given data center is not valid, the data center is not updated.
 func (r *Registry) SetDatacenter(dc string) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	parsed := Datacenter(dc)
 	if (parsed == SingleDatacenter || parsed == MultiDataCenter) && r.client != nil {
 		r.client.dc = parsed
@@ -110,6 +119,9 @@ func (r *Registry) SetDatacenter(dc string) {
 // If set to true, the registry will start a goroutine to update the TTL of the service registration periodically.
 // If set to false, the goroutine is stopped and the TTL is no longer updated.
 func (r *Registry) SetHeartbeatEnabled(enabled bool) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	if r.client != nil {
 		r.client.heartbeat = enabled
 	}
@@ -121,6 +133,9 @@ func (r *Registry) SetHeartbeatEnabled(enabled bool) {
 // The unit of the interval is seconds.
 // If the interval is negative, the health check interval is disabled.
 func (r *Registry) SetHealthCheckInterval(interval int) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	if r.client != nil {
 		r.client.healthCheckInterval = interval
 	}
@@ -132,6 +147,9 @@ func (r *Registry) SetHealthCheckInterval(interval int) {
 // The unit of the interval is seconds.
 // If the interval is negative, the deregister critical service after interval is disabled.
 func (r *Registry) SetDeregisterCriticalServiceAfter(interval int) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	if r.client != nil {
 		r.client.deregisterCriticalServiceAfter = interval
 	}
@@ -141,6 +159,9 @@ func (r *Registry) SetDeregisterCriticalServiceAfter(interval int) {
 // The tags are used as additional metadata for the registered services.
 // If the tags are nil, the default tags of the Registry are used.
 func (r *Registry) SetTags(tags ...string) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	if r.client != nil {
 		r.client.tags = tags
 	}

@@ -13,7 +13,7 @@ func failTo(t *testing.T, cs *checkState, at time.Time, cfg Config) {
 	t.Helper()
 
 	for i := 0; i < cfg.FailThreshold; i++ {
-		cs.record(at, errBoom, cfg)
+		cs.record(at, 0, errBoom, cfg)
 	}
 	if cs.status != StatusFail {
 		t.Fatalf("check did not reach %s after %d failures", NameFail, cfg.FailThreshold)
@@ -24,7 +24,7 @@ func TestFirstSuccessIsImmediate(t *testing.T) {
 	cfg := DefaultConfig()
 	cs := &checkState{}
 
-	status, changed := cs.record(time.Now(), nil, cfg)
+	status, changed := cs.record(time.Now(), 0, nil, cfg)
 	if status != StatusOK || !changed {
 		t.Fatalf("got %s changed=%v, want %s changed=true", status, changed, NameOK)
 	}
@@ -36,12 +36,12 @@ func TestFailThresholdMustBeConsecutive(t *testing.T) {
 	now := time.Now()
 
 	for i := 1; i < cfg.FailThreshold; i++ {
-		if status, _ := cs.record(now, errBoom, cfg); status == StatusFail {
+		if status, _ := cs.record(now, 0, errBoom, cfg); status == StatusFail {
 			t.Fatalf("flipped to %s after %d failures, want %d", NameFail, i, cfg.FailThreshold)
 		}
 	}
 
-	if status, changed := cs.record(now, errBoom, cfg); status != StatusFail || !changed {
+	if status, changed := cs.record(now, 0, errBoom, cfg); status != StatusFail || !changed {
 		t.Fatalf("got %s changed=%v, want %s changed=true", status, changed, NameFail)
 	}
 }
@@ -51,9 +51,9 @@ func TestSingleFailureDoesNotUnseatOK(t *testing.T) {
 	cs := &checkState{}
 	now := time.Now()
 
-	cs.record(now, nil, cfg)
+	cs.record(now, 0, nil, cfg)
 
-	if status, changed := cs.record(now, errBoom, cfg); status != StatusOK || changed {
+	if status, changed := cs.record(now, 0, errBoom, cfg); status != StatusOK || changed {
 		t.Fatalf("one failure moved the check to %s", status)
 	}
 }
@@ -67,11 +67,11 @@ func TestRecoveryWaitsForMinUnready(t *testing.T) {
 
 	// A success inside the MinUnready window is not enough: an unstable
 	// dependency must not be able to flap the node back into rotation.
-	if status, _ := cs.record(start.Add(cfg.MinUnready-time.Second), nil, cfg); status != StatusFail {
+	if status, _ := cs.record(start.Add(cfg.MinUnready-time.Second), 0, nil, cfg); status != StatusFail {
 		t.Fatalf("recovered before MinUnready elapsed, got %s", status)
 	}
 
-	if status, changed := cs.record(start.Add(cfg.MinUnready), nil, cfg); status != StatusOK || !changed {
+	if status, changed := cs.record(start.Add(cfg.MinUnready), 0, nil, cfg); status != StatusOK || !changed {
 		t.Fatalf("got %s changed=%v, want %s changed=true", status, changed, NameOK)
 	}
 }
@@ -86,11 +86,11 @@ func TestNotOKAlwaysCarriesAnError(t *testing.T) {
 	never := &checkState{name: "never-ran"}
 
 	stale := &checkState{name: "stale"}
-	stale.record(now.Add(-cfg.StaleAfter-time.Second), nil, cfg)
+	stale.record(now.Add(-cfg.StaleAfter-time.Second), 0, nil, cfg)
 
 	held := &checkState{name: "held-by-min-unready"}
 	failTo(t, held, now, cfg)
-	held.record(now, nil, cfg) // success inside the MinUnready window
+	held.record(now, 0, nil, cfg) // success inside the MinUnready window
 
 	for _, cs := range []*checkState{never, stale, held} {
 		res := cs.result(now, cfg)
@@ -111,11 +111,11 @@ func TestFailureCounterResetsOnSuccess(t *testing.T) {
 	now := time.Now()
 
 	for i := 1; i < cfg.FailThreshold; i++ {
-		cs.record(now, errBoom, cfg)
+		cs.record(now, 0, errBoom, cfg)
 	}
-	cs.record(now, nil, cfg)
+	cs.record(now, 0, nil, cfg)
 
-	if status, _ := cs.record(now, errBoom, cfg); status == StatusFail {
+	if status, _ := cs.record(now, 0, errBoom, cfg); status == StatusFail {
 		t.Fatalf("a success did not reset the consecutive-failure count")
 	}
 }
@@ -133,7 +133,7 @@ func TestStaleResultIsUnknownNotHealthy(t *testing.T) {
 	cs := &checkState{name: "db"}
 	now := time.Now()
 
-	cs.record(now, nil, cfg)
+	cs.record(now, 0, nil, cfg)
 
 	if got := cs.result(now.Add(cfg.StaleAfter), cfg).Status; got != StatusOK {
 		t.Fatalf("went stale early: got %s, want %s", got, NameOK)
@@ -153,7 +153,7 @@ func TestResultCarriesLastError(t *testing.T) {
 	cs := &checkState{name: "db"}
 	now := time.Now()
 
-	cs.record(now, errBoom, cfg)
+	cs.record(now, 0, errBoom, cfg)
 
 	if got := cs.result(now, cfg).Err; !errors.Is(got, errBoom) {
 		t.Fatalf("got %v, want %v", got, errBoom)
@@ -195,5 +195,46 @@ func TestOnlyInformationalIsExcludedFromReadiness(t *testing.T) {
 		if got := group.countsForReadiness(); got != want {
 			t.Errorf("%s.countsForReadiness() = %v, want %v", group, got, want)
 		}
+	}
+}
+
+func TestTransitions(t *testing.T) {
+	cfg := DefaultConfig()
+	start := time.Now()
+
+	for _, tc := range []struct {
+		name string
+		run  func(cs *checkState)
+		want Transitions
+	}{
+		{"first pass counts unknown->ok", func(cs *checkState) {
+			cs.record(start, 0, nil, cfg)
+		}, Transitions{OK: 1}},
+		{"failures under the threshold are absorbed", func(cs *checkState) {
+			cs.record(start, 0, nil, cfg)
+			for i := 1; i < cfg.FailThreshold; i++ {
+				cs.record(start, 0, errBoom, cfg)
+			}
+		}, Transitions{OK: 1}},
+		{"the threshold counts one fail", func(cs *checkState) {
+			failTo(t, cs, start, cfg)
+		}, Transitions{Fail: 1}},
+		{"recovery inside MinUnready does not count", func(cs *checkState) {
+			failTo(t, cs, start, cfg)
+			cs.record(start.Add(cfg.MinUnready-time.Second), 0, nil, cfg)
+		}, Transitions{Fail: 1}},
+		{"recovery at MinUnready counts", func(cs *checkState) {
+			cs.record(start, 0, nil, cfg)
+			failTo(t, cs, start, cfg)
+			cs.record(start.Add(cfg.MinUnready), 0, nil, cfg)
+		}, Transitions{OK: 2, Fail: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := &checkState{}
+			tc.run(cs)
+			if cs.transitions != tc.want {
+				t.Fatalf("transitions = %+v, want %+v", cs.transitions, tc.want)
+			}
+		})
 	}
 }

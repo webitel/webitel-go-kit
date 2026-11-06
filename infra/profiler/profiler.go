@@ -8,15 +8,17 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/webitel/webitel-go-kit/pkg/logger"
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 )
+
+const Component logging.Component = "github.com/webitel/webitel-go-kit/infra/profiler"
 
 type Profiler struct {
 	server *http.Server
-	logger logger.Logger
+	logger *logging.Logger
 }
 
-func New(logger logger.Logger, config Config) *Profiler {
+func New(logger *logging.Logger, config Config) *Profiler {
 	if config.Addr == "" {
 		return nil
 	}
@@ -44,7 +46,7 @@ func New(logger logger.Logger, config Config) *Profiler {
 
 	return &Profiler{
 		server: srv,
-		logger: logger,
+		logger: logger.WithComponent(Component),
 	}
 }
 
@@ -54,10 +56,11 @@ func (p *Profiler) Start() error {
 	}
 
 	go func() {
-		p.logger.Info("pprof server starting", "addr", p.server.Addr)
+		ctx := context.Background()
+		p.logger.InfoCtx(ctx, "pprof server starting", logging.Str("addr", p.server.Addr))
 
 		if err := p.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			p.logger.Error("pprof server failed", "err", err)
+			p.logger.ErrorCtx(ctx, "pprof server failed", logging.Err(err))
 		}
 	}()
 
@@ -69,7 +72,7 @@ func (p *Profiler) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	p.logger.Info("pprof server stopping")
+	p.logger.InfoCtx(ctx, "pprof server stopping")
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

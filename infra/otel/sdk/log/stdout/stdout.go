@@ -32,10 +32,12 @@ func withOptions(ctx context.Context, rawDSN string) ([]log.Option, error) {
 	}
 	scheme = strings.ToLower(scheme)
 
-	var (
-		err error
-		out io.WriteCloser
-	)
+	path, params, err := internal.ParseDSN(rawDSN)
+	if err != nil {
+		return nil, err
+	}
+
+	var out io.WriteCloser
 	switch scheme {
 	case "stdout":
 		out = os.Stdout
@@ -43,7 +45,7 @@ func withOptions(ctx context.Context, rawDSN string) ([]log.Option, error) {
 		out = os.Stderr
 	case "file":
 		{
-			out, err = internal.FileDSN(rawDSN)
+			out, err = internal.FileDSN(rawDSN, "codec")
 			if err != nil {
 				return nil, err
 			}
@@ -51,28 +53,15 @@ func withOptions(ctx context.Context, rawDSN string) ([]log.Option, error) {
 	default:
 		return nil, fmt.Errorf("scheme %s: unknown", scheme)
 	}
+	if scheme != "file" && path != "" {
+		return nil, fmt.Errorf("%s:%s: unexpected path %q, expect %[1]s:;codec= or %[1]s://?codec=", scheme, rawDSN, path)
+	}
 
 	var (
 		noColor   = true
-		encoder   Encoder // formatter
 		codecOpts []codec.Option
-		newCodec  = func(name string) {
-			if encoder != nil {
-				return // already
-			}
-			// Apply: COLORIZE options
-			if noColor {
-				codecOpts = append(codecOpts,
-					codec.WithNoColor(),
-				)
-			}
-			encoder = codec.NewCodec(name, out, codecOpts...)
-			if encoder == nil {
-				re := fmt.Errorf("invalid OTEL_LOGRECORD_CODEC value %s: codec %[1]q not found", name)
-				err = errors.Join(err, re)
-				otel.Handle(re)
-			}
-		}
+		codecName = "text"
+		codecFrom = "OTEL_LOGRECORD_CODEC"
 	)
 	internal.Environment.Apply(
 		internal.EnvString("LOGRECORD_TIMESTAMP", func(s string) {
@@ -109,12 +98,22 @@ func withOptions(ctx context.Context, rawDSN string) ([]log.Option, error) {
 			noColor = !enable
 		}),
 		internal.EnvString("LOGRECORD_CODEC", func(s string) {
-			newCodec(s)
+			codecName = s
 		}),
 	)
+	if s, ok := params["codec"]; ok {
+		codecName, codecFrom = s, "DSN codec"
+	}
 
-	// OTEL_LOGRECORD_CODEC = "text"; default
-	newCodec("text")
+	if noColor {
+		codecOpts = append(codecOpts, codec.WithNoColor())
+	}
+	encoder := codec.NewCodec(codecName, out, codecOpts...)
+	if encoder == nil {
+		re := fmt.Errorf("invalid %s value %s: codec %[2]q not found", codecFrom, codecName)
+		err = errors.Join(err, re)
+		otel.Handle(re)
+	}
 
 	if err != nil {
 		return nil, err

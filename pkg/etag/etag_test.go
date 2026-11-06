@@ -89,6 +89,20 @@ func TestDecodeEtag(t *testing.T) {
 	t.Log("Decoding invalid ETag returned error as expected")
 }
 
+// TestDecodeEtagWorkingSchedule tests that the newest type decodes: ConsumeTag
+// rejects any type above maxWellKnownType
+func TestDecodeEtagWorkingSchedule(t *testing.T) {
+	encoded, err := EncodeEtag(EtagWorkingSchedule, 12345, 3)
+	assert.NoError(t, err, "Encoding EtagWorkingSchedule should not produce an error")
+
+	typ, oid, ver, err := DecodeEtag(encoded)
+	assert.NoError(t, err, "Decoding EtagWorkingSchedule should not produce an error")
+	assert.Equal(t, EtagWorkingSchedule, typ, "Expected EtagWorkingSchedule type")
+	assert.Equal(t, int64(12345), oid, "Expected OID to be 12345")
+	assert.Equal(t, int32(3), ver, "Expected version to be 3")
+	assert.Equal(t, "EtagWorkingSchedule", typ.String(), "Expected the generated type name")
+}
+
 // TestExpectEtag tests the ExpectEtag function
 func TestExpectEtag(t *testing.T) {
 	encoded, _ := EncodeEtag(EtagCase, 12345, 0)

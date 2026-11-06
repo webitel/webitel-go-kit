@@ -36,19 +36,30 @@ on:
         required: true
         type: choice
         options:
+          - appconfig
           - infra/discovery
+          - infra/discovery/fx
+          - infra/errors
           - infra/fts_client
+          - infra/health
+          - infra/health/fx
+          - infra/httpproxy
           - infra/logger_client
           - infra/otel
+          - infra/pgw
+          - infra/pgw/fx
           - infra/profiler
           - infra/pubsub/rabbitmq
+          - infra/ratelimit
+          - infra/ratelimit/mux
           - infra/sqldb
           - infra/transport
+          - pkg/cache
           - pkg/errors
           - pkg/etag
           - pkg/filters
           - pkg/interceptors
-          - pkg/logger
+          - pkg/logging
           - pkg/safemap
           - pkg/watcher
 
@@ -172,7 +183,7 @@ jobs:
 
       - name: Test module
         working-directory: ${{ inputs.module }}
-        run: go test -race ./...
+        run: go test -race -short ./...
         continue-on-error: true
 
       - name: Configure git

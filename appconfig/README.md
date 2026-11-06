@@ -26,6 +26,7 @@ Dots and hyphens in flag names are replaced with underscores for the env var equ
 | `profiler.mutex_fraction` | `PROFILER_MUTEX_FRACTION` |
 | `profiler.block_rate` | `PROFILER_BLOCK_RATE` |
 | `service.conn.verify_certs` | `SERVICE_CONN_VERIFY_CERTS` |
+| `service.conn.mtls` | `SERVICE_CONN_MTLS` |
 | `service.conn.ca` | `SERVICE_CONN_CA` |
 | `service.conn.cert` | `SERVICE_CONN_CERT` |
 | `service.conn.key` | `SERVICE_CONN_KEY` |

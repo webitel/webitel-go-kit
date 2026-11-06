@@ -46,18 +46,78 @@ A registry with no checks — or with only informational ones — is **not ready
 nothing registered answers "can this node take traffic?", so no verdict has been
 earned.
 
+Each `CheckResult` also carries `LastDuration` (elapsed time of the last
+completed run; zero until the first) and `Transitions` (how many times the
+check changed to `ok` and to `fail` since the process started). Both come from
+`Snapshot()`. The first completed run counts as one transition, since a check
+starts `unknown`.
+
+Staleness is applied when a result is read, never stored: a stale check reads
+`unknown` but `Transitions` does not move. The counter answers "how often did
+the verdict flip", not "is this check healthy now" — `Status` answers that.
+
+`infra/otel/instrumentation/health` exports these as OpenTelemetry metrics. Its
+transport registers them when the registry starts and unregisters them when it
+stops, before the DrainHold wait:
+
+```go
+import otelhealth "github.com/webitel/webitel-go-kit/infra/otel/instrumentation/health"
+
+h := health.New(health.DefaultConfig(), log,
+    health.WithTransport(otelhealth.NewTransport()),
+)
+```
+
+With fx, pass it to the module: `healthfx.Module(cfg, health.WithTransport(otelhealth.NewTransport()))`.
+
 ## Quick start
 
 ```go
-h := health.New(health.DefaultConfig(), log)
+h := health.New(health.DefaultConfig(), log,
+    health.WithTransport(healthhttp.NewServer("127.0.0.1:8081")),
+    health.WithTransport(sdnotify.New()), // nil when NOTIFY_SOCKET is unset, ignored
+)
 
-h.Critical("grpc", health.ListenerCheck(lis))
-h.Informational("postgres", store.Ping)
+h.Critical(health.SystemGRPC, health.ListenerCheck(lis))
+h.Informational(health.SystemPostgreSQL, store.Ping)
 
 if err := h.Start(ctx); err != nil {
     return err
 }
 ```
+
+A check is registered by the system it probes. The `System` constants —
+`postgresql`, `redis`, `rabbitmq`, `grpc`, `http` — follow the upstream
+OpenTelemetry values, so health metrics line up with the spans of the same
+system. A listener of the service itself uses its protocol, `grpc` or `http`.
+Any other system takes a value of its own:
+
+```go
+h.Critical("freeswitch", callManager.Ready)
+```
+
+Two checks of one system are told apart with `WithName`:
+
+```go
+h.Informational(health.SystemPostgreSQL, pool.Ping)
+h.Informational(health.SystemPostgreSQL, standby.Ping, health.WithName("standby"))
+```
+
+The key of a check is its system, or `system/name` — `postgresql/standby`. It is
+unique in a registry and is what logs, `STATUS=` and the `ReadyFunc` error show.
+A second check with the same key is ignored and logged, so a second database
+registered without `WithName` is never checked. The name is a metric attribute:
+keep it static, never a host, an address or a tenant.
+
+The registry owns its transports. `Start` runs the checks, then starts each
+transport in order. If one fails, the ones already started are stopped, the
+checks are halted, and the returned error joins the failure with any rollback
+failure. That registry is finished: exit, or build a new one. Nil and typed-nil
+transports are ignored.
+
+A transport implements `health.Transport`: `Start(ctx, *Registry)` and
+`Stop(ctx)`. `Stop` on a transport that never started must be safe: it must not
+block or fail, though it may still send a shutdown signal, as `sdnotify` does.
 
 `ListenerCheck` dials a listener to prove it still accepts connections. It uses
 the listener's own address, not the one advertised to service discovery — a host
@@ -76,24 +136,25 @@ discovery.NewServiceDiscovery(nodeID, url, h.ReadyFunc())
 is `false` the error is never nil**, so a caller may use it without a nil check.
 
 Shut down with `Shutdown`, which runs the sequence in the order the registry
-requires. `ctx` must carry at least `DrainHold` of budget: `Drain` returns
-immediately and the hold is absorbed inside `Stop`, so a shorter context cuts
-the hold short and service discovery may never see the node leave rotation.
+requires: `Drain`, then every transport in reverse start order, then the
+DrainHold wait, then the scheduler. `ctx` must carry at least `DrainHold` of
+budget: `Drain` returns immediately and the hold is absorbed inside `Stop`, so a
+shorter context cuts the hold short and service discovery may never see the node
+leave rotation.
 
 ```go
 ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 defer cancel()
 
-err := health.Shutdown(ctx, h, notifier) // any number of transports, nil ones skipped
+err := h.Shutdown(ctx)
 ```
 
 Every transport is stopped even if an earlier one fails, and the errors are
 joined. The equivalent by hand, if you need to interleave something:
 
 ```go
-h.Drain()          // not ready from here on, one way
-notifier.Stop(ctx) // if the sd_notify transport is used
-h.Stop(ctx)        // waits out the rest of DrainHold, then halts the scheduler
+h.Drain()    // not ready from here on, one way
+h.Stop(ctx)  // stops the transports, waits out the rest of DrainHold, halts the scheduler
 ```
 
 ## HTTP
@@ -107,14 +168,12 @@ router.Handle("/readyz", healthhttp.ReadinessHandler(h))
 router.Handle("/healthz", healthhttp.HealthHandler(h))
 ```
 
-Or run a listener of your own, for a service with no HTTP server:
+Or run a listener of your own, for a service with no HTTP server. `NewServer`
+is a transport: pass it to `health.WithTransport` and the registry binds it on
+`Start` and stops it on `Stop`. It returns nil for an empty address.
 
 ```go
-srv := healthhttp.NewServer(h, "127.0.0.1:8081")
-if err := srv.Start(); err != nil {
-    return err
-}
-defer srv.Stop(ctx)
+h := health.New(cfg, log, health.WithTransport(healthhttp.NewServer("127.0.0.1:8081")))
 ```
 
 `healthhttp.Handler(h)` serves all three from one mount by routing on the last
@@ -133,11 +192,13 @@ Anything other than `GET` or `HEAD` returns 405 with an `Allow` header.
 {
   "status": "degraded",
   "checks": [
-    { "name": "grpc",     "group": "critical",      "status": "ok",   "since": "2026-08-12T10:04:11Z" },
-    { "name": "postgres", "group": "informational", "status": "fail", "since": "2026-08-12T10:07:52Z" }
+    { "system": "grpc",       "group": "critical",      "status": "ok",   "since": "2026-08-12T10:04:11Z" },
+    { "system": "postgresql", "name": "standby", "group": "informational", "status": "fail", "since": "2026-08-12T10:07:52Z" }
   ]
 }
 ```
+
+`name` is present only for a check registered with `WithName`.
 
 **A check's error text never reaches a response body**, on any endpoint. Names
 and states are safe to expose; the text of a database error is not, and it goes
@@ -147,10 +208,7 @@ JSON, and only on a `Server` whose listener bound to loopback.
 ## systemd
 
 ```go
-n := sdnotify.New(h) // nil when NOTIFY_SOCKET is unset
-if err := n.Start(ctx); err != nil {
-    return err
-}
+h := health.New(cfg, log, health.WithTransport(sdnotify.New())) // New is nil when NOTIFY_SOCKET is unset
 ```
 
 With no `NOTIFY_SOCKET` the transport does nothing at all, so a dev machine, a

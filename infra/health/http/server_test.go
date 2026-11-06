@@ -43,8 +43,8 @@ func stopServerAtCleanup(t *testing.T, srv *Server) {
 func startServer(t *testing.T, reg *health.Registry) *Server {
 	t.Helper()
 
-	srv := NewServer(reg, "127.0.0.1:0")
-	if err := srv.Start(); err != nil {
+	srv := NewServer("127.0.0.1:0")
+	if err := srv.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	stopServerAtCleanup(t, srv)
@@ -71,11 +71,11 @@ func fetch(t *testing.T, url string) (int, string, http.Header) {
 }
 
 func TestNilServer(t *testing.T) {
-	srv := NewServer(okRegistry(t), "")
+	srv := NewServer("")
 	if srv != nil {
 		t.Fatal("NewServer with an empty address is not nil")
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.Start(context.Background(), nil); err != nil {
 		t.Fatalf("Start on a nil Server: %v", err)
 	}
 	if err := srv.Stop(context.Background()); err != nil {
@@ -109,9 +109,9 @@ func TestStartBindError(t *testing.T) {
 	}
 	defer held.Close()
 
-	srv := NewServer(okRegistry(t), held.Addr().String())
+	srv := NewServer(held.Addr().String())
 
-	err = srv.Start()
+	err = srv.Start(context.Background(), okRegistry(t))
 	if err == nil {
 		t.Fatal("Start on a busy port returned nil")
 	}
@@ -121,12 +121,12 @@ func TestStartBindError(t *testing.T) {
 }
 
 func TestStopIdempotent(t *testing.T) {
-	srv := NewServer(okRegistry(t), "127.0.0.1:0")
+	srv := NewServer("127.0.0.1:0")
 
 	if err := srv.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop before Start: %v", err)
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.Start(context.Background(), okRegistry(t)); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := srv.Stop(context.Background()); err != nil {
@@ -159,11 +159,11 @@ func TestVerboseRefusedOffLoopback(t *testing.T) {
 	}
 
 	off := fakeAddr("192.168.1.10:8080")
-	srv := NewServer(failingRegistry(t), off.String())
+	srv := NewServer(off.String())
 	// serve() bypasses Start(), so the Serve goroutine is ours to stop —
 	// otherwise -count=3 accumulates three of them.
 	stopServerAtCleanup(t, srv)
-	if err := srv.serve(lyingListener{Listener: l, addr: off}); err != nil {
+	if err := srv.serve(lyingListener{Listener: l, addr: off}, failingRegistry(t)); err != nil {
 		t.Fatalf("serve: %v", err)
 	}
 

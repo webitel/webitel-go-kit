@@ -1,0 +1,120 @@
+{% import 'helpers.j2' as h -%}
+{% import 'instrument.j2' as i -%}
+{%- macro sentence(text) -%}
+{{ text | trim | trim(".") }}.
+{%- endmacro -%}
+// Code generated from semantic convention specification. DO NOT EDIT.
+
+// Copyright (c) 2026 Webitel
+// SPDX-License-Identifier: MIT
+
+{% set pkg = ctx.pkg | camel_case | lower ~ "conv" -%}
+{%- if not ctx.has_metrics -%}
+// Package {{ pkg }} provides types and functionality for OpenTelemetry semantic
+// conventions in the "{{ ctx.root_namespace }}" namespace.
+{% endif -%}
+package {{ pkg }}
+
+import "go.opentelemetry.io/otel/attribute"
+{%- for attr in ctx.events | map(attribute="attributes") | flatten | selectattr("type", "mapping") | unique(attribute="name") | sort(attribute="name") if attr.name not in ctx.metric_enums %}
+{%- set name = h.to_go_name(attr.name, ctx.root_namespace) %}
+
+{{ [ name ~ "Attr is a value of the \"" ~ attr.name ~ "\" attribute. " ~ sentence(attr.brief) ] | comment }}
+type {{ name }}Attr {{ h.member_type(attr.type.members[0]) }}
+
+var (
+{%- for m in attr.type.members %}
+	{%- set m_name = name ~ h.to_go_name(m.id, ctx.root_namespace) -%}
+
+	{% if attr.type.members[0].value is string -%}
+	{%- set m_value = '"' + m.value + '"' -%}
+	{%- else -%}
+	{%- set m_value = m.value -%}
+	{%- endif -%}
+
+	{%- if m.brief is defined %}
+	{%- set m_brief = m.brief -%}
+	{%- else %}
+	{%- set m_brief = "standardized value " + m_value + ' of ' + name + 'Attr.' -%}
+	{%- endif %}
+{{ h.prefix_brief(m_brief, m_name ~ " is ") | comment(format="go_1tab") }}
+	{{ m_name }} {{ name }}Attr = {{ m_value }}
+{%- endfor %}
+)
+{%- endfor %}
+
+{%- for event in ctx.events %}
+{%- set name = h.to_go_name(event.name, ctx.root_namespace) %}
+{%- set type = name ~ "Event" %}
+{%- set opt = name ~ "Option" %}
+{%- set required = event.attributes | required | attribute_sort %}
+{%- set optional = event.attributes | not_required | attribute_sort %}
+
+{{ [ type ~ " is the \"" ~ event.name ~ "\" event. " ~ sentence(event.brief) ] | comment }}
+type {{ type }} struct {
+	attrs []attribute.KeyValue
+}
+{%- if optional | length > 0 %}
+
+{{ [ opt ~ " sets an optional attribute of " ~ type ~ "." ] | comment }}
+type {{ opt }} struct {
+	kv attribute.KeyValue
+}
+{%- endif %}
+
+{%- set doc = namespace(text="New" ~ type ~ " returns a new " ~ type ~ ".") %}
+{%- for attr in required %}
+{%- set doc.text = doc.text ~ "\n\n" ~ i.param_name(attr.name, ctx.root_namespace) ~ " is the \"" ~ attr.name ~ "\" attribute. " ~ sentence(attr.brief) %}
+{%- endfor %}
+{%- if optional | length > 0 %}
+{%- set doc.text = doc.text ~ "\n\nOptional attributes are set with " ~ name ~ "With* options." %}
+{%- endif %}
+{{ doc.text | comment }}
+func New{{ type }}(
+{%- for attr in required %}
+	{{ i.param(attr, ctx.root_namespace) }}
+{%- endfor %}
+{%- if optional | length > 0 %}
+	opts ...{{ opt }},
+{%- endif %}
+) {{ type }} {
+{%- if optional | length > 0 %}
+	attrs := make([]attribute.KeyValue, 0, {{ required | length }}+len(opts))
+{%- else %}
+	attrs := make([]attribute.KeyValue, 0, {{ required | length }})
+{%- endif %}
+{%- for attr in required %}
+	attrs = append(attrs, {{ i.to_attribute(attr, ctx.root_namespace) | trim | trim(",") }})
+{%- endfor %}
+{%- if optional | length > 0 %}
+	for _, o := range opts {
+		attrs = append(attrs, o.kv)
+	}
+{%- endif %}
+	return {{ type }}{attrs: attrs}
+}
+
+// EventName returns the semantic convention name of the event.
+func ({{ type }}) EventName() string {
+	return "{{ event.name }}"
+}
+
+// Attributes returns the attributes of the event.
+func (e {{ type }}) Attributes() []attribute.KeyValue {
+	return e.attrs
+}
+{%- for attr in optional %}
+{%- set attr_name = h.to_go_name(attr.name, ctx.root_namespace) %}
+
+{{ [ name ~ "With" ~ attr_name ~ " sets the optional \"" ~ attr.name ~ "\" attribute. " ~ sentence(attr.brief) ] | comment }}
+{%- if attr.type is mapping %}
+func {{ name }}With{{ attr_name }}(val {{ attr_name }}Attr) {{ opt }} {
+	return {{ opt }}{attribute.{{ h.attr_type(attr) | map_text("attribute_type_method") }}("{{ attr.name }}", {{ h.member_type(attr.type.members[0]) }}(val))}
+}
+{%- else %}
+func {{ name }}With{{ attr_name }}(val {{ attr.type | map_text("attribute_type_value") }}) {{ opt }} {
+	return {{ opt }}{attribute.{{ h.attr_type(attr) | map_text("attribute_type_method") }}("{{ attr.name }}", val)}
+}
+{%- endif %}
+{%- endfor %}
+{%- endfor %}

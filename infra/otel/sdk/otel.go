@@ -5,21 +5,26 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/webitel/webitel-go-kit/infra/otel/correlation"
 	"github.com/webitel/webitel-go-kit/infra/otel/internal"
-	logv "github.com/webitel/webitel-go-kit/infra/otel/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log"
+	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/redaction"
+	_ "github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout"
+	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/throttle"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/metric"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/trace"
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 
 	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	// "go.opentelemetry.io/contrib/processors/minsev"
 	"go.opentelemetry.io/otel"
 	otelog "go.opentelemetry.io/otel/log"
-	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -48,17 +53,24 @@ type ShutdownFunc func(context.Context) error
 // configuration
 type options struct {
 	// Logs output severity level
-	Lvl      otelog.Severity
-	Logs     []log.Option
-	Traces   []trace.Option
-	Metrics  []metric.Option
-	Resource *resource.Resource
+	Lvl          otelog.Severity
+	LogOptions   []log.Option
+	LogsDisabled bool
+	Traces       []trace.Option
+	Metrics      []metric.Option
+	Resource     *resource.Resource
 	// RuntimeMetrics enables the standard Go runtime metric set.
 	RuntimeMetrics bool
-	// option used to set[build] level[logger] for SDK internals
-	// https://pkg.go.dev/go.opentelemetry.io/otel#SetLogger
-	// https://github.com/open-telemetry/opentelemetry-go/blob/v1.29.0/internal/global/internal_logging.go#L20
-	setLevel func(level otelog.Severity) // , bridge bool)
+	// SensitiveAttributes maps attribute names to the sensitivity class,
+	// "pii" or "secret", redacted in log records.
+	SensitiveAttributes map[string]string
+	// LogsRedaction enables log redaction by SensitiveAttributes.
+	LogsRedaction bool
+	// LogsThrottle limits repeated log records; nil disables it.
+	LogsThrottle *throttle.Config
+	// logProcessors run before the exporter processors of LogOptions, in order:
+	// baggage copy, redaction.
+	logProcessors []sdklog.Processor
 	// option used to bridge third-party logger(s)
 	setBridge     []func()
 	shutdownTx    sync.Mutex
@@ -117,26 +129,13 @@ func WithLogLevel(max otelog.Severity) Option {
 	})
 }
 
-// WithSetLevel option allows you [re]set/bridge
-// go.opentelemetry.io/otel/log/global.SetLogger()
-// the logger used internally to opentelemetry
-// with OTEL_LOG_LEVEL= severity specified.
-//
-// Always called except if OTEL_SDK_DISABLED='true'.
-// By default log.SeverityError level is set.
-// Default [SetLogLevel] method is used.
-func WithSetLevel(set func(otelog.Severity)) Option {
-	return option(func(conf *options) {
-		conf.setLevel = set
-	})
-}
-
 // WithLogBridge option allows you to register hook(s)
 // that will be triggered for you to redirect (bridge) logger(s)
 // which you project is internally using.
 //
-// Runs when OTEL_LOGS_EXPORTER=? is specified
-// and otel.GetLoggerProvider() has processor(s).
+// Runs only when a logs exporter is configured explicitly,
+// by OTEL_LOGS_EXPORTER=? or [WithLogOptions].
+// The default stdout exporter does not trigger it.
 func WithLogBridge(do ...func()) Option {
 	return option(func(conf *options) {
 		conf.setBridge = append(
@@ -148,8 +147,26 @@ func WithLogBridge(do ...func()) Option {
 func WithLogOptions(opts ...log.Option) Option {
 	return option(func(conf *options) {
 		if len(opts) > 0 {
-			conf.Logs = append(conf.Logs, opts...)
+			conf.LogOptions = append(conf.LogOptions, opts...)
 		}
+	})
+}
+
+// WithSensitiveAttributes option sets the attributes redacted in log records,
+// by name, to their sensitivity class: "pii" or "secret".
+// A nil or empty map disables log redaction.
+func WithSensitiveAttributes(classes map[string]string) Option {
+	return option(func(conf *options) {
+		conf.SensitiveAttributes = classes
+	})
+}
+
+// WithLogThrottle option sets the quota of repeated log records, see
+// [throttle.LoggerProvider]. A nil config disables throttling.
+// Default is [throttle.DefaultConfig].
+func WithLogThrottle(cfg *throttle.Config) Option {
+	return option(func(conf *options) {
+		conf.LogsThrottle = cfg
 	})
 }
 
@@ -194,34 +211,35 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 	// var level slog.LevelVar
 	// level.Set(slog.LevelError + 4) // [MIN]: ERROR4, e.g. FATAL
 	conf = options{
-		Lvl:      otelog.SeverityError, // default: "error"
-		Logs:     nil,                  // noop
-		Traces:   nil,                  // noop
-		Metrics:  nil,                  // noop
-		Resource: nil,                  // resource.Environment(),
-
-		setLevel: SetLogLevel,
+		Lvl:           otelog.SeverityError, // default: "error"
+		LogOptions:    nil,                  // noop
+		Traces:        nil,                  // noop
+		Metrics:       nil,                  // noop
+		Resource:      nil,                  // resource.Environment(),
+		LogsRedaction: true,
+		LogsThrottle:  new(throttle.DefaultConfig()),
 	}
 	// Environment, as next defaults layer ...
 	internal.Environment.Apply(
 		internal.EnvString("LOG_LEVEL", func(input string) {
-			var level logv.Severity
+			var level logging.Level
 			err := level.UnmarshalText([]byte(input))
 			if err != nil {
 				err = fmt.Errorf("invalid %s value %s: %w", "OTEL_LOG_LEVEL", input, err)
 				otel.Handle(err)
 				return // err
 			}
-			WithLogLevel(otelog.Severity(level)).apply(&conf)
+			WithLogLevel(level.Severity()).apply(&conf)
 		}),
 		internal.EnvString("LOGS_EXPORTER", func(input string) {
-			opts, err := log.NewOptions(ctx, input)
+			opts, disabled, err := newLogDSNOptions(ctx, input)
+			WithLogOptions(opts...).apply(&conf)
 			if err != nil {
 				err = fmt.Errorf("invalid %s value %s: %w", "OTEL_LOGS_EXPORTER", input, err)
 				otel.Handle(err)
 				return // err
 			}
-			WithLogOptions(opts...).apply(&conf)
+			conf.LogsDisabled = disabled
 			// exporter, err := log.NewExporter(ctx, input)
 			// if err != nil {
 			// 	err = fmt.Errorf("invalid %s value %s: %w", "OTEL_LOGS_EXPORTER", input, err)
@@ -244,6 +262,30 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 			// WithLogOptions(
 			// 	sdklog.WithProcessor(processor),
 			// ).apply(&conf)
+		}),
+		internal.EnvString("LOGS_REDACTION", func(input string) {
+			enable, err := strconv.ParseBool(input)
+			if err != nil {
+				slog.Warn(
+					"otel: invalid OTEL_LOGS_REDACTION value, log redaction stays enabled",
+					"value", input,
+					"error", err.Error(),
+				)
+				return
+			}
+			conf.LogsRedaction = enable
+		}),
+		internal.EnvString("LOGS_THROTTLE", func(input string) {
+			cfg, err := throttle.ParseConfig(input)
+			if err != nil {
+				slog.Warn(
+					"otel: invalid OTEL_LOGS_THROTTLE value, default log throttling stays enabled",
+					"value", input,
+					"error", err.Error(),
+				)
+				return
+			}
+			conf.LogsThrottle = cfg
 		}),
 		internal.EnvString("TRACES_EXPORTER", func(input string) {
 			opts, err := trace.NewOptions(ctx, input)
@@ -292,6 +334,51 @@ func newOptions(ctx context.Context, opts ...Option) (conf options) {
 	return // conf
 }
 
+func newLogDSNOptions(ctx context.Context, input string) (opts []log.Option, disabled bool, err error) {
+	var dsns []string
+	for dsn := range strings.SplitSeq(input, ",") {
+		if dsn = strings.TrimSpace(dsn); dsn != "" {
+			dsns = append(dsns, dsn)
+		}
+	}
+	for _, dsn := range dsns {
+		if strings.EqualFold(dsn, "none") {
+			if len(dsns) > 1 {
+				return nil, false, errors.New("none must be the only value")
+			}
+			return nil, true, nil
+		}
+	}
+
+	var dsnErrs []error
+	for _, dsn := range dsns {
+		dsnOpts, dsnErr := log.NewOptions(ctx, dsn)
+		if dsnErr != nil {
+			dsnErrs = append(dsnErrs, fmt.Errorf("%s: %w", dsn, dsnErr))
+			continue
+		}
+		opts = append(opts, dsnOpts...)
+	}
+	return opts, false, errors.Join(dsnErrs...)
+}
+
+func (c *options) loggerProviderOptions(src *resource.Resource) []sdklog.LoggerProviderOption {
+	opts := make([]sdklog.LoggerProviderOption, 0, len(c.logProcessors)+len(c.LogOptions)+1)
+	for _, p := range c.logProcessors {
+		opts = append(opts, sdklog.WithProcessor(p))
+	}
+
+	opts = append(opts, c.LogOptions...)
+	return append(opts, sdklog.WithResource(src))
+}
+
+func stderrErrorHandler(err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s [O]pen[Tel]emetry error: %v\n", time.Now().Format(time.RFC3339), err)
+}
+
 // // Deprecated. Use [Configure] instead.
 // func Setup(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 // 	return Configure(ctx, opts...)
@@ -315,6 +402,8 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 		ctx = context.Background()
 	}
 
+	otel.SetLogger(internalLogger())
+
 	// Handles any error deemed irremediable by an OpenTelemetry component.
 	// errorHandler := otel.GetErrorHandler()
 	var (
@@ -326,12 +415,7 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 			}
 
 			errs = errors.Join(errs, err)
-
-			// slog.Error(err.Error())
-			slog.Error(
-				"[O]pen[Tel]emetry configuration ;",
-				"error", err,
-			)
+			stderrErrorHandler(err)
 
 			// // Fatal
 			// os.Exit(1)
@@ -340,9 +424,12 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 	)
 	// Log&exit: errors while initialization ...
 	otel.SetErrorHandler(errorHandler)
+	// Never route through the logs pipeline: a failing exporter would re-enter this handler forever.
+	defer otel.SetErrorHandler(otel.ErrorHandlerFunc(stderrErrorHandler))
 
 	// Read ENV configuration ...
 	setup := newOptions(ctx, opts...)
+	SetLogLevel(setup.Lvl)
 	if errs != nil {
 		// An exporter's option constructor may already have acquired an OS
 		// resource: the prometheus metrics exporter opens its own listener
@@ -355,6 +442,9 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 		// release them.
 		if len(setup.Metrics) > 0 {
 			setup.OnShutdown(sdkmetric.NewMeterProvider(setup.Metrics...).Shutdown)
+		}
+		if len(setup.LogOptions) > 0 {
+			setup.OnShutdown(sdklog.NewLoggerProvider(setup.LogOptions...).Shutdown)
 		}
 		// USE: otel.Handle(err)
 		return setup.Shutdown, errs
@@ -383,58 +473,41 @@ func Configure(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 	//                  logs                   //
 	// --------------------------------------- //
 
-	if len(setup.Logs) > 0 {
+	explicitLogs := len(setup.LogOptions) > 0
+	if !explicitLogs && !setup.LogsDisabled {
+		opts, err := log.NewOptions(ctx, "stdout:")
+		if err != nil {
+			otel.Handle(fmt.Errorf("otel/sdk: default logs exporter: %w", err))
+		}
+		setup.LogOptions = opts
+	}
+
+	if len(setup.LogOptions) > 0 && !setup.LogsDisabled {
+		setup.logProcessors = append(setup.logProcessors, correlation.NewLogProcessor())
+		if setup.LogsRedaction && len(setup.SensitiveAttributes) > 0 {
+			setup.logProcessors = append(setup.logProcessors, redaction.NewProcessor(setup.SensitiveAttributes))
+		}
 		provider := sdklog.NewLoggerProvider(
-			append(setup.Logs, sdklog.WithResource(src))...,
+			setup.loggerProviderOptions(src)...,
 		)
 		setup.OnShutdown(provider.Shutdown)
-		global.SetLoggerProvider(provider)
 
-		// otel/sdk/log.Logger("otel").Error(err)
-		errorHandler = func(err error) {
-
-			if err == nil {
-				return // none
-			}
-
-			var (
-				event otelog.Record
-				level = otelog.SeverityError
-			)
-
-			event.SetTimestamp(time.Now())
-			event.SetSeverityText("ERROR")
-			event.SetSeverity(level)
-
-			event.SetBody(otelog.StringValue(err.Error()))
-
-			global.GetLoggerProvider().Logger("otel").
-				Emit(context.Background(), event)
-
-			// // Fatal
-			// os.Exit(1)
-
+		var lp otelog.LoggerProvider = provider
+		if setup.LogsThrottle != nil {
+			lp = throttle.NewLoggerProvider(provider, *setup.LogsThrottle)
 		}
-		// Just log any ERROR deemed irremediable by an OpenTelemetry component
-		otel.SetErrorHandler(errorHandler)
+		otel.SetLoggerProvider(lp)
 
-		// TODO: redirect (bridge) internal logger(s)
-		for _, doBridge := range setup.setBridge {
-			if doBridge != nil {
-				doBridge()
+		if explicitLogs {
+			// TODO: redirect (bridge) internal logger(s)
+			for _, doBridge := range setup.setBridge {
+				if doBridge != nil {
+					doBridge()
+				}
 			}
 		}
 
 	}
-	// OTEL_LOG_LEVEL = ? ; default: "error"
-	if setup.Lvl > otelog.SeverityUndefined {
-		// [re]set https://pkg.go.dev/go.opentelemetry.io/otel#SetLogger(!)
-		// severity/verbosity OTEL_LOG_LEVEL=
-		if setup.setLevel != nil {
-			setup.setLevel(setup.Lvl)
-		}
-	}
-
 	// --------------------------------------- //
 	//                traces                   //
 	// --------------------------------------- //

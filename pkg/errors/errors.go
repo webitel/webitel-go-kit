@@ -3,6 +3,7 @@ package errors
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 )
 
@@ -100,6 +101,18 @@ func (e *errWithValue) String() string {
 // Unwrap returns the next wrapped error.
 func (e *errWithValue) Unwrap() error {
 	return e.err
+}
+
+// LogValue implements slog.LogValuer. It describes only this error, not the errors it wraps.
+func (e *errWithValue) LogValue() slog.Value {
+	if e.key == ErrKeyMessage {
+		return slog.GroupValue(slog.String("message", e.Error()))
+	}
+
+	return slog.GroupValue(
+		slog.String("message", e.Error()),
+		slog.Any(fmt.Sprint(e.key), e.value),
+	)
 }
 
 func (e *errWithValue) isWError() {}

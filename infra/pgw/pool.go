@@ -11,10 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var (
-	ErrMigrationVerify = errors.New("pgw: migration unverified")
-)
-
 type PoolConfig struct {
 	HealthCheckInterval time.Duration
 	HealthCheckTimeout  time.Duration
@@ -107,27 +103,34 @@ func (h *Pool) verifyMigration(ctx context.Context) error {
 	return nil
 }
 
-func (h *Pool) ConnectWithRetry(maxAttempts int, strategy RetryStrategy, baseValue int) error {
+func (h *Pool) ConnectWithRetry(ctx context.Context, maxAttempts int, strategy RetryStrategy, baseValue int) error {
 	h.reconnectMu.Lock()
 	defer h.reconnectMu.Unlock()
 
 	var lastErr error
 	for i := 1; i <= maxAttempts; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), h.config.HealthCheckTimeout)
-		err := h.Connect(ctx)
+		attemptCtx, cancel := context.WithTimeout(ctx, h.config.HealthCheckTimeout)
+		err := h.Connect(attemptCtx)
 		cancel()
 		if err == nil {
 			return nil
 		}
 
 		lastErr = err
-		if i < maxAttempts {
-			timeToWait := strategy(baseValue, i)
-			select {
-			case <-time.After(timeToWait):
-			case <-h.closeChan:
-				return errors.New("pool closed while waiting for reconnect")
-			}
+		if i >= maxAttempts {
+			break
+		}
+
+		timeToWait := strategy(baseValue, i)
+		timer := time.NewTimer(timeToWait)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-h.closeChan:
+			timer.Stop()
+			return errors.New("pool closed while waiting for reconnect")
 		}
 	}
 	return lastErr
@@ -198,22 +201,22 @@ func (h *Pool) Exec(ctx context.Context, query string, args ...any) (pgconn.Comm
 }
 
 func (h *Pool) Query(ctx context.Context, query string, args ...any) (pgx.Rows, error) {
-	rows, err := h.pool.Query(ctx, query, args...)
-	return rows, h.parseErr(err)
+	r, err := h.pool.Query(ctx, query, args...)
+	return wrapRows(r, h.config.ErrorParser), h.parseErr(err)
 }
 
 func (h *Pool) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
-	return h.pool.QueryRow(ctx, query, args...)
+	return row{h.pool.QueryRow(ctx, query, args...), h.config.ErrorParser}
 }
 
 func (h *Pool) BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error) {
-	tx, err := h.pool.BeginTx(ctx, opts)
-	return tx, h.parseErr(err)
+	t, err := h.pool.BeginTx(ctx, opts)
+	return wrapTx(t, h.config.ErrorParser, err)
 }
 
 func (h *Pool) Begin(ctx context.Context) (pgx.Tx, error) {
-	tx, err := h.pool.Begin(ctx)
-	return tx, h.parseErr(err)
+	t, err := h.pool.Begin(ctx)
+	return wrapTx(t, h.config.ErrorParser, err)
 }
 
 func (h *Pool) Acquire(ctx context.Context) (*pgxpool.Conn, error) {
@@ -226,7 +229,7 @@ func (h *Pool) AcquireAllIdle(ctx context.Context) []*pgxpool.Conn {
 }
 
 func (h *Pool) AcquireFunc(ctx context.Context, f func(*pgxpool.Conn) error) error {
-	return h.pool.AcquireFunc(ctx, f)
+	return h.parseErr(h.pool.AcquireFunc(ctx, f))
 }
 
 func (h *Pool) CopyFrom(ctx context.Context, tableName pgx.Identifier, columns []string, rows pgx.Rows) (int64, error) {
@@ -235,5 +238,5 @@ func (h *Pool) CopyFrom(ctx context.Context, tableName pgx.Identifier, columns [
 }
 
 func (h *Pool) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults {
-	return h.pool.SendBatch(ctx, b)
+	return batchResults{h.pool.SendBatch(ctx, b), h.config.ErrorParser}
 }

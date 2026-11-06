@@ -13,18 +13,25 @@ go get github.com/webitel/webitel-go-kit/infra/pgw
 ## Quick start
 
 ```go
-manager, err := pgw.NewPoolManager(ctx,
+manager, err := pgw.New(
     pgw.WithPrimaryConfig(pgw.PrimaryConfig{
         DSN:      "postgres://user:pass@localhost:5432/mydb",
         MaxConns: 20,
         MinConns: 2,
-        pgw.DefaultPrimaryPoolConfig.HealthCheckInterval,  // embed defaults
+        HealthCheckInterval: pgw.DefaultPrimaryPoolConfig.HealthCheckInterval,  // embed defaults
     }),
 )
 if err != nil {
     log.Fatal(err)
 }
 defer manager.Close()
+
+// Optional: register constraint processors before Start.
+_ = manager.RegisterUniqueViolation("users_email_key", mapEmailTaken)
+
+if err := manager.Start(ctx); err != nil {
+    log.Fatal(err)
+}
 
 primary, err := manager.Primary()
 if err != nil {
@@ -33,6 +40,11 @@ if err != nil {
 
 rows, err := primary.Query(ctx, "SELECT id, name FROM users WHERE active = $1", true)
 ```
+
+`New` builds the manager without dialing. `Start` connects the primary (and
+standbys). Until `Start` succeeds, `Primary` / `Standby` return `ErrUnreachable`.
+
+`NewPoolManager(ctx, opts...)` remains as `New` + `Start` for existing callers.
 
 ## Connection routing
 
@@ -45,7 +57,7 @@ rows, err := primary.Query(ctx, "SELECT id, name FROM users WHERE active = $1", 
 ## Configuration
 
 ```go
-manager, err := pgw.NewPoolManager(ctx,
+manager, err := pgw.New(
     pgw.WithApplicationName("my-service"),
     pgw.WithPrimaryConfig(pgw.PrimaryConfig{
         DSN:                    "postgres://...",
@@ -70,6 +82,12 @@ manager, err := pgw.NewPoolManager(ctx,
         RetryStrategyBaseValue:        2,
     }),
 )
+if err != nil {
+    log.Fatal(err)
+}
+if err := manager.Start(ctx); err != nil {
+    log.Fatal(err)
+}
 ```
 
 `DefaultPrimaryPoolConfig` and `DefaultStandbyPoolConfig` are applied automatically — only override the fields you need.
@@ -118,9 +136,9 @@ if errors.Is(err, pgw.ErrMigrationVerify) {
 }
 ```
 
-## Constraint error mapping
+## Constraint / driver error mapping
 
-Register processors for specific PostgreSQL constraint violations so that raw `pgconn.PgError` values are translated to your own error types before being returned from any pool method.
+Every pool method runs errors through `ParsePgError` before returning them. Registered processors win for specific constraints; everything else gets a default coded [`pkg/errors`](https://github.com/webitel/webitel-go-kit/tree/main/pkg/errors) mapping, so stores do not need an extra wrap step.
 
 ```go
 manager.RegisterUniqueViolation("users_email_key", func(e *pgconn.PgError) error {
@@ -140,7 +158,38 @@ manager.RegisterNotNullViolation("users", "email", func(e *pgconn.PgError) error
 })
 ```
 
-Unregistered violations and connection exceptions are wrapped in `DataExceptionError` and `ConnectionExceptionError` respectively, both implementing the `pgw.Error` interface.
+Defaults below apply when no constraint processor is registered. Mapped results wrap the package sentinels (`ErrNotFound`, `ErrUnique`, …), so callers can match with `errors.Is(err, pgw.ErrNotFound)` (and still with `pgx.ErrNoRows` / `*pgconn.PgError` via the cause).
+
+| Input | gRPC code | Sentinel | ID |
+|---|---|---|---|
+| `pgx.ErrNoRows` | NotFound | `ErrNotFound` | `pgw.not_found` |
+| `pgerrcode.UniqueViolation` | AlreadyExists | `ErrUnique` | `pgw.unique` |
+| `pgerrcode.ForeignKeyViolation` | FailedPrecondition | `ErrForeignKey` | `pgw.foreign_key` |
+| `pgerrcode.CheckViolation` | InvalidArgument | `ErrCheck` | `pgw.check` |
+| `pgerrcode.NotNullViolation` | InvalidArgument | `ErrNotNull` | `pgw.not_null` |
+| `pgerrcode.IsDataException` | InvalidArgument | `ErrData` | `pgw.data` |
+| `pgerrcode.IsConnectionException` | Unavailable | `ErrConnection` | `pgw.connection` |
+| `AdminShutdown` / `CrashShutdown` / `CannotConnectNow` / `ReadOnlySQLTransaction` | Unavailable | `ErrConnection` | `pgw.connection` |
+| `pgerrcode.IsProgramLimitExceeded` | InvalidArgument | `ErrProgramLimit` | `pgw.program_limit` |
+| `pgerrcode.SerializationFailure` | Aborted | `ErrAborted` | `pgw.aborted` |
+| `pgerrcode.DeadlockDetected` | Aborted | `ErrAborted` | `pgw.aborted` |
+| `pgw.ErrUnreachable` | Unavailable | `ErrUnreachable` | `pgw.unreachable` |
+| `context.Canceled` | Canceled | `ErrCanceled` | `pgw.canceled` |
+| `context.DeadlineExceeded` | DeadlineExceeded | `ErrDeadlineExceeded` | `pgw.deadline_exceeded` |
+| other `*pgconn.PgError` | Internal | `ErrInternal` | `pgw.internal` |
+
+Already-coded errors (for example from a constraint processor) and non-Postgres sentinels such as `pgx.ErrTxClosed` pass through unchanged. Mapped errors keep the original driver error as cause — use `errors.As` / `errors.Is`, not a type assertion:
+
+```go
+if errors.Is(err, pgw.ErrNotFound) {
+    // also true for the underlying pgx.ErrNoRows cause
+}
+
+var pgErr *pgconn.PgError
+if errors.As(err, &pgErr) {
+    // pgErr.Code, pgErr.ConstraintName
+}
+```
 
 ## Tracing
 
@@ -190,4 +239,10 @@ Each pool transitions through these states, visible via `Pool.GetState()` and su
 - `Acquire`, `AcquireAllIdle`, `AcquireFunc`
 - `CopyFrom`, `SendBatch`
 
-All methods pass errors through the registered constraint processors before returning.
+All methods pass errors through the registered constraint processors before returning, including errors from `Row.Scan`, `Rows.Err`, transactions and batch results. A processor may be called more than once for the same error, so it should have no side effects.
+
+Exceptions:
+
+- `Acquire`, `AcquireAllIdle`, `Tx.Conn` and `Tx.LargeObjects` return raw pgx objects, errors of calls made through them are not mapped.
+- Callbacks of `Batch.Queue(...)` get raw pgx results, the error they return is mapped on `Close`.
+- `AcquireFunc` maps the error returned by the callback, so return it as is: a wrapped error is replaced by the mapped one.

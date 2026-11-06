@@ -20,6 +20,35 @@ func TestNew(t *testing.T) {
 	assert.Equal(t, "blue", werror.Value(err, "raw"))
 }
 
+func TestCodedConstructors(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   func(string, ...werror.Wrapper) error
+		code codes.Code
+	}{
+		{name: "Forbidden", fn: werror.Forbidden, code: codes.PermissionDenied},
+		{name: "Unauthenticated", fn: werror.Unauthenticated, code: codes.Unauthenticated},
+		{name: "NotFound", fn: werror.NotFound, code: codes.NotFound},
+		{name: "AlreadyExists", fn: werror.AlreadyExists, code: codes.AlreadyExists},
+		{name: "InvalidArgument", fn: werror.InvalidArgument, code: codes.InvalidArgument},
+		{name: "FailedPrecondition", fn: werror.FailedPrecondition, code: codes.FailedPrecondition},
+		{name: "Aborted", fn: werror.Aborted, code: codes.Aborted},
+		{name: "Internal", fn: werror.Internal, code: codes.Internal},
+		{name: "Unavailable", fn: werror.Unavailable, code: codes.Unavailable},
+		{name: "Canceled", fn: werror.Canceled, code: codes.Canceled},
+		{name: "DeadlineExceeded", fn: werror.DeadlineExceeded, code: codes.DeadlineExceeded},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fn("boom", werror.WithID("test.id"))
+			assert.EqualError(t, err, "boom")
+			assert.Equal(t, tt.code, werror.Code(err))
+			assert.Equal(t, "test.id", werror.ID(err))
+		})
+	}
+}
+
 func TestWrap(t *testing.T) {
 	// capture a stack
 	ogerr := errors.New("boom")
@@ -119,11 +148,8 @@ func TestValue(t *testing.T) {
 }
 
 func TestValues(t *testing.T) {
-	// nil -> nil
-	assert.Nil(t, werror.Values(nil))
-
-	// error with no values should still be nil
-	assert.Nil(t, werror.Values(errors.New("boom")))
+	assert.Empty(t, werror.Values(nil))
+	assert.Empty(t, werror.Values(errors.New("boom")))
 
 	// create an error chain with a few values attached, and a non-werror
 	// in the middle.
@@ -154,20 +180,20 @@ func BenchmarkValues(b *testing.B) {
 }
 
 func TestCode(t *testing.T) {
-	// nil -> 200
-	assert.Equal(t, codes.Code(200), werror.Code(nil))
+	// nil -> OK
+	assert.Equal(t, codes.OK, werror.Code(nil))
 
-	// default to 500
-	assert.Equal(t, codes.Code(500), werror.Code(errors.New("boom")))
+	// default to Internal
+	assert.Equal(t, codes.Internal, werror.Code(errors.New("boom")))
 
 	// set with werror.Wrapper
-	assert.Equal(t, codes.Code(404), werror.Code(werror.New("boom", werror.WithCode(404))))
+	assert.Equal(t, codes.NotFound, werror.Code(werror.New("boom", werror.WithCode(codes.NotFound))))
 
 	// works when werror.Value is deep in stack
-	err := werror.New("bam", werror.WithCode(404))
+	err := werror.New("bam", werror.WithCode(codes.NotFound))
 	err = &UnwrapperError{err}
 	err = werror.Wrap(err, werror.WithValue("raw", "yikes"))
-	assert.Equal(t, codes.Code(404), werror.Code(err))
+	assert.Equal(t, codes.NotFound, werror.Code(err))
 }
 
 func TestCause(t *testing.T) {

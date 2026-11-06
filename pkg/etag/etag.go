@@ -3,6 +3,7 @@ package etag
 import (
 	"encoding/base32"
 	"fmt"
+	"math"
 	"strings"
 	"unicode"
 
@@ -95,7 +96,7 @@ func (e *Tid) Valid() error {
 type Tids []Tid
 
 func (e Tids) IsNone() bool {
-	return len(e) > 0
+	return len(e) == 0
 }
 
 func (e Tids) Oids() []int64 {
@@ -187,6 +188,10 @@ func ConsumeTag(src []byte) (typ EtagType, oid int64, ver int32, n int) {
 			return
 		}
 		n += r
+	}
+	if v[0] > math.MaxInt32 || v[1] == 0 || v[1] > uint64(maxWellKnownType) || v[2] < 1 || v[2] > math.MaxInt64 {
+		n = errTagMalformed
+		return
 	}
 	ver = int32(v[0])
 	typ = EtagType(v[1])
@@ -296,4 +301,18 @@ func GetTag(node IVersional, typ EtagType) (tag Tid, err error) {
 	rev := node.GetVer()
 	tag.Ver = &rev
 	return
+}
+
+// MustTag ensures the given tag is a complete ETag tuple or panics.
+func MustTag(tag Tid, err error) Tid {
+	if err == nil && !tag.HasOid() {
+		err = fmt.Errorf("tag( oid: int64! ) ISNULL")
+	}
+	if err == nil && !tag.HasVer() {
+		err = fmt.Errorf("tag( rev: int32! ) ISNULL")
+	}
+	if err != nil {
+		panic(err)
+	}
+	return tag
 }

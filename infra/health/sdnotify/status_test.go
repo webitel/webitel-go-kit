@@ -15,7 +15,7 @@ import (
 const sentinel = "SENTINEL-9f2a41-must-not-leak"
 
 func check(name string, group health.Group, status health.Status) health.CheckResult {
-	return health.CheckResult{Name: name, Group: group, Status: status}
+	return health.CheckResult{System: health.System(name), Group: group, Status: status}
 }
 
 func TestStatusTextTable(t *testing.T) {
@@ -38,6 +38,14 @@ func TestStatusTextTable(t *testing.T) {
 				check("s3", health.GroupInformational, health.StatusFail),
 			}},
 			want: "degraded: informational [s3]",
+		},
+		{
+			name: "named check",
+			snap: health.Snapshot{State: health.StateDegraded, Checks: []health.CheckResult{
+				check("db", health.GroupCritical, health.StatusOK),
+				{System: health.SystemPostgreSQL, Name: "standby", Group: health.GroupInformational, Status: health.StatusFail},
+			}},
+			want: "degraded: informational [postgresql/standby]",
 		},
 		{
 			name: "not ready",
@@ -135,7 +143,7 @@ func TestStatusIsOneLineOnTheWire(t *testing.T) {
 	waitState(t, reg, health.StateNotReady)
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -162,7 +170,7 @@ func TestNoErrorTextLeaks(t *testing.T) {
 	stopAtCleanup(t, reg)
 
 	n := newNotifier(t, reg, addr, WithPollInterval(10*time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 

@@ -8,6 +8,10 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 )
 
 var (
@@ -31,6 +35,7 @@ type ConsumerConfig struct {
 	MaxWorkers        int
 	ReconnectDelay    time.Duration
 	ProcessingTimeout time.Duration
+	TracerProvider    trace.TracerProvider
 }
 
 // ConsumerOption defines a function to modify ConsumerConfig.
@@ -88,6 +93,13 @@ func WithConsumerProcessingTimeout(d time.Duration) ConsumerOption {
 	}
 }
 
+// WithConsumerTracerProvider sets provider for process spans. Global provider is used when not set.
+func WithConsumerTracerProvider(tp trace.TracerProvider) ConsumerOption {
+	return func(c *ConsumerConfig) {
+		c.TracerProvider = tp
+	}
+}
+
 type MessageConsumer struct {
 	broker    *Connection
 	queue     *QueueConfig
@@ -96,23 +108,28 @@ type MessageConsumer struct {
 	wg        sync.WaitGroup
 	cancel    context.CancelFunc
 	workerSem chan struct{}
-	logger    Logger
+	logger    *logging.Logger
+	tracer    trace.Tracer
 }
 
+// NewConsumer returns a consumer of queueCfg. A nil logger uses [logging.New].
 func NewConsumer(
 	broker *Connection,
 	queueCfg *QueueConfig,
 	consumerCfg *ConsumerConfig,
 	handler HandleFunc,
-	logger Logger,
+	logger *logging.Logger,
 ) *MessageConsumer {
 	return &MessageConsumer{
-		broker:    broker,
-		queue:     queueCfg,
-		consumer:  consumerCfg,
-		handler:   handler,
-		logger:    logger,
+		broker:   broker,
+		queue:    queueCfg,
+		consumer: consumerCfg,
+		handler:  handler,
+		logger: componentLogger(logger).With(logging.KV(
+			semconv.MessagingDestinationSubscriptionName(queueCfg.Name),
+		)),
 		workerSem: make(chan struct{}, consumerCfg.MaxWorkers),
+		tracer:    newTracer(consumerCfg.TracerProvider),
 	}
 }
 
@@ -134,17 +151,19 @@ func (c *MessageConsumer) consumeLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			ch, err := c.broker.Channel(ctx)
+			ch, err := c.broker.NewChannel(ctx)
 			if err != nil {
-				c.logger.Error("get channel", err)
+				c.logger.ErrorCtx(ctx, "open channel", logging.Err(err))
 				time.Sleep(retryDelay)
 				retryDelay = min(retryDelay*2, c.consumer.ReconnectDelay)
 				continue
 			}
 
-			if err := c.consumeMessages(ctx, ch); err != nil {
-				c.logger.Error("consuming failed", err)
-				_ = ch.Close()
+			err = c.consumeMessages(ctx, ch)
+			_ = ch.Close()
+
+			if err != nil {
+				c.logger.ErrorCtx(ctx, "consuming failed", logging.Err(err))
 				time.Sleep(retryDelay)
 				retryDelay = min(retryDelay*2, c.consumer.ReconnectDelay)
 				continue
@@ -169,6 +188,10 @@ func (c *MessageConsumer) consumeMessages(ctx context.Context, ch *amqp.Channel)
 		return fmt.Errorf("%w: %v", ErrConsumerStartFailed, err)
 	}
 
+	// ch is closed on return: let in-flight deliveries settle first.
+	var inflight sync.WaitGroup
+	defer inflight.Wait()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -181,7 +204,11 @@ func (c *MessageConsumer) consumeMessages(ctx context.Context, ch *amqp.Channel)
 			select {
 			case c.workerSem <- struct{}{}:
 				c.wg.Add(1)
-				go c.processMessage(ctx, msg)
+				inflight.Add(1)
+				go func() {
+					defer inflight.Done()
+					c.processMessage(ctx, msg)
+				}()
 			case <-ctx.Done():
 				return nil
 			}
@@ -198,17 +225,41 @@ func (c *MessageConsumer) processMessage(ctx context.Context, msg amqp.Delivery)
 	processCtx, cancel := context.WithTimeout(ctx, c.consumer.ProcessingTimeout)
 	defer cancel()
 
+	processCtx, span := startProcessSpan(processCtx, c.tracer, c.queue.Name, msg)
+	defer span.End()
+
 	if err := c.handler(processCtx, msg); err != nil {
-		c.logger.Error("message handling failed", err)
-		if err := msg.Nack(false, !msg.Redelivered); err != nil {
-			c.logger.Error("failed to Nack message", err)
+		failSpan(span, err)
+		c.logger.ErrorCtx(processCtx, "message handling failed", logging.Err(err))
+
+		settleErr := c.settle(processCtx, operationNack, msg, func() error {
+			return msg.Nack(false, !msg.Redelivered)
+		})
+		if settleErr != nil {
+			c.logger.ErrorCtx(processCtx, "failed to Nack message", logging.Err(settleErr))
 		}
+
 		return
 	}
 
-	if err := msg.Ack(false); err != nil {
-		c.logger.Error("ack message", err)
+	settleErr := c.settle(processCtx, operationAck, msg, func() error {
+		return msg.Ack(false)
+	})
+	if settleErr != nil {
+		c.logger.ErrorCtx(processCtx, "ack message", logging.Err(settleErr))
 	}
+}
+
+func (c *MessageConsumer) settle(ctx context.Context, operation string, msg amqp.Delivery, settle func() error) error {
+	_, span := startSettleSpan(ctx, c.tracer, operation, c.queue.Name, msg)
+	defer span.End()
+
+	err := settle()
+	if err != nil {
+		failSpan(span, err)
+	}
+
+	return err
 }
 
 func (c *MessageConsumer) Shutdown(ctx context.Context) error {

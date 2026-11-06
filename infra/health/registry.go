@@ -6,19 +6,23 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
 
+const startAbortTimeout = 5 * time.Second
+
 // Registry runs checks in the background and caches the last result. Every
 // method is safe for concurrent use and on a nil *Registry. Use New.
 type Registry struct {
-	cfg Config
-	log *slog.Logger
-
+	cfg        Config
+	log        *slog.Logger
+	transports []Transport
 	// mu guards everything below and is never held while a check runs.
 	mu        sync.Mutex
-	checks    map[string]*checkState
+	checks    []*checkState   // sorted by key
 	ctx       context.Context // nil until Start
 	cancel    context.CancelFunc
 	started   bool
@@ -32,7 +36,7 @@ type Registry struct {
 }
 
 // New builds a registry. A nil logger discards.
-func New(cfg Config, log *slog.Logger) *Registry {
+func New(cfg Config, log *slog.Logger, opts ...Option) *Registry {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
@@ -43,30 +47,51 @@ func New(cfg Config, log *slog.Logger) *Registry {
 			"timeout", cfg.Timeout, "interval", cfg.Interval)
 	}
 
-	return &Registry{
+	r := &Registry{
 		cfg:      cfg,
 		log:      log,
-		checks:   make(map[string]*checkState),
 		stopDone: make(chan struct{}),
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	return r
 }
 
 // Liveness registers a check that answers "is this process wedged?".
-func (r *Registry) Liveness(name string, fn Check) { r.register(name, GroupLiveness, fn) }
+func (r *Registry) Liveness(system System, fn Check, opts ...CheckOption) {
+	r.register(system, GroupLiveness, fn, opts)
+}
 
 // Critical registers a check whose failure takes the node out of rotation.
-func (r *Registry) Critical(name string, fn Check) { r.register(name, GroupCritical, fn) }
+func (r *Registry) Critical(system System, fn Check, opts ...CheckOption) {
+	r.register(system, GroupCritical, fn, opts)
+}
 
 // Informational registers a check whose failure only degrades the node.
-func (r *Registry) Informational(name string, fn Check) { r.register(name, GroupInformational, fn) }
+func (r *Registry) Informational(system System, fn Check, opts ...CheckOption) {
+	r.register(system, GroupInformational, fn, opts)
+}
 
 // register adds a check, starting its goroutine at once when already running.
-func (r *Registry) register(name string, group Group, fn Check) {
+func (r *Registry) register(system System, group Group, fn Check, opts []CheckOption) {
 	if r == nil {
 		return
 	}
-	if name == "" || fn == nil {
-		r.log.Error("health: ignoring check with empty name or nil function", "check", name)
+
+	var o checkOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+
+	key := checkKey(system, o.name)
+
+	// A slash in the system would make the key ambiguous with system/name.
+	if system == "" || strings.Contains(string(system), "/") || fn == nil {
+		r.log.Error("health: ignoring check with empty or invalid system, or nil function", "check", key)
 
 		return
 	}
@@ -75,18 +100,21 @@ func (r *Registry) register(name string, group Group, fn Check) {
 	defer r.mu.Unlock()
 
 	if r.stopped {
-		r.log.Error("health: ignoring check registered after Stop", "check", name)
+		r.log.Error("health: ignoring check registered after Stop", "check", key)
 
 		return
 	}
-	if _, exists := r.checks[name]; exists {
-		r.log.Error("health: ignoring duplicate check name", "check", name)
+	at, exists := slices.BinarySearchFunc(r.checks, key, func(cs *checkState, key string) int {
+		return strings.Compare(cs.key, key)
+	})
+	if exists {
+		r.log.Error("health: ignoring duplicate check; tell checks of one system apart with WithName", "check", key)
 
 		return
 	}
 
-	cs := &checkState{name: name, group: group, fn: fn}
-	r.checks[name] = cs
+	cs := &checkState{system: system, name: o.name, key: key, group: group, fn: fn}
+	r.checks = slices.Insert(r.checks, at, cs)
 
 	if r.started {
 		r.wg.Add(1)
@@ -94,19 +122,23 @@ func (r *Registry) register(name string, group Group, fn Check) {
 	}
 }
 
-// Start begins running every registered check. It does not block.
+// Start begins running every registered check, then starts each transport in
+// order. It does not block. When a transport fails to start, the transports
+// already started are stopped and the checks are halted; the registry is then
+// stopped for good and the caller must exit or build a new one. The returned
+// error joins the start failure with any failure of that rollback.
 func (r *Registry) Start(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if r.stopped {
+		r.mu.Unlock()
 		return errors.New("health: registry is stopped")
 	}
 	if r.started {
+		r.mu.Unlock()
 		return errors.New("health: registry is already started")
 	}
 
@@ -119,9 +151,39 @@ func (r *Registry) Start(ctx context.Context) error {
 		go r.run(r.ctx, cs)
 	}
 
-	r.log.Info("health: started", "checks", len(r.checks), "interval", r.cfg.Interval)
+	runCtx, checks := r.ctx, len(r.checks)
+	r.mu.Unlock()
+
+	r.log.Info("health: started", "checks", checks, "interval", r.cfg.Interval)
+
+	for i, t := range r.transports {
+		if err := r.startTransport(runCtx, t); err != nil {
+			r.log.Error("health: transport failed to start, rolling back", "err", err)
+
+			return r.abortStart(ctx, i, err)
+		}
+	}
 
 	return nil
+}
+
+func (r *Registry) startTransport(ctx context.Context, t Transport) error {
+	r.mu.Lock()
+	stopped := r.stopped
+	r.mu.Unlock()
+
+	if stopped {
+		return errors.New("health: registry was stopped while starting")
+	}
+
+	return t.Start(ctx, r)
+}
+
+func (r *Registry) abortStart(ctx context.Context, started int, cause error) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), startAbortTimeout)
+	defer cancel()
+
+	return errors.Join(cause, r.stop(ctx, r.transports[:started]))
 }
 
 // Drain switches to not-ready, one way. The DrainHold wait happens in Stop.
@@ -142,8 +204,31 @@ func (r *Registry) Drain() {
 	r.log.Info("health: draining", "hold", r.cfg.DrainHold)
 }
 
-// Stop halts the scheduler, bounded by ctx, after waiting out any DrainHold.
+// Shutdown drains, then stops the transports and the registry, in the order the
+// registry requires: Drain first so the verdict flips before anything is torn
+// down.
+//
+// ctx must carry at least DrainHold of budget: Drain returns immediately and
+// the hold is absorbed inside Stop. A shorter context cuts the hold short and
+// service discovery may never observe the node leaving rotation.
+func (r *Registry) Shutdown(ctx context.Context) error {
+	r.Drain()
+
+	return r.Stop(ctx)
+}
+
+// Stop stops every transport in reverse start order, waits out any DrainHold,
+// then halts the scheduler, all bounded by ctx. Every transport is stopped even
+// if an earlier one fails; the errors are joined.
 func (r *Registry) Stop(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+
+	return r.stop(ctx, r.transports)
+}
+
+func (r *Registry) stop(ctx context.Context, up []Transport) error {
 	if r == nil {
 		return nil
 	}
@@ -166,6 +251,13 @@ func (r *Registry) Stop(ctx context.Context) error {
 
 	defer close(r.stopDone)
 
+	var errs []error
+	for _, u := range slices.Backward(up) {
+		if err := u.Stop(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
 	// A never-started registry was never ready, so there is nothing to hold for.
 	if draining && started {
 		if err := wait(ctx, r.cfg.DrainHold-time.Since(drainAt)); err != nil {
@@ -176,14 +268,16 @@ func (r *Registry) Stop(ctx context.Context) error {
 	if cancel != nil {
 		cancel()
 	}
-	if !started {
-		return nil
+	if started {
+		if err := r.join(ctx); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
-	return r.join(ctx)
+	return errors.Join(errs...)
 }
 
-// results returns every check's state, sorted by name.
+// results returns every check's state, sorted by key.
 func (r *Registry) results() []CheckResult {
 	return r.Snapshot().Checks
 }
@@ -212,17 +306,19 @@ func (r *Registry) runOnce(ctx context.Context, cs *checkState) {
 	runCtx, cancel := context.WithTimeout(ctx, r.cfg.Timeout)
 	defer cancel()
 
+	start := time.Now()
 	err := r.call(runCtx, cs)
+	elapsed := time.Since(start)
 
 	if ctx.Err() != nil {
 		return // shutting down, not the check's fault
 	}
 	if err == nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		// Finished late: that is not passing.
-		err = fmt.Errorf("check %q passed only after its %s timeout", cs.name, r.cfg.Timeout)
+		err = fmt.Errorf("check %q passed only after its %s timeout", cs.key, r.cfg.Timeout)
 	}
 
-	r.record(cs, err)
+	r.record(cs, elapsed, err)
 }
 
 // call runs the check; a panic becomes that check's error.
@@ -230,17 +326,17 @@ func (r *Registry) call(ctx context.Context, cs *checkState) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			r.log.Error("health: check panicked",
-				"check", cs.name, "panic", p, "stack", string(debug.Stack()))
-			err = fmt.Errorf("check %q panicked: %v", cs.name, p)
+				"check", cs.key, "panic", p, "stack", string(debug.Stack()))
+			err = fmt.Errorf("check %q panicked: %v", cs.key, p)
 		}
 	}()
 
 	return cs.fn(ctx)
 }
 
-func (r *Registry) record(cs *checkState, err error) {
+func (r *Registry) record(cs *checkState, elapsed time.Duration, err error) {
 	r.mu.Lock()
-	status, changed := cs.record(time.Now(), err, r.cfg)
+	status, changed := cs.record(time.Now(), elapsed, err, r.cfg)
 	r.mu.Unlock()
 
 	if !changed {
@@ -248,12 +344,12 @@ func (r *Registry) record(cs *checkState, err error) {
 	}
 
 	if status == StatusFail {
-		r.log.Warn("health: check is failing", "check", cs.name, "group", cs.group, "err", err)
+		r.log.Warn("health: check is failing", "check", cs.key, "group", cs.group, "err", err)
 
 		return
 	}
 
-	r.log.Info("health: check recovered", "check", cs.name, "group", cs.group, "status", status)
+	r.log.Info("health: check recovered", "check", cs.key, "group", cs.group, "status", status)
 }
 
 // join waits for the check goroutines, bounded by ctx.

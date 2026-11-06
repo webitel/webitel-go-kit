@@ -18,7 +18,8 @@ const (
 
 // checkJSON is one check on the wire.
 type checkJSON struct {
-	Name   string `json:"name"`
+	System string `json:"system"`
+	Name   string `json:"name,omitempty"`
 	Group  string `json:"group"`
 	Status string `json:"status"`
 	Since  string `json:"since,omitempty"`
@@ -38,7 +39,7 @@ func detail(s health.Snapshot) bodyJSON {
 	}
 
 	for _, c := range s.Checks {
-		cj := checkJSON{Name: c.Name, Group: c.Group.String(), Status: c.Status.String()}
+		cj := checkJSON{System: string(c.System), Name: c.Name, Group: c.Group.String(), Status: c.Status.String()}
 
 		// since tracks the hysteresis status, not the rendered one, and is
 		// zero until the first transition.

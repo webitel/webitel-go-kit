@@ -27,8 +27,16 @@ func NotFound(msg string, wrappers ...Wrapper) error {
 	return New(msg, append(wrappers, WithCode(codes.NotFound))...)
 }
 
+func AlreadyExists(msg string, wrappers ...Wrapper) error {
+	return New(msg, append(wrappers, WithCode(codes.AlreadyExists))...)
+}
+
 func InvalidArgument(msg string, wrappers ...Wrapper) error {
 	return New(msg, append(wrappers, WithCode(codes.InvalidArgument))...)
+}
+
+func FailedPrecondition(msg string, wrappers ...Wrapper) error {
+	return New(msg, append(wrappers, WithCode(codes.FailedPrecondition))...)
 }
 
 func Aborted(msg string, wrappers ...Wrapper) error {
@@ -41,6 +49,14 @@ func Internal(msg string, wrappers ...Wrapper) error {
 
 func Unavailable(msg string, wrappers ...Wrapper) error {
 	return New(msg, append(wrappers, WithCode(codes.Unavailable))...)
+}
+
+func Canceled(msg string, wrappers ...Wrapper) error {
+	return New(msg, append(wrappers, WithCode(codes.Canceled))...)
+}
+
+func DeadlineExceeded(msg string, wrappers ...Wrapper) error {
+	return New(msg, append(wrappers, WithCode(codes.DeadlineExceeded))...)
 }
 
 // Wrap adds context to errors by applying Wrappers.

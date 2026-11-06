@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"strconv"
 
 	"github.com/mattn/go-isatty"
-	// logv "github.com/webitel/webitel-go-kit/infra/otel/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout/codec"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	sdk "go.opentelemetry.io/otel/sdk/log"
 )
@@ -52,18 +53,6 @@ func (enc *Encoder) Encode(rec sdk.Record) error {
 	}
 
 	levelVerb := rec.Severity()
-	// levelText := rec.SeverityText()
-	// if levelText == "" {
-	// 	// level = rec.Severity().String()
-	// 	levelText = logv.Severity(rec.Severity()).String()
-	// }
-
-	// scope := rec.InstrumentationScope()
-	// name := path.Base(scope.Name)
-
-	// buf.WriteString(name)
-	// buf.WriteByte(':')
-	// buf.WriteByte(' ')
 
 	// func (h *handler) appendLevel(buf *buffer, level slog.Level) {
 	appendLevelDelta := func(delta log.Severity) {
@@ -108,6 +97,15 @@ func (enc *Encoder) Encode(rec sdk.Record) error {
 	}
 	// }
 	buf.WriteByte(' ')
+	if name := rec.InstrumentationScope().Name; name != "" {
+		buf.WriteString(path.Base(name))
+		buf.WriteString(": ")
+	}
+	if name := rec.EventName(); name != "" {
+		buf.WriteByte('[')
+		buf.WriteString(name)
+		buf.WriteString("] ")
+	}
 	enc.printValue(buf, rec.Body())
 	// body := rec.Body().String()
 	// _, err := fmt.Fprintf(state, "[%s] %v", level, body)
@@ -115,7 +113,7 @@ func (enc *Encoder) Encode(rec sdk.Record) error {
 	// 	return err
 	// }
 
-	rec.WalkAttributes(func(att log.KeyValue) bool {
+	rec.WalkAttributes(func(att attribute.KeyValue) bool {
 		err := enc.printAttr(buf, att)
 		return err == nil
 	})
@@ -130,9 +128,9 @@ func (enc *Encoder) Encode(rec sdk.Record) error {
 	return err
 }
 
-func (enc *Encoder) printAttr(buf *buffer, att log.KeyValue) (err error) {
+func (enc *Encoder) printAttr(buf *buffer, att attribute.KeyValue) (err error) {
 	// complex
-	if att.Value.Kind() == log.KindMap {
+	if att.Value.Type() == attribute.MAP {
 		prefix := att.Key
 		for _, att := range att.Value.AsMap() {
 			att.Key = prefix + "." + att.Key
@@ -153,29 +151,29 @@ func (enc *Encoder) printAttr(buf *buffer, att log.KeyValue) (err error) {
 	return enc.printValue(buf, att.Value)
 }
 
-func (enc *Encoder) printValue(buf *buffer, val log.Value) (err error) {
-	switch val.Kind() {
-	case log.KindBool:
+func (enc *Encoder) printValue(buf *buffer, val attribute.Value) (err error) {
+	switch val.Type() {
+	case attribute.BOOL:
 		{
 			_, err = fmt.Fprintf(buf, "%t", val.AsBool())
 		}
-	case log.KindFloat64:
+	case attribute.FLOAT64:
 		{
 			_, err = fmt.Fprintf(buf, "%f", val.AsFloat64())
 		}
-	case log.KindInt64:
+	case attribute.INT64:
 		{
 			_, err = fmt.Fprintf(buf, "%d", val.AsInt64())
 		}
-	case log.KindString:
+	case attribute.STRING:
 		{
 			_, err = buf.WriteString(val.AsString())
 		}
-	case log.KindBytes:
+	case attribute.BYTESLICE:
 		{
-			_, err = fmt.Fprintf(buf, "%x", val.AsBytes())
+			_, err = fmt.Fprintf(buf, "%x", val.AsByteSlice())
 		}
-	case log.KindSlice:
+	case attribute.SLICE:
 		{
 			sep := func(c byte) {
 				err = buf.WriteByte(c)
@@ -209,7 +207,7 @@ func (enc *Encoder) printValue(buf *buffer, val log.Value) (err error) {
 	// 	}
 	// case log.KindEmpty:
 	default:
-		_, err = buf.WriteString(val.AsString())
+		_, err = buf.WriteString(val.String())
 	}
 	return // err?
 }

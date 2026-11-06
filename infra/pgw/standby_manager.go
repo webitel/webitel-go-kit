@@ -98,6 +98,7 @@ func (rm *standbyManager) AddStandby(ctx context.Context, pool *pgxpool.Pool) er
 		key := rm.buildMapKeyFromPool(pool)
 
 		err := host.ConnectWithRetry(
+			context.Background(),
 			rm.config.RetriesBeforeUnhealthy,
 			rm.config.RetryStrategy,
 			rm.config.RetryStrategyBaseValue)
@@ -180,6 +181,7 @@ func (rm *standbyManager) monitorUnhealthy() {
 						return
 					}
 					err := host.ConnectWithRetry(
+						context.Background(),
 						rm.config.RetriesBeforeUnhealthy,
 						rm.config.RetryStrategy,
 						rm.config.RetryStrategyBaseValue)

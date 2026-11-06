@@ -30,19 +30,19 @@ func statusText(s health.Snapshot) string {
 		if c.Group == health.GroupInformational {
 			// Never-run reads as pending, not as down.
 			if c.Status == health.StatusFail {
-				informational = append(informational, sanitize(c.Name))
+				informational = append(informational, sanitize(c.Key()))
 			}
 			if c.Status == health.StatusUnknown {
-				pending = append(pending, sanitize(c.Name))
+				pending = append(pending, sanitize(c.Key()))
 			}
 
 			continue
 		}
 		if c.Status == health.StatusFail {
-			failing = append(failing, sanitize(c.Name))
+			failing = append(failing, sanitize(c.Key()))
 		}
 		if c.Status == health.StatusUnknown {
-			pending = append(pending, sanitize(c.Name))
+			pending = append(pending, sanitize(c.Key()))
 		}
 	}
 

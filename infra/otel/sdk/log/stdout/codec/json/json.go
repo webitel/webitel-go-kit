@@ -2,11 +2,10 @@ package json
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 
-	logv "github.com/webitel/webitel-go-kit/infra/otel/log"
 	"github.com/webitel/webitel-go-kit/infra/otel/sdk/log/stdout/codec"
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
@@ -41,32 +40,22 @@ func (enc *Encoder) Options() codec.Options {
 }
 
 type logValue struct {
-	log.Value
+	attribute.Value
 }
 
-// MarshalJSON implements a custom marshal function to encode log.Value.
+// MarshalJSON implements a custom marshal function to encode attribute.Value.
 func (v logValue) MarshalJSON() ([]byte, error) {
 	var eval any
-	switch v.Kind() {
-	case log.KindString:
-		eval = v.AsString()
-	case log.KindInt64:
-		eval = v.AsInt64()
-	case log.KindFloat64:
-		eval = v.AsFloat64()
-	case log.KindBool:
-		eval = v.AsBool()
-	case log.KindBytes:
-		eval = v.AsBytes()
-	case log.KindMap:
+	switch v.Type() {
+	case attribute.MAP:
 		src := v.AsMap()
 		dst := make(map[string]logValue, len(src))
 		for _, att := range src {
-			dst[att.Key] = logValue{att.Value}
+			dst[string(att.Key)] = logValue{att.Value}
 		}
 
 		eval = dst
-	case log.KindSlice:
+	case attribute.SLICE:
 		src := v.AsSlice()
 		dst := make([]logValue, 0, len(src))
 		for _, e := range src {
@@ -74,62 +63,14 @@ func (v logValue) MarshalJSON() ([]byte, error) {
 		}
 
 		eval = dst
-	case log.KindEmpty:
-		eval = nil
 	default:
-		return nil, errors.New("invalid Kind")
+		eval = v.AsInterface()
 	}
 
 	return json.Marshal(eval)
 }
-
-// type keyValue struct {
-// 	Key   string
-// 	Value value
-// }
 
 type attributes map[string]logValue
-
-type attValue struct {
-	attribute.Value
-}
-
-// MarshalJSON implements a custom marshal function to encode log.Value.
-func (v attValue) MarshalJSON() ([]byte, error) {
-	var eval any = v.Value
-	switch v.Type() {
-	// INVALID is used for a Value with no value set.
-	case attribute.INVALID:
-		eval = nil
-	// BOOL is a boolean Type Value.
-	case attribute.BOOL:
-		eval = v.AsBool()
-	// INT64 is a 64-bit signed integral Type Value.
-	case attribute.INT64:
-		eval = v.AsInt64()
-	// FLOAT64 is a 64-bit floating point Type Value.
-	case attribute.FLOAT64:
-		eval = v.AsFloat64()
-	// STRING is a string Type Value.
-	case attribute.STRING:
-		eval = v.AsString()
-	// BOOLSLICE is a slice of booleans Type Value.
-	case attribute.BOOLSLICE:
-		eval = v.AsBoolSlice()
-	// INT64SLICE is a slice of 64-bit signed integral numbers Type Value.
-	case attribute.INT64SLICE:
-		eval = v.AsInt64Slice()
-	// FLOAT64SLICE is a slice of 64-bit floating point numbers Type Value.
-	case attribute.FLOAT64SLICE:
-		eval = v.AsFloat64Slice()
-	// STRINGSLICE is a slice of strings Type Value.
-	case attribute.STRINGSLICE:
-		eval = v.AsStringSlice()
-		// default:
-		// 	eval = v.Value
-	}
-	return json.Marshal(eval)
-}
 
 type Resource resource.Resource
 
@@ -140,9 +81,9 @@ func (e Resource) MarshalJSON() ([]byte, error) {
 	if n == 0 {
 		return nil, nil
 	}
-	obj := make(map[string]attValue, n)
+	obj := make(map[string]logValue, n)
 	for _, att := range attr {
-		obj[string(att.Key)] = attValue{att.Value}
+		obj[string(att.Key)] = logValue{att.Value}
 	}
 	return json.Marshal(obj)
 }
@@ -180,6 +121,7 @@ type record struct {
 	ObservedTimestamp *codec.Timestamp     `json:"-"`
 	Severity          log.Severity         `json:"-"`
 	SeverityText      string               `json:"level,omitempty"`
+	EventName         string               `json:"event_name,omitempty"`
 	Message           logValue             `json:"message,omitempty"`
 	TraceID           *trace.TraceID       `json:"trace_id,omitempty"`
 	TraceFlags        *trace.TraceFlags    `json:"trace_flags,omitempty"`
@@ -220,6 +162,7 @@ func (enc *Encoder) record(src sdk.Record) record {
 
 		Severity:     src.Severity(),
 		SeverityText: src.SeverityText(),
+		EventName:    src.EventName(),
 		Message:      logValue{src.Body()},
 
 		TraceID:    traceIdValue(src.TraceID()),
@@ -238,14 +181,14 @@ func (enc *Encoder) record(src sdk.Record) record {
 		DroppedAttributes: src.DroppedAttributes(),
 	}
 
-	if out.SeverityText == "" {
-		out.SeverityText = logv.Severity(out.Severity).String()
+	if out.SeverityText == "" && out.Severity > log.SeverityUndefined {
+		out.SeverityText = logging.LevelOf(out.Severity).String()
 	}
 
 	if n := src.AttributesLen(); n > 0 {
 		out.Attributes = make(attributes, n)
-		src.WalkAttributes(func(att log.KeyValue) bool {
-			out.Attributes[att.Key] = logValue{att.Value}
+		src.WalkAttributes(func(att attribute.KeyValue) bool {
+			out.Attributes[string(att.Key)] = logValue{att.Value}
 			return true
 		})
 	}

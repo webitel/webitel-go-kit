@@ -71,7 +71,7 @@ func TestRaceRegisterWhileRunning(t *testing.T) {
 	reg := start(t, racyConfig())
 
 	hammer(64, func(i int) {
-		reg.Critical("c"+strconv.Itoa(i), func(context.Context) error { return nil })
+		reg.Critical(System("c"+strconv.Itoa(i)), func(context.Context) error { return nil })
 	})
 
 	waitFor(t, "every check to run", func() bool {
@@ -118,7 +118,7 @@ func TestRaceRegisterAndReadConcurrently(t *testing.T) {
 	}
 
 	hammer(48, func(i int) {
-		reg.Informational("late"+strconv.Itoa(i), func(context.Context) error { return nil })
+		reg.Informational(System("late"+strconv.Itoa(i)), func(context.Context) error { return nil })
 	})
 
 	time.Sleep(20 * time.Millisecond)
@@ -178,7 +178,7 @@ func TestRaceStartStopCyclesDoNotLeakGoroutines(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		reg := New(racyConfig(), nil)
 		for j := 0; j < 8; j++ {
-			reg.Critical("c"+strconv.Itoa(j), func(context.Context) error { return nil })
+			reg.Critical(System("c"+strconv.Itoa(j)), func(context.Context) error { return nil })
 		}
 		if err := reg.Start(context.Background()); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -237,13 +237,13 @@ func TestRacePanickingCheckDoesNotCorruptTheRegistry(t *testing.T) {
 
 	for i := 0; i < 16; i++ {
 		name := "boom" + strconv.Itoa(i)
-		reg.Critical(name, func(context.Context) error { panic("kaboom " + name) })
+		reg.Critical(System(name), func(context.Context) error { panic("kaboom " + name) })
 	}
 	reg.Informational("fine", func(context.Context) error { return nil })
 
 	waitFor(t, "the healthy check to pass despite the panics", func() bool {
 		for _, r := range reg.results() {
-			if r.Name == "fine" && r.Status == StatusOK {
+			if r.Key() == "fine" && r.Status == StatusOK {
 				return true
 			}
 		}
@@ -291,7 +291,7 @@ func TestRaceSnapshotIsAnIndependentCopy(t *testing.T) {
 	// or reading the returned slice must not touch registry state.
 	reg := start(t, racyConfig())
 	for i := 0; i < 16; i++ {
-		reg.Critical("c"+strconv.Itoa(i), func(context.Context) error { return nil })
+		reg.Critical(System("c"+strconv.Itoa(i)), func(context.Context) error { return nil })
 	}
 
 	waitFor(t, "checks to appear", func() bool { return len(reg.Snapshot().Checks) == 16 })
@@ -389,7 +389,7 @@ func TestRaceCheckIgnoringContextDoesNotBlockShutdown(t *testing.T) {
 
 	reg := New(racyConfig(), nil)
 	for i := 0; i < 8; i++ {
-		reg.Critical("hung"+strconv.Itoa(i), func(context.Context) error { <-release; return nil })
+		reg.Critical(System("hung"+strconv.Itoa(i)), func(context.Context) error { <-release; return nil })
 	}
 	if err := reg.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)

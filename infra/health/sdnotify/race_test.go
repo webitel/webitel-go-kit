@@ -49,7 +49,7 @@ func TestRaceConcurrentStartAndStop(t *testing.T) {
 				defer cancel()
 
 				if i%2 == 0 {
-					_ = n.Start(ctx)
+					_ = n.Start(ctx, reg)
 
 					return
 				}
@@ -66,7 +66,7 @@ func TestRaceRepeatedStopReturnsTheSameVerdict(t *testing.T) {
 	reg.Critical("db", func(context.Context) error { return nil })
 	n := newNotifier(t, reg, addr)
 
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -114,11 +114,11 @@ func TestRaceNotifierCyclesDoNotLeakGoroutines(t *testing.T) {
 		}
 
 		t.Setenv("NOTIFY_SOCKET", addr)
-		n := New(reg)
+		n := New()
 		if n == nil {
 			t.Fatal("New returned nil with NOTIFY_SOCKET set")
 		}
-		if err := n.Start(context.Background()); err != nil {
+		if err := n.Start(context.Background(), reg); err != nil {
 			t.Fatalf("cycle %d: Start: %v", i, err)
 		}
 		time.Sleep(2 * time.Millisecond)
@@ -152,10 +152,10 @@ func TestRaceParentContextCancelRacesStop(t *testing.T) {
 		}
 
 		t.Setenv("NOTIFY_SOCKET", addr)
-		n := New(reg)
+		n := New()
 
 		ctx, cancel := context.WithCancel(context.Background())
-		if err := n.Start(ctx); err != nil {
+		if err := n.Start(ctx, reg); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -189,7 +189,7 @@ func TestRaceRegistryChurnsWhileTheNotifierRuns(t *testing.T) {
 	reg.Critical("db", func(context.Context) error { return nil })
 
 	n := newNotifier(t, reg, addr, WithPollInterval(time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -198,7 +198,7 @@ func TestRaceRegistryChurnsWhileTheNotifierRuns(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
-			reg.Informational("late"+strconv.Itoa(i), func(context.Context) error { return nil })
+			reg.Informational(health.System("late"+strconv.Itoa(i)), func(context.Context) error { return nil })
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -223,7 +223,7 @@ func TestRaceNilNotifierUnderConcurrency(t *testing.T) {
 	t.Setenv("NOTIFY_SOCKET", "")
 
 	reg := newTestRegistry(t, fastConfig())
-	n := New(reg)
+	n := New()
 	if n != nil {
 		t.Fatal("New returned non-nil without NOTIFY_SOCKET")
 	}
@@ -233,7 +233,7 @@ func TestRaceNilNotifierUnderConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := n.Start(context.Background()); err != nil {
+			if err := n.Start(context.Background(), reg); err != nil {
 				panic("nil notifier Start: " + err.Error())
 			}
 			if err := n.Stop(context.Background()); err != nil {
@@ -262,7 +262,7 @@ func TestNoReadyWithOnlyInformationalChecks(t *testing.T) {
 	// for a critical check too — proving nothing about the informational rule.
 	waitFor(t, "the informational check to pass", func() bool {
 		for _, c := range reg.Snapshot().Checks {
-			if c.Name == "rabbit" && c.Status == health.StatusOK {
+			if c.Key() == "rabbit" && c.Status == health.StatusOK {
 				return true
 			}
 		}
@@ -271,7 +271,7 @@ func TestNoReadyWithOnlyInformationalChecks(t *testing.T) {
 	})
 
 	n := newNotifier(t, reg, addr, WithPollInterval(time.Millisecond))
-	if err := n.Start(context.Background()); err != nil {
+	if err := n.Start(context.Background(), reg); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 

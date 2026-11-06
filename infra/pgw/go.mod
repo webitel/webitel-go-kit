@@ -2,7 +2,14 @@ module github.com/webitel/webitel-go-kit/infra/pgw
 
 go 1.25.3
 
-require github.com/jackc/pgx/v5 v5.10.0
+require (
+	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
+	github.com/jackc/pgx/v5 v5.10.0
+	github.com/webitel/webitel-go-kit/pkg/errors v0.2.0
+	google.golang.org/grpc v1.80.0
+)
+
+require golang.org/x/sys v0.42.0 // indirect
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect

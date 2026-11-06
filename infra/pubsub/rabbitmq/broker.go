@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/rabbitmq/amqp091-go"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+
+	"github.com/webitel/webitel-go-kit/pkg/logging"
 )
 
 var (
@@ -38,7 +41,7 @@ type Connection struct {
 	ch     *amqp091.Channel
 	mu     sync.RWMutex
 	done   chan struct{}
-	logger Logger
+	logger *logging.Logger
 
 	reconnecting atomic.Bool
 
@@ -47,15 +50,12 @@ type Connection struct {
 	declarations map[string]declaration
 }
 
-func NewConnection(cfg *Config, logger Logger) (*Connection, error) {
-	if logger == nil {
-		logger = &NoopLogger{}
-	}
-
+// NewConnection connects to the broker. A nil logger uses [logging.New].
+func NewConnection(cfg *Config, logger *logging.Logger) (*Connection, error) {
 	b := &Connection{
 		cfg:          cfg,
 		done:         make(chan struct{}),
-		logger:       logger,
+		logger:       componentLogger(logger),
 		declarations: make(map[string]declaration),
 	}
 
@@ -64,7 +64,7 @@ func NewConnection(cfg *Config, logger Logger) (*Connection, error) {
 			return nil, fmt.Errorf("broker creation: %w", err)
 		}
 
-		b.logger.Warn("rabbitmq is not available yet, connecting in the background", "err", err)
+		b.logger.WarnCtx(context.Background(), "rabbitmq is not available yet, connecting in the background", logging.Err(err))
 
 		go b.reconnect()
 	}
@@ -88,7 +88,7 @@ func (b *Connection) connect() error {
 	}
 
 	if err := b.replayDeclarations(ch); err != nil {
-		b.logger.Warn("rabbitmq topology was not fully restored", "err", err)
+		b.logger.WarnCtx(context.Background(), "rabbitmq topology was not fully restored", logging.Err(err))
 
 		if ch, err = conn.Channel(); err != nil {
 			_ = conn.Close()
@@ -109,8 +109,9 @@ func (b *Connection) connect() error {
 	b.ch = ch
 
 	go b.watchConn(conn)
+	go b.watchChannel(conn, ch)
 
-	b.logger.Info("connected to RabbitMQ")
+	b.logger.InfoCtx(context.Background(), "connected to RabbitMQ")
 	return nil
 }
 
@@ -118,12 +119,68 @@ func (b *Connection) watchConn(conn *amqp091.Connection) {
 	notifyClose := conn.NotifyClose(make(chan *amqp091.Error, 1))
 
 	select {
-	case err := <-notifyClose:
-		b.logger.Warn("rabbitmq connection closed", err)
+	case amqpErr := <-notifyClose:
+		var err error
+		if amqpErr != nil {
+			err = amqpErr
+		}
+		b.logger.WarnCtx(context.Background(), "rabbitmq connection closed", logging.Err(err))
 		b.reconnect()
 	case <-b.done:
 		return
 	}
+}
+
+// watchChannel reopens the shared channel when it closes while its connection
+// stays up: a channel-level error or a caller's Close. A closed connection is
+// left to watchConn.
+func (b *Connection) watchChannel(conn *amqp091.Connection, ch *amqp091.Channel) {
+	notifyClose := ch.NotifyClose(make(chan *amqp091.Error, 1))
+
+	select {
+	case <-notifyClose:
+		b.reopenChannel(conn, ch)
+	case <-b.done:
+		return
+	}
+}
+
+func (b *Connection) reopenChannel(conn *amqp091.Connection, old *amqp091.Channel) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	select {
+	case <-b.done:
+		return
+	default:
+	}
+
+	if b.conn != conn || b.ch != old || conn.IsClosed() {
+		return
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		b.logger.ErrorCtx(context.Background(), "reopen rabbitmq channel", logging.Err(err))
+
+		return
+	}
+
+	if err := b.replayDeclarations(ch); err != nil {
+		b.logger.WarnCtx(context.Background(), "rabbitmq topology was not fully restored", logging.Err(err))
+
+		if ch, err = conn.Channel(); err != nil {
+			b.logger.ErrorCtx(context.Background(), "reopen rabbitmq channel", logging.Err(err))
+
+			return
+		}
+	}
+
+	b.ch = ch
+
+	go b.watchChannel(conn, ch)
+
+	b.logger.InfoCtx(context.Background(), "rabbitmq channel reopened")
 }
 
 func (b *Connection) reconnect() {
@@ -141,7 +198,7 @@ func (b *Connection) reconnect() {
 			return
 		default:
 			if err := b.connect(); err == nil {
-				b.logger.Info("successfully reconnected to RabbitMQ")
+				b.logger.InfoCtx(context.Background(), "successfully reconnected to RabbitMQ")
 				return
 			}
 
@@ -215,7 +272,7 @@ func (b *Connection) replayDeclarations(ch *amqp091.Channel) error {
 	}
 
 	if len(b.declOrder) > 0 {
-		b.logger.Info("rabbitmq topology restored")
+		b.logger.InfoCtx(context.Background(), "rabbitmq topology restored", logging.Int("declarations", len(b.declOrder)))
 	}
 
 	return nil
@@ -274,6 +331,14 @@ func (b *Connection) Channel(ctx context.Context) (*amqp091.Channel, error) {
 		}
 		return b.ch, nil
 	}
+}
+
+// Ping reports whether the connection and its channel are open. It reads the
+// cached state and does not dial, so it fits a health check.
+func (b *Connection) Ping(ctx context.Context) error {
+	_, err := b.Channel(ctx)
+
+	return err
 }
 
 func (b *Connection) DeclareExchange(ctx context.Context, cfg *ExchangeConfig) error {
@@ -375,7 +440,11 @@ func (b *Connection) BindQueue(queueName string, rk string, exchange string, noW
 		return err
 	}
 
-	b.logger.Info("queue binded")
+	b.logger.InfoCtx(context.Background(), "queue bound", logging.KV(
+		semconv.MessagingDestinationName(exchange),
+		semconv.MessagingRabbitMQDestinationRoutingKey(rk),
+		semconv.MessagingDestinationSubscriptionName(queueName),
+	))
 
 	return nil
 }
@@ -394,12 +463,13 @@ func (b *Connection) Close() error {
 	if b.ch != nil && !b.ch.IsClosed() {
 		_ = b.ch.Close()
 	}
+	var err error
 	if b.conn != nil && !b.conn.IsClosed() {
-		return b.conn.Close()
+		err = b.conn.Close()
 	}
 
-	b.logger.Info("broker closed")
-	return nil
+	b.logger.InfoCtx(context.Background(), "broker closed", logging.Err(err))
+	return err
 }
 
 func minDuration(a, b time.Duration) time.Duration {
