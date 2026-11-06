@@ -5,50 +5,44 @@ import (
 	"testing"
 )
 
-func TestParseDSN(t *testing.T) {
-	type args struct {
-		dsn string
-	}
-	tests := []struct {
-		name       string
-		args       args
-		wantPath   string
-		wantParams map[string]string
-		wantErr    bool
+func TestGetScheme(t *testing.T) {
+	for _, tc := range []struct {
+		dsn, scheme, rest string
+		wantErr           bool
 	}{
-		// TODO: Add test cases.
-		{
-			name: "general",
-			args: args{
-				// dsn: "file:~/path/to/file.ext;size=100;age=7;backups=3;compress=gzip",
-				// dsn: "file:~/path/to/file.ext?size=100&age=7&backups=3&compress=gzip",
-				dsn: "file://~/path/to/file.ext?size=100&age=7&backups=3&compress=gzip#fragment",
-				// dsn: "file://relative/path/to/file.ext?size=100&age=7&backups=3&compress=gzip",
-				// dsn: "file:///absolute/path/to/file.ext?size=100&age=7&backups=3&compress=gzip",
-			},
-			wantPath: "~/path/to/file.ext",
-			wantParams: map[string]string{
-				"size":     "100",
-				"age":      "7",
-				"backups":  "3",
-				"compress": "gzip",
-			},
-			wantErr: false,
-		},
+		{"stdout", "stdout", "", false},
+		{"file:/var/log/m.json;max-size=10", "file", "/var/log/m.json;max-size=10", false},
+		{"otlp+http://host", "otlp+http", "//host", false},
+		{"/var/log/m.json", "", "/var/log/m.json", false},
+		{"1file:x", "", "1file:x", false},
+		{":x", "", "", true},
+	} {
+		scheme, rest, err := GetScheme(tc.dsn)
+		if (err != nil) != tc.wantErr || scheme != tc.scheme || rest != tc.rest {
+			t.Errorf("GetScheme(%q) = %q, %q, %v; want %q, %q, err=%v",
+				tc.dsn, scheme, rest, err, tc.scheme, tc.rest, tc.wantErr)
+		}
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotPath, gotParams, err := ParseDSN(tt.args.dsn)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseDSN() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if gotPath != tt.wantPath {
-				t.Errorf("ParseDSN() gotPath = %v, want %v", gotPath, tt.wantPath)
-			}
-			if !reflect.DeepEqual(gotParams, tt.wantParams) {
-				t.Errorf("ParseDSN() gotParams = %v, want %v", gotParams, tt.wantParams)
-			}
-		})
+}
+
+func TestParseDSN(t *testing.T) {
+	for _, tc := range []struct {
+		dsn, path string
+		params    map[string]string
+		wantErr   bool
+	}{
+		{"file:/var/log/m.json", "/var/log/m.json", nil, false},
+		{"file:/var/log/m.json;max-size=10;compress=gzip", "/var/log/m.json",
+			map[string]string{"max-size": "10", "compress": "gzip"}, false},
+		{"file:///var/log/m.json?max-size=10&backups=2#frag", "/var/log/m.json",
+			map[string]string{"max-size": "10", "backups": "2"}, false},
+		{"/var/log/m.json", "/var/log/m.json", nil, false},
+		{":x", "", nil, true},
+	} {
+		path, params, err := ParseDSN(tc.dsn)
+		if (err != nil) != tc.wantErr || path != tc.path || !reflect.DeepEqual(params, tc.params) {
+			t.Errorf("ParseDSN(%q) = %q, %v, %v; want %q, %v, err=%v",
+				tc.dsn, path, params, err, tc.path, tc.params, tc.wantErr)
+		}
 	}
 }
