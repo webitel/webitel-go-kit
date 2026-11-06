@@ -3,46 +3,66 @@
 Authentication and authorization of gRPC calls for Webitel services.
 
 The caller's access token (`x-webitel-access`) is exchanged for a `Session`
-through `Auth.UserInfo` of go.webitel.app. The interceptor then checks the call
-against the `WebitelAPI` map that `protoc-gen-go-webitel` generates:
+through `Auth.UserInfo` of go.webitel.app. Two parts, both shaped like
+go-grpc-middleware's `AuthFunc` (`func(ctx) (context.Context, error)`):
 
-1. public methods (health checks) pass without a token;
-2. the method must be in the map, otherwise it is denied (`PermissionDenied`);
-3. the token must be present and the session not expired;
-4. every license in the service's `additional_license` must be valid now
+- `Client`: `Session(ctx, token)` and `Authenticate(ctx)`. It takes the token from
+  the metadata, requires a live session and puts it into the context. It knows
+  nothing about `WebitelAPI`.
+- `Authorizer`: `NewAuthorizer(client, pb.WebitelAPI)` and `Authorize(ctx)`.
+  On top of `Authenticate` it checks the call against the `WebitelAPI` map that
+  `protoc-gen-go-webitel` generates. `WebitelAPI` is passed as `any` and
+  converted by field name, so `NewAuthorizer` fails at once if its shape changes.
+
+Order of checks in `Authorize`:
+
+1. the method (`grpc.Method(ctx)`) must be in the map, otherwise it is denied
+   (`PermissionDenied`), also outside a server context;
+2. the token must be present and the session not expired (`Authenticate`);
+3. every license in the service's `additional_license` must be valid now
    (`IssuedAt <= now < ExpiresAt`, matched by `License.Prod`);
-5. obac: the user needs the action on the object class.
+4. obac: the user needs the action on the object class.
 
 ## Usage
+
+Interceptors live in `pkg/interceptors`; this package does not import them.
 
 ```go
 import authgrpc "buf.build/gen/go/webitel/webitel-go/grpc/go/_gogrpc"
 
-authorizer := auth.New(authgrpc.NewAuthClient(conn)) // conn: gRPC connection to go.webitel.app
-interceptor, err := auth.NewInterceptor(authorizer, auditpb.WebitelAPI)
+client := auth.New(authgrpc.NewAuthClient(conn)) // conn: gRPC connection to go.webitel.app
+authorizer, err := auth.NewAuthorizer(client, auditpb.WebitelAPI)
 if err != nil {
     return err
 }
 
 srv := grpc.NewServer(
-    grpc.ChainUnaryInterceptor(errorInterceptor, recoveryInterceptor, interceptor.Unary()),
-    grpc.ChainStreamInterceptor(interceptor.Stream()),
+    grpc.ChainUnaryInterceptor(
+        interceptors.UnaryServerErrorInterceptor(),
+        interceptors.AuthUnaryServerInterceptor(authorizer.Authorize),
+    ),
+    grpc.ChainStreamInterceptor(interceptors.AuthStreamServerInterceptor(authorizer.Authorize)),
 )
 ```
 
-`WebitelAPI` is passed as `any` and converted by field name at startup, so
-`NewInterceptor` fails at once if its shape ever changes.
+A service without `WebitelAPI` passes `client.Authenticate` instead of
+`authorizer.Authorize`.
 
-`errorInterceptor` is `UnaryServerErrorInterceptor` of `pkg/interceptors`; without
-it unary errors reach clients as `Unknown`. It also rewrites the IDs below to
-`api.process.*` for clients. `Stream()` sets the gRPC code itself, as plain text.
+Public methods, such as health checks, are the service's job: leave them out
+with the `selector` of go-grpc-middleware. Reflection stays closed unless the
+service opts in the same way. Service-internal APIs with their own credentials
+are handled the same way.
+
+`UnaryServerErrorInterceptor` maps the errors below to gRPC codes and rewrites
+the IDs to `api.process.*` for clients. For streams the error format comes from
+the server (WTEL-10860); nothing is formatted here.
 
 In a handler:
 
 ```go
 s, ok := auth.SessionFromContext(ctx)
 if !ok {
-    // only on public methods, which the interceptor lets through without a session
+    // only on methods the interceptor skipped
     return nil, errors.Unauthenticated("no session")
 }
 if s.RequiresRBAC("forms", auth.ActionRead) {
@@ -50,20 +70,12 @@ if s.RequiresRBAC("forms", auth.ActionRead) {
 }
 ```
 
-The interceptor does not apply record-based access control (rbac); that is the
-handler's job through `Session.RequiresRBAC` and `Session.ACLRoles`.
+Record-based access control (rbac) is not applied here; that is the handler's
+job through `Session.RequiresRBAC` and `Session.ACLRoles`.
 In tests build the handler context with `auth.ContextWithSession`.
 
 A stream is authorized once, when it opens. A token that is revoked or expires
 later does not close a stream that is already running.
-
-Health checks need no token. Add more with
-`auth.WithPublicMethods("/pkg.Service/")`, e.g.
-`"/grpc.reflection.v1.ServerReflection/"` for reflection; any other prefix
-shape, such as `"/pkg.Pub"` or `"/"`, makes `NewInterceptor` fail.
-Service-internal APIs that use their own credentials belong to the service:
-make them public here and put your own guard in the chain before this
-interceptor.
 
 ## Access and permissions
 

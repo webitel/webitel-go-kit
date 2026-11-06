@@ -9,7 +9,7 @@ func ContextWithSession(ctx context.Context, s *Session) context.Context {
 	return context.WithValue(ctx, sessionKey{}, s)
 }
 
-// SessionFromContext returns the session the interceptor stored in ctx.
+// SessionFromContext returns the session Authenticate or Authorize stored in ctx.
 func SessionFromContext(ctx context.Context) (*Session, bool) {
 	s, ok := ctx.Value(sessionKey{}).(*Session)
 

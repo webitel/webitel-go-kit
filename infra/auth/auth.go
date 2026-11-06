@@ -1,10 +1,11 @@
 // Package auth authenticates and authorizes gRPC calls of Webitel services.
 //
 // The access token (metadata key x-webitel-access) is exchanged for a Session
-// through Auth.UserInfo of go.webitel.app. The interceptor checks the call
-// against the generated WebitelAPI map: licenses first, then obac for the
-// object class and action; methods missing from the map are denied. Handlers
-// read the caller with SessionFromContext.
+// through Auth.UserInfo of go.webitel.app. Client.Authenticate only
+// authenticates; Authorizer.Authorize also checks the call against the generated
+// WebitelAPI map: licenses first, then obac for the object class and action;
+// methods missing from the map are denied. Both have the shape of an AuthFunc
+// and handlers read the caller with SessionFromContext.
 //
 // See the package example for wiring.
 package auth
@@ -18,7 +19,6 @@ import (
 	authpb "buf.build/gen/go/webitel/webitel-go/protocolbuffers/go"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -35,14 +35,84 @@ const (
 	DefaultCallTimeout = 5 * time.Second
 )
 
-// UserInfoClient is the part of the generated AuthClient the Authorizer needs.
+// UserInfoClient is the part of the generated AuthClient the Client needs.
 type UserInfoClient interface {
 	UserInfo(ctx context.Context, in *authpb.UserinfoRequest, opts ...grpc.CallOption) (*authpb.Userinfo, error)
 }
 
-// Authorizer turns an access token into a Session.
-type Authorizer interface {
-	Authorize(ctx context.Context, token string) (*Session, error)
+// Client turns an access token into a Session through Auth.UserInfo, with a cache.
+type Client struct {
+	client UserInfoClient
+	opts   options
+	group  singleflight.Group
+
+	mu    sync.Mutex
+	cache map[[sha256.Size]byte]cacheEntry
+}
+
+// New returns a Client that resolves sessions through Auth.UserInfo.
+func New(c UserInfoClient, opts ...Option) *Client {
+	a := &Client{
+		client: c,
+		opts:   options{cacheTTL: DefaultCacheTTL, cacheSize: DefaultCacheSize, callTimeout: DefaultCallTimeout},
+		cache:  make(map[[sha256.Size]byte]cacheEntry),
+	}
+	for _, o := range opts {
+		o(&a.opts)
+	}
+
+	return a
+}
+
+// Session returns the session of the token, from the cache when possible.
+func (a *Client) Session(ctx context.Context, token string) (*Session, error) {
+	// Hashed so raw tokens never sit in the map keys.
+	key := sha256.Sum256([]byte(token))
+	if s := a.cached(key); s != nil {
+		return s, nil
+	}
+
+	ch := a.group.DoChan(string(key[:]), func() (any, error) { return a.fetch(ctx, key, token) })
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+
+		return res.Val.(*Session), nil
+	case <-ctx.Done():
+		return nil, errors.Wrap(ctx.Err(),
+			errors.WithCode(status.FromContextError(ctx.Err()).Code()),
+			errors.WithID("auth.request.canceled"),
+		)
+	}
+}
+
+// Authenticate puts the session of the incoming token into the context; it has the shape of go-grpc-middleware's AuthFunc.
+func (a *Client) Authenticate(ctx context.Context) (context.Context, error) {
+	token := tokenFromContext(ctx)
+	if token == "" {
+		return nil, ErrTokenMissing
+	}
+
+	s, err := a.Session(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	if s == nil || s.Expired() {
+		return nil, ErrSessionExpired
+	}
+
+	return ContextWithSession(ctx, s), nil
+}
+
+func tokenFromContext(ctx context.Context) string {
+	md, _ := metadata.FromIncomingContext(ctx)
+	if v := md.Get(TokenHeader); len(v) > 0 {
+		return v[0]
+	}
+
+	return ""
 }
 
 type options struct {
@@ -81,54 +151,8 @@ type cacheEntry struct {
 	until   time.Time
 }
 
-type authorizer struct {
-	client UserInfoClient
-	opts   options
-	group  singleflight.Group
-
-	mu    sync.Mutex
-	cache map[[sha256.Size]byte]cacheEntry
-}
-
-// New returns an Authorizer that resolves sessions through Auth.UserInfo.
-func New(c UserInfoClient, opts ...Option) Authorizer {
-	a := &authorizer{
-		client: c,
-		opts:   options{cacheTTL: DefaultCacheTTL, cacheSize: DefaultCacheSize, callTimeout: DefaultCallTimeout},
-		cache:  make(map[[sha256.Size]byte]cacheEntry),
-	}
-	for _, o := range opts {
-		o(&a.opts)
-	}
-
-	return a
-}
-
-func (a *authorizer) Authorize(ctx context.Context, token string) (*Session, error) {
-	// Hashed so raw tokens never sit in the map keys.
-	key := sha256.Sum256([]byte(token))
-	if s := a.cached(key); s != nil {
-		return s, nil
-	}
-
-	ch := a.group.DoChan(string(key[:]), func() (any, error) { return a.fetch(ctx, key, token) })
-	select {
-	case res := <-ch:
-		if res.Err != nil {
-			return nil, res.Err
-		}
-
-		return res.Val.(*Session), nil
-	case <-ctx.Done():
-		return nil, errors.Wrap(ctx.Err(),
-			errors.WithCode(status.FromContextError(ctx.Err()).Code()),
-			errors.WithID("auth.request.canceled"),
-		)
-	}
-}
-
 // fetch must not die with the context of the caller that started the flight.
-func (a *authorizer) fetch(ctx context.Context, key [sha256.Size]byte, token string) (any, error) {
+func (a *Client) fetch(ctx context.Context, key [sha256.Size]byte, token string) (any, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), a.opts.callTimeout)
 	defer cancel()
 
@@ -146,7 +170,7 @@ func (a *authorizer) fetch(ctx context.Context, key [sha256.Size]byte, token str
 	return s, nil
 }
 
-func (a *authorizer) cached(key [sha256.Size]byte) *Session {
+func (a *Client) cached(key [sha256.Size]byte) *Session {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -163,7 +187,7 @@ func (a *authorizer) cached(key [sha256.Size]byte) *Session {
 	return e.session
 }
 
-func (a *authorizer) store(key [sha256.Size]byte, s *Session) {
+func (a *Client) store(key [sha256.Size]byte, s *Session) {
 	if a.opts.cacheTTL <= 0 {
 		return
 	}
@@ -192,57 +216,4 @@ func (a *authorizer) store(key [sha256.Size]byte, s *Session) {
 		}
 	}
 	a.cache[key] = cacheEntry{session: s, until: until}
-}
-
-// mapError keeps an outage of the auth service from looking like a bad token.
-func mapError(err error) error {
-	switch status.Code(err) {
-	case codes.Unauthenticated, codes.PermissionDenied, codes.NotFound:
-		return errors.Wrap(ErrInvalidToken, errors.WithCause(err))
-	default:
-		return errors.Wrap(ErrUnavailable, errors.WithCause(err))
-	}
-}
-
-// millis converts milliseconds; 0 stays the zero time, which means no bound.
-func millis(ms int64) time.Time {
-	if ms <= 0 {
-		return time.Time{}
-	}
-
-	return time.UnixMilli(ms)
-}
-
-func newSession(info *authpb.Userinfo) *Session {
-	s := &Session{
-		UserID:   info.GetUserId(),
-		DomainID: info.GetDc(),
-		Name:     info.GetName(),
-		Username: info.GetUsername(),
-		Scopes:   make(map[string]Scope, len(info.GetScope())),
-	}
-	s.ExpiresAt = millis(info.GetExpiresAt())
-	for _, r := range info.GetRoles() {
-		s.RoleIDs = append(s.RoleIDs, r.GetId())
-	}
-	for _, p := range info.GetPermissions() {
-		s.Permissions = append(s.Permissions, p.GetId())
-	}
-	for _, l := range info.GetLicense() {
-		s.Licenses = append(s.Licenses, License{
-			Prod:      l.GetProd(),
-			IssuedAt:  millis(l.GetIssuedAt()),
-			ExpiresAt: millis(l.GetExpiresAt()),
-		})
-	}
-	for _, sc := range info.GetScope() {
-		s.Scopes[sc.GetClass()] = Scope{
-			Class:  sc.GetClass(),
-			Access: sc.GetAccess(),
-			OBAC:   sc.GetObac(),
-			RBAC:   sc.GetRbac(),
-		}
-	}
-
-	return s
 }

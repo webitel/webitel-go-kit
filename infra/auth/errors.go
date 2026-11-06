@@ -2,10 +2,12 @@ package auth
 
 import "github.com/webitel/webitel-go-kit/pkg/errors"
 
+type valueKey string
+
 // Keys of the values attached to ErrLicense and ErrPermission, read with errors.Value.
 const (
-	ValueLicenses = "licenses" // []string: the missing licenses
-	ValueClass    = "class"    // string: the object class that was denied
+	ValueLicenses valueKey = "licenses" // []string: the missing licenses
+	ValueClass    valueKey = "class"    // string: the object class that was denied
 )
 
 var (

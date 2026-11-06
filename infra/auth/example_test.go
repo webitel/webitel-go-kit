@@ -22,32 +22,70 @@ func (exampleClient) UserInfo(context.Context, *authpb.UserinfoRequest, ...grpc.
 	}, nil
 }
 
-// Wire the interceptors into a server and read the caller in a handler.
-func Example() {
-	// In a service: New(authgrpc.NewAuthClient(conn)) and the generated
-	// pb.WebitelAPI; testAPI has the same shape. Put UnaryServerErrorInterceptor
-	// of pkg/interceptors before Unary() so clients get gRPC status codes.
-	interceptor, err := NewInterceptor(New(exampleClient{}), testAPI)
+// A service with a generated WebitelAPI. infra/auth does not import pkg/interceptors,
+// so the server wiring is shown in comments:
+//
+//	authorizer, err := auth.NewAuthorizer(client, pb.WebitelAPI)
+//	srv := grpc.NewServer(
+//		grpc.ChainUnaryInterceptor(
+//			interceptors.UnaryServerErrorInterceptor(),
+//			interceptors.AuthUnaryServerInterceptor(authorizer.Authorize),
+//		),
+//		grpc.ChainStreamInterceptor(interceptors.AuthStreamServerInterceptor(authorizer.Authorize)),
+//	)
+//
+// Public methods such as health checks are left out with go-grpc-middleware's selector.
+func ExampleNewAuthorizer() {
+	// In a service: New(authgrpc.NewAuthClient(conn)) and the generated pb.WebitelAPI;
+	// testAPI has the same shape.
+	client := New(exampleClient{})
+	authorizer, err := NewAuthorizer(client, testAPI)
 	if err != nil {
 		panic(err)
 	}
 
-	_ = grpc.NewServer(
-		grpc.ChainUnaryInterceptor(interceptor.Unary()),
-		grpc.ChainStreamInterceptor(interceptor.Stream()),
-	)
-
+	// The interceptor calls Authorize; the method comes from the server context.
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenHeader, "token"))
-	info := &grpc.UnaryServerInfo{FullMethod: "/webitel.audit.Forms/Search"}
-	_, err = interceptor.Unary()(ctx, nil, info, func(ctx context.Context, _ any) (any, error) {
-		s, _ := SessionFromContext(ctx)
-		fmt.Println("user", s.UserID, "may read forms:", s.CanAccess("forms", ActionRead))
-
-		return nil, nil
-	})
+	ctx = grpc.NewContextWithServerTransportStream(ctx, fakeMethodStream{"/webitel.audit.Forms/Search"})
+	ctx, err = authorizer.Authorize(ctx)
 	fmt.Println("error:", err)
+	handler(ctx)
 
 	// Output:
-	// user 7 may read forms: true
 	// error: <nil>
+	// user 7 may read forms: true
+}
+
+// A service without WebitelAPI only needs the session: pass client.Authenticate instead:
+//
+//	interceptors.AuthUnaryServerInterceptor(client.Authenticate)
+func ExampleClient_Authenticate() {
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenHeader, "token"))
+	ctx, err := New(exampleClient{}).Authenticate(ctx)
+	fmt.Println("error:", err)
+	handler(ctx)
+
+	// Output:
+	// error: <nil>
+	// user 7 may read forms: true
+}
+
+// A handler reads the caller from the context.
+func ExampleSessionFromContext() {
+	ctx := ContextWithSession(context.Background(), &Session{UserID: 7, Scopes: map[string]Scope{"forms": {Class: "forms", OBAC: true, RBAC: true, Access: "r"}}})
+	s, ok := SessionFromContext(ctx)
+	if !ok {
+		return
+	}
+	if s.CanAccess("forms", ActionRead) && s.RequiresRBAC("forms", ActionRead) {
+		fmt.Println("restrict records to the roles of", s.ACLRoles())
+	}
+
+	// Output:
+	// restrict records to the roles of [7]
+}
+
+func handler(ctx context.Context) {
+	s, _ := SessionFromContext(ctx)
+	fmt.Println("user", s.UserID, "may read forms:", s.CanAccess("forms", ActionRead))
 }

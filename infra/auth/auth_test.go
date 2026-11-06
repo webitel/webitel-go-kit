@@ -72,12 +72,12 @@ func testInfo() *authpb.Userinfo {
 	}
 }
 
-func TestAuthorizeBuildsSession(t *testing.T) {
+func TestSessionBuildsSession(t *testing.T) {
 	exp := time.Now().Add(time.Hour).Truncate(time.Millisecond)
 	info := testInfo()
 	info.ExpiresAt = exp.UnixMilli()
 
-	s, err := New(&fakeClient{resp: info}).Authorize(context.Background(), "tok")
+	s, err := New(&fakeClient{resp: info}).Session(context.Background(), "tok")
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(7), s.UserID)
@@ -92,11 +92,11 @@ func TestAuthorizeBuildsSession(t *testing.T) {
 	assert.False(t, s.Expired())
 }
 
-func TestAuthorizeUnboundedLicense(t *testing.T) {
+func TestSessionUnboundedLicense(t *testing.T) {
 	info := testInfo()
 	info.License = []*authpb.LicenseUser{{Prod: "AUDIT"}}
 
-	s, err := New(&fakeClient{resp: info}).Authorize(context.Background(), "tok")
+	s, err := New(&fakeClient{resp: info}).Session(context.Background(), "tok")
 	require.NoError(t, err)
 
 	assert.True(t, s.Licenses[0].IssuedAt.IsZero())
@@ -104,26 +104,26 @@ func TestAuthorizeUnboundedLicense(t *testing.T) {
 	assert.True(t, s.HasLicense("AUDIT"))
 }
 
-func TestAuthorizeNoExpiryWhenZero(t *testing.T) {
-	s, err := New(&fakeClient{resp: testInfo()}).Authorize(context.Background(), "tok")
+func TestSessionNoExpiryWhenZero(t *testing.T) {
+	s, err := New(&fakeClient{resp: testInfo()}).Session(context.Background(), "tok")
 	require.NoError(t, err)
 
 	assert.True(t, s.ExpiresAt.IsZero())
 	assert.False(t, s.Expired())
 }
 
-func TestAuthorizeForwardsOnlyToken(t *testing.T) {
+func TestSessionForwardsOnlyToken(t *testing.T) {
 	f := &fakeClient{resp: testInfo()}
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-real-ip", "1.2.3.4", TokenHeader, "other"))
 
-	_, err := New(f).Authorize(ctx, "tok")
+	_, err := New(f).Session(ctx, "tok")
 	require.NoError(t, err)
 
 	require.Len(t, f.md, 1)
 	assert.Equal(t, metadata.Pairs(TokenHeader, "tok"), f.md[0])
 }
 
-func TestAuthorizeSingleflight(t *testing.T) {
+func TestSessionSingleflight(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeClient{resp: testInfo(), block: make(chan struct{})}
 		a := New(f)
@@ -132,7 +132,7 @@ func TestAuthorizeSingleflight(t *testing.T) {
 		var failed atomic.Int32
 		for range 50 {
 			wg.Go(func() {
-				if _, err := a.Authorize(context.Background(), "tok"); err != nil {
+				if _, err := a.Session(context.Background(), "tok"); err != nil {
 					failed.Add(1)
 				}
 			})
@@ -146,7 +146,7 @@ func TestAuthorizeSingleflight(t *testing.T) {
 	})
 }
 
-func TestAuthorizeFirstCallerCancelDoesNotBreakOthers(t *testing.T) {
+func TestSessionFirstCallerCancelDoesNotBreakOthers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeClient{resp: testInfo(), block: make(chan struct{})}
 		a := New(f)
@@ -154,9 +154,9 @@ func TestAuthorizeFirstCallerCancelDoesNotBreakOthers(t *testing.T) {
 		firstCtx, cancel := context.WithCancel(context.Background())
 		var firstErr, secondErr error
 		var wg sync.WaitGroup
-		wg.Go(func() { _, firstErr = a.Authorize(firstCtx, "tok") })
+		wg.Go(func() { _, firstErr = a.Session(firstCtx, "tok") })
 		synctest.Wait() // the first caller started the flight
-		wg.Go(func() { _, secondErr = a.Authorize(context.Background(), "tok") })
+		wg.Go(func() { _, secondErr = a.Session(context.Background(), "tok") })
 		synctest.Wait() // the second caller joined it
 
 		cancel()
@@ -177,15 +177,15 @@ func TestCacheTTL(t *testing.T) {
 		a := New(f, WithCacheTTL(10*time.Second))
 		ctx := context.Background()
 
-		_, err := a.Authorize(ctx, "tok")
+		_, err := a.Session(ctx, "tok")
 		require.NoError(t, err)
 		time.Sleep(9 * time.Second)
-		_, err = a.Authorize(ctx, "tok")
+		_, err = a.Session(ctx, "tok")
 		require.NoError(t, err)
 		assert.Equal(t, 1, f.count(), "served from cache inside the TTL")
 
 		time.Sleep(2 * time.Second)
-		_, err = a.Authorize(ctx, "tok")
+		_, err = a.Session(ctx, "tok")
 		require.NoError(t, err)
 		assert.Equal(t, 2, f.count(), "refetched after the TTL")
 	})
@@ -199,10 +199,10 @@ func TestCacheLimitedByTokenExpiry(t *testing.T) {
 		a := New(f, WithCacheTTL(time.Minute))
 		ctx := context.Background()
 
-		_, err := a.Authorize(ctx, "tok")
+		_, err := a.Session(ctx, "tok")
 		require.NoError(t, err)
 		time.Sleep(4 * time.Second)
-		_, err = a.Authorize(ctx, "tok")
+		_, err = a.Session(ctx, "tok")
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, f.count())
@@ -214,7 +214,7 @@ func TestCacheDisabled(t *testing.T) {
 	a := New(f, WithCacheTTL(0))
 
 	for range 3 {
-		_, err := a.Authorize(context.Background(), "tok")
+		_, err := a.Session(context.Background(), "tok")
 		require.NoError(t, err)
 	}
 
@@ -224,16 +224,16 @@ func TestCacheDisabled(t *testing.T) {
 func TestCacheIsBounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeClient{resp: testInfo()}
-		a := New(f, WithCacheSize(2)).(*authorizer)
+		a := New(f, WithCacheSize(2))
 
 		for i := range 5 {
-			_, err := a.Authorize(context.Background(), fmt.Sprint("tok", i))
+			_, err := a.Session(context.Background(), fmt.Sprint("tok", i))
 			require.NoError(t, err)
 		}
 		assert.Len(t, a.cache, 2)
 
 		time.Sleep(DefaultCacheTTL + time.Second)
-		_, err := a.Authorize(context.Background(), "fresh")
+		_, err := a.Session(context.Background(), "fresh")
 		require.NoError(t, err)
 		assert.Len(t, a.cache, 1, "expired entries make room")
 	})
@@ -243,14 +243,14 @@ func TestErrorsAreNotCached(t *testing.T) {
 	f := &fakeClient{err: status.Error(codes.Unavailable, "down")}
 	a := New(f)
 
-	_, err := a.Authorize(context.Background(), "tok")
+	_, err := a.Session(context.Background(), "tok")
 	require.Error(t, err)
 
 	f.mu.Lock()
 	f.err, f.resp = nil, testInfo()
 	f.mu.Unlock()
 
-	_, err = a.Authorize(context.Background(), "tok")
+	_, err = a.Session(context.Background(), "tok")
 	require.NoError(t, err)
 	assert.Equal(t, 2, f.count())
 }
@@ -273,7 +273,7 @@ func TestErrorMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(&fakeClient{err: tt.err}).Authorize(context.Background(), "tok")
+			_, err := New(&fakeClient{err: tt.err}).Session(context.Background(), "tok")
 
 			require.Error(t, err)
 			assert.Equal(t, tt.code, errors.Code(err))
@@ -291,9 +291,62 @@ func TestCallTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeClient{block: make(chan struct{})}
 
-		_, err := New(f, WithCallTimeout(time.Second)).Authorize(context.Background(), "tok")
+		_, err := New(f, WithCallTimeout(time.Second)).Session(context.Background(), "tok")
 
 		require.Error(t, err)
 		assert.Equal(t, codes.Unavailable, errors.Code(err))
+	})
+}
+
+func withIncomingToken(tok string) context.Context {
+	return metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenHeader, tok))
+}
+
+func TestAuthenticate(t *testing.T) {
+	t.Run("puts the session into the context and caches it", func(t *testing.T) {
+		f := &fakeClient{resp: testInfo()}
+		c := New(f)
+		ctx := withIncomingToken("tok")
+
+		got, err := c.Authenticate(ctx)
+		require.NoError(t, err)
+		want, err := c.Session(ctx, "tok")
+		require.NoError(t, err)
+		s, ok := SessionFromContext(got)
+		require.True(t, ok)
+		assert.Same(t, want, s)
+
+		_, err = c.Authenticate(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, 1, f.count(), "second call served from the cache")
+	})
+
+	t.Run("token missing", func(t *testing.T) {
+		c := New(&fakeClient{resp: testInfo()})
+
+		_, err := c.Authenticate(context.Background())
+		assert.ErrorIs(t, err, ErrTokenMissing)
+		_, err = c.Authenticate(withIncomingToken(""))
+		assert.ErrorIs(t, err, ErrTokenMissing)
+	})
+
+	t.Run("UserInfo errors keep their sentinel", func(t *testing.T) {
+		_, err := New(&fakeClient{err: status.Error(codes.Unauthenticated, "bad")}).Authenticate(withIncomingToken("tok"))
+		assert.ErrorIs(t, err, ErrInvalidToken)
+		_, err = New(&fakeClient{err: status.Error(codes.Unavailable, "down")}).Authenticate(withIncomingToken("tok"))
+		assert.ErrorIs(t, err, ErrUnavailable)
+	})
+
+	t.Run("expired session", func(t *testing.T) {
+		info := testInfo()
+		info.ExpiresAt = time.Now().Add(-time.Minute).UnixMilli()
+		f := &fakeClient{resp: info}
+		c := New(f)
+
+		for range 2 {
+			_, err := c.Authenticate(withIncomingToken("tok"))
+			assert.ErrorIs(t, err, ErrSessionExpired)
+		}
+		assert.Equal(t, 2, f.count(), "an expired session is not cached")
 	})
 }
