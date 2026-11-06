@@ -83,24 +83,14 @@ func TestAddStandby_FailedConnectStaysUnhealthy(t *testing.T) {
 			t.Fatalf("AddStandby() = %v", err)
 		}
 
-		// Connect attempts use real network I/O (not durably blocked); give them
-		// wall time to fail, then wait for the bubble to quiesce.
-		deadline := time.Now().Add(3 * time.Second)
-		var host *Pool
-		for {
-			synctest.Wait()
-			healthy, unhealthy := rm.Stats()
-			if healthy == 0 && unhealthy == 1 {
-				host = onlyUnhealthyHost(t, rm)
-				break
-			}
-			if !time.Now().Before(deadline) {
-				t.Fatal("host did not remain unhealthy after failed connect")
-			}
-			time.Sleep(10 * time.Millisecond)
+		synctest.Wait()
+
+		if healthy, unhealthy := rm.Stats(); healthy != 0 || unhealthy != 1 {
+			t.Fatalf("Stats() after failed connect = (%d, %d), want (0, 1)", healthy, unhealthy)
 		}
-		if host.GetState() == HostStateClosed {
-			t.Fatal("host closed while tracked as unhealthy")
+		host := onlyUnhealthyHost(t, rm)
+		if host.GetState() != HostStateError {
+			t.Fatalf("state = %s, want %s", host.GetState(), HostStateError)
 		}
 
 		rm.Close()
