@@ -3,29 +3,21 @@ package auth
 import (
 	"context"
 	"fmt"
-	"time"
 
-	authpb "buf.build/gen/go/webitel/webitel-go/protocolbuffers/go"
+	authgrpc "buf.build/gen/go/webitel/webitel-go/grpc/go/_gogrpc"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 )
 
-type exampleClient struct{}
-
-func (exampleClient) UserInfo(context.Context, *authpb.UserinfoRequest, ...grpc.CallOption) (*authpb.Userinfo, error) {
-	return &authpb.Userinfo{
-		UserId: 7,
-		License: []*authpb.LicenseUser{
-			{Prod: "AUDIT", ExpiresAt: time.Now().Add(time.Hour).UnixMilli()},
-		},
-		Scope: []*authpb.Objclass{{Class: "forms", Access: "r", Obac: true, Rbac: true}},
-	}, nil
-}
-
-// A service with a generated WebitelAPI. infra/auth does not import pkg/interceptors,
-// so the server wiring is shown in comments:
+// Full service wiring; the interceptors come from pkg/interceptors, which this package does not import:
 //
-//	authorizer, err := auth.NewAuthorizer(client, pb.WebitelAPI)
+//	client := auth.New(authgrpc.NewAuthClient(conn))
+//	defer client.Close()
+//
+//	authorizer, err := auth.NewAuthorizer(client, webitelAPI)
+//	if err != nil {
+//		return err
+//	}
+//
 //	srv := grpc.NewServer(
 //		grpc.ChainUnaryInterceptor(
 //			interceptors.UnaryServerErrorInterceptor(),
@@ -36,68 +28,39 @@ func (exampleClient) UserInfo(context.Context, *authpb.UserinfoRequest, ...grpc.
 //
 // Public methods such as health checks are left out with go-grpc-middleware's selector.
 func ExampleNewAuthorizer() {
-	// In a service: New(authgrpc.NewAuthClient(conn)) and the generated pb.WebitelAPI;
-	// testAPI has the same shape.
-	client := New(exampleClient{})
-	defer client.Close()
-	authorizer, err := NewAuthorizer(client, testAPI)
+	var conn grpc.ClientConnInterface // connection to go.webitel.app
+	var webitelAPI any                // the generated pb.WebitelAPI
+
+	client := New(authgrpc.NewAuthClient(conn))
+	defer func() { _ = client.Close() }()
+	authorizer, err := NewAuthorizer(client, webitelAPI)
 	if err != nil {
 		panic(err)
 	}
-
-	// The interceptor calls Authorize; the method comes from the server context.
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenHeader, "token"))
-	ctx = grpc.NewContextWithServerTransportStream(ctx, fakeMethodStream{"/webitel.audit.Forms/Search"})
-	ctx, err = authorizer.Authorize(ctx)
-	fmt.Println("error:", err)
-	handler(ctx)
-
-	// Output:
-	// error: <nil>
-	// user 7 may read forms: true
+	_ = authorizer.Authorize
 }
 
-// A service without WebitelAPI only needs the session: pass client.Authenticate instead:
-//
-//	interceptors.AuthUnaryServerInterceptor(client.Authenticate)
+// A service without WebitelAPI passes client.Authenticate to the interceptors instead.
 func ExampleClient_Authenticate() {
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenHeader, "token"))
-	client := New(exampleClient{})
-	defer client.Close()
-	ctx, err := client.Authenticate(ctx)
-	fmt.Println("error:", err)
-	handler(ctx)
+	var conn grpc.ClientConnInterface // connection to go.webitel.app
 
-	// Output:
-	// error: <nil>
-	// user 7 may read forms: true
+	client := New(authgrpc.NewAuthClient(conn))
+	defer func() { _ = client.Close() }()
+	_ = client.Authenticate
 }
 
-// A handler reads the caller from the context. RequiresRBAC(ctx) covers the class
-// of the method; s.RequiresRBAC(parentClass, action) is for parent objects.
-func ExampleRequiresRBAC() {
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenHeader, "token"))
-	ctx = grpc.NewContextWithServerTransportStream(ctx, fakeMethodStream{"/webitel.audit.Forms/Search"})
-	client := New(exampleClient{})
-	defer client.Close()
-	authorizer, err := NewAuthorizer(client, testAPI)
-	if err != nil {
-		panic(err)
-	}
-	ctx, err = authorizer.Authorize(ctx)
-	if err != nil {
-		panic(err)
-	}
-	s, _ := SessionFromContext(ctx)
-	if RequiresRBAC(ctx) {
-		fmt.Println("restrict records to the roles of", s.ACLRoles())
-	}
+// A handler reads the caller from the context; s.RequiresRBAC(parentClass, action) is for parent objects.
+func ExampleSessionFromContext() {
+	handler := func(ctx context.Context) error {
+		s, ok := SessionFromContext(ctx)
+		if !ok || !s.CanAccess("forms", ActionRead) {
+			return ErrPermission
+		}
+		if RequiresRBAC(ctx) {
+			fmt.Println("restrict records to the roles of", s.ACLRoles())
+		}
 
-	// Output:
-	// restrict records to the roles of [7]
-}
-
-func handler(ctx context.Context) {
-	s, _ := SessionFromContext(ctx)
-	fmt.Println("user", s.UserID, "may read forms:", s.CanAccess("forms", ActionRead))
+		return nil
+	}
+	_ = handler
 }

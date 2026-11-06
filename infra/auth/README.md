@@ -17,6 +17,8 @@ import authgrpc "buf.build/gen/go/webitel/webitel-go/grpc/go/_gogrpc"
 client := auth.New(authgrpc.NewAuthClient(conn)) // conn: gRPC connection to go.webitel.app
 defer client.Close()
 
+client, err := auth.Dial(ctx, discovery)
+
 authorizer, err := auth.NewAuthorizer(client, auditpb.WebitelAPI)
 if err != nil {
     return err
@@ -33,7 +35,8 @@ srv := grpc.NewServer(
 
 Public methods (health checks) and reflection are the service's choice: leave them out
 with the `selector` of go-grpc-middleware. A method without an `access` option
-in the proto needs the create permission.
+in the proto needs the create permission. Health is closed by default: leave `Health/Check`
+out of the unary interceptor and `Health/Watch` out of the stream one.
 
 In a handler:
 

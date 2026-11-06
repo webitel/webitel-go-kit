@@ -12,13 +12,22 @@ package auth
 
 import (
 	"context"
+	"crypto/tls"
+	stderrors "errors"
+	"fmt"
+	"sync"
 	"time"
 
+	authgrpc "buf.build/gen/go/webitel/webitel-go/grpc/go/_gogrpc"
 	authpb "buf.build/gen/go/webitel/webitel-go/protocolbuffers/go"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/webitel/webitel-go-kit/infra/discovery"
+	resolver "github.com/webitel/webitel-go-kit/infra/transport/gRPC/resolver/discovery"
 	"github.com/webitel/webitel-go-kit/pkg/cache"
 	"github.com/webitel/webitel-go-kit/pkg/errors"
 )
@@ -31,6 +40,8 @@ const (
 	DefaultCacheTTL    = 10 * time.Second
 	DefaultCacheSize   = 10_000
 	DefaultCallTimeout = 5 * time.Second
+	// DefaultService is how go.webitel.app registers itself in service discovery.
+	DefaultService = "go.webitel.app"
 )
 
 // UserInfoClient is the part of the generated AuthClient the Client needs.
@@ -45,29 +56,69 @@ type Client struct {
 	opts   options
 	// nil when the cache is disabled.
 	cache cache.Cache[string, *Session]
+	// Set by Dial only; New never closes the caller's connection.
+	conn *grpc.ClientConn
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // New returns a Client that resolves sessions through Auth.UserInfo.
 func New(c UserInfoClient, opts ...Option) *Client {
-	a := &Client{
-		client: c,
-		opts:   options{cacheTTL: DefaultCacheTTL, cacheSize: DefaultCacheSize, callTimeout: DefaultCallTimeout},
+	o := defaultOptions()
+	for _, f := range opts {
+		f(&o)
 	}
-	for _, o := range opts {
-		o(&a.opts)
-	}
-	a.cache = a.newCache()
 
-	return a
+	return build(c, o)
 }
 
-// Close releases the cache; the Client must not be used afterwards.
-func (a *Client) Close() error {
-	if a.cache == nil {
-		return nil
+func Dial(_ context.Context, d discovery.Discovery, opts ...DialOption) (*Client, error) {
+	o := defaultOptions()
+	for _, f := range opts {
+		f.apply(&o)
+	}
+	if d == nil {
+		return nil, fmt.Errorf("auth: dial %s: nil discovery", o.service)
 	}
 
-	return a.cache.Close()
+	creds := insecure.NewCredentials()
+	if o.tls != nil {
+		creds = credentials.NewTLS(o.tls)
+	}
+
+	// WithInsecure only picks the plain "grpc" endpoint scheme, the only one go.webitel.app registers; TLS comes from creds.
+	conn, err := grpc.NewClient("discovery:///"+o.service, append([]grpc.DialOption{
+		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
+		grpc.WithTransportCredentials(creds),
+		grpc.WithResolvers(resolver.NewBuilder(d, resolver.WithInsecure(true), resolver.PrintDebugLog(false))),
+	}, o.dialOpts...)...)
+	if err != nil {
+		return nil, fmt.Errorf("auth: dial %s: %w", o.service, err)
+	}
+
+	c := build(authgrpc.NewAuthClient(conn), o)
+	c.conn = conn
+
+	return c, nil
+}
+
+// Close releases the connection made by Dial and the cache; it is safe to call more than once.
+// The Client must not be used afterwards.
+func (a *Client) Close() error {
+	a.closeOnce.Do(func() {
+		// The connection goes first so that loads still in flight fail instead of feeding a closing cache.
+		var errs []error
+		if a.conn != nil {
+			errs = append(errs, a.conn.Close())
+		}
+		if a.cache != nil {
+			errs = append(errs, a.cache.Close())
+		}
+		a.closeErr = stderrors.Join(errs...)
+	})
+
+	return a.closeErr
 }
 
 // Session returns the session of the token, from the cache when possible.
@@ -126,10 +177,24 @@ type options struct {
 	cacheTTL    time.Duration
 	cacheSize   int
 	callTimeout time.Duration
+
+	// Used by Dial only.
+	service  string
+	tls      *tls.Config
+	dialOpts []grpc.DialOption
 }
 
-// Option configures New.
+// Option configures New and Dial.
 type Option func(*options)
+
+func (f Option) apply(o *options) { f(o) }
+
+// DialOption configures Dial: any Option, WithService, WithTLS or WithDialOptions.
+type DialOption interface{ apply(*options) }
+
+type dialOnly func(*options)
+
+func (f dialOnly) apply(o *options) { f(o) }
 
 // WithCacheTTL sets how long a session is reused; a revoked token stays
 // effective that long. A non-positive value disables the cache.
@@ -151,4 +216,31 @@ func WithCallTimeout(d time.Duration) Option {
 			o.callTimeout = d
 		}
 	}
+}
+
+// WithService sets the discovery name of the auth service; Dial only.
+func WithService(name string) DialOption {
+	return dialOnly(func(o *options) {
+		if name != "" {
+			o.service = name
+		}
+	})
+}
+
+// WithTLS secures the connection of Dial; nil connects without TLS.
+func WithTLS(cfg *tls.Config) DialOption { return dialOnly(func(o *options) { o.tls = cfg }) }
+
+func WithDialOptions(opts ...grpc.DialOption) DialOption {
+	return dialOnly(func(o *options) { o.dialOpts = append(o.dialOpts, opts...) })
+}
+
+func defaultOptions() options {
+	return options{cacheTTL: DefaultCacheTTL, cacheSize: DefaultCacheSize, callTimeout: DefaultCallTimeout, service: DefaultService}
+}
+
+func build(c UserInfoClient, o options) *Client {
+	a := &Client{client: c, opts: o}
+	a.cache = a.newCache()
+
+	return a
 }
