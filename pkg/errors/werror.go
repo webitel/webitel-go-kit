@@ -208,19 +208,36 @@ func Lookup(err error, key interface{}) (interface{}, bool) {
 	}
 }
 
-// Values returns a map of all values attached to the error
-// If a key has been attached multiple times, the map will
-// contain the last value mapped.
+// Values returns a map of all values attached to the error and its causes.
+// A key attached more than once keeps its outermost value, the one Lookup
+// returns; the values of a cause only fill in keys the error does not have.
 func Values(err error) map[interface{}]interface{} {
 	values := map[any]any{}
-	for err != nil {
-		if e, ok := err.(*errWithValue); ok {
-			if _, ok := values[e.key]; !ok {
-				values[e.key] = e.value
+
+	var causes []error
+
+	for next := err; next != nil; {
+		switch t := next.(type) {
+		case *errWithValue:
+			if _, ok := values[t.key]; !ok {
+				values[t.key] = t.value
+			}
+
+			next = t.err
+		case *errWithCause:
+			causes = append(causes, t.cause)
+			next = t.err
+		default:
+			next = errors.Unwrap(next)
+		}
+	}
+
+	for _, cause := range causes {
+		for k, v := range Values(cause) {
+			if _, ok := values[k]; !ok {
+				values[k] = v
 			}
 		}
-
-		err = errors.Unwrap(err)
 	}
 
 	return values
