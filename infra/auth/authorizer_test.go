@@ -100,6 +100,71 @@ func TestAuthorize(t *testing.T) {
 	}
 }
 
+func TestRequiresRBACFromContext(t *testing.T) {
+	info := func(rbac bool, perms ...string) *authpb.Userinfo {
+		i := testInfo()
+		i.Permissions = nil
+		for _, p := range perms {
+			i.Permissions = append(i.Permissions, &authpb.Permission{Id: p})
+		}
+		i.Scope = []*authpb.Objclass{{Class: "forms", Access: "rwxd", Obac: true, Rbac: rbac}}
+
+		return i
+	}
+	tests := []struct {
+		name, method string
+		resp         *authpb.Userinfo
+		want         bool
+	}{
+		{"rbac on", "Search", info(true), true},
+		{"rbac off", "Search", info(false), false},
+		{"super read", "Search", info(true, "read"), false},
+		{"super write", "Update", info(true, "write"), false},
+		{"super add", "Create", info(true, "add"), false},
+		{"super delete", "Delete", info(true, "delete"), false},
+		{"other super keeps rbac", "Search", info(true, "write"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newTestAuthorizer(t, &fakeClient{resp: tt.resp}, testAPI)
+
+			ctx, err := a.Authorize(serverCtx(withIncomingToken("tok"), "/webitel.audit.Forms/"+tt.method))
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, RequiresRBAC(ctx))
+		})
+	}
+}
+
+func TestRequiresRBACFailsSafe(t *testing.T) {
+	// Authenticate stores no rule; the session alone is not enough to answer.
+	ctx, err := New(&fakeClient{resp: testInfo()}).Authenticate(withIncomingToken("tok"))
+	require.NoError(t, err)
+	_, ok := SessionFromContext(ctx)
+	require.True(t, ok)
+	assert.True(t, RequiresRBAC(ctx), "session without rule")
+
+	assert.True(t, RequiresRBAC(context.Background()), "bare context")
+	assert.True(t, RequiresRBAC(contextWithRule(context.Background(), rule{class: "forms"})), "rule without session")
+}
+
+func TestAuthorizeKeepsCachedSession(t *testing.T) {
+	c := New(&fakeClient{resp: testInfo()})
+	a, err := NewAuthorizer(c, testAPI)
+	require.NoError(t, err)
+
+	cached, err := c.Session(context.Background(), "tok")
+	require.NoError(t, err)
+	before := *cached
+
+	ctx, err := a.Authorize(serverCtx(withIncomingToken("tok"), "/webitel.audit.Forms/Search"))
+	require.NoError(t, err)
+
+	s, _ := SessionFromContext(ctx)
+	assert.Same(t, cached, s)
+	assert.Equal(t, before, *cached)
+}
+
 func TestAuthorizeOutsideServer(t *testing.T) {
 	f := &fakeClient{resp: testInfo()}
 
@@ -173,6 +238,7 @@ func TestAuthorizeInRealServer(t *testing.T) {
 	a := newTestAuthorizer(t, &fakeClient{resp: testInfo()}, testAPI)
 
 	var seen *Session
+	var seenRBAC bool
 	desc := grpc.ServiceDesc{
 		ServiceName: "webitel.audit.Forms",
 		HandlerType: (*any)(nil),
@@ -185,6 +251,7 @@ func TestAuthorizeInRealServer(t *testing.T) {
 				}
 				h := func(ctx context.Context, _ any) (any, error) {
 					seen, _ = SessionFromContext(ctx)
+					seenRBAC = RequiresRBAC(ctx)
 
 					return new(emptypb.Empty), nil
 				}
@@ -227,4 +294,5 @@ func TestAuthorizeInRealServer(t *testing.T) {
 	require.NoError(t, invoke(metadata.AppendToOutgoingContext(context.Background(), TokenHeader, "tok")))
 	require.NotNil(t, seen)
 	assert.EqualValues(t, 7, seen.UserID)
+	assert.False(t, seenRBAC, "testInfo has the super read permission")
 }

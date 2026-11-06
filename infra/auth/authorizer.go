@@ -31,7 +31,7 @@ func NewAuthorizer(c *Client, webitelAPI any) (*Authorizer, error) {
 }
 
 // Authorize has the shape of go-grpc-middleware's AuthFunc: the session of the
-// incoming token goes into the returned context if the licenses and obac of the method allow it.
+// incoming token goes into the returned context, with the rule of the method, if the licenses and obac of the method allow it.
 func (a *Authorizer) Authorize(ctx context.Context) (context.Context, error) {
 	method, ok := grpc.Method(ctx)
 	if !ok {
@@ -64,5 +64,5 @@ func (a *Authorizer) Authorize(ctx context.Context) (context.Context, error) {
 		return nil, errors.Wrap(ErrPermission, errors.WithValue(ValueClass, r.class))
 	}
 
-	return ctx, nil
+	return contextWithRule(ctx, r), nil
 }

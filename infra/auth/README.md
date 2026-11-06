@@ -65,13 +65,21 @@ if !ok {
     // only on methods the interceptor skipped
     return nil, errors.Unauthenticated("no session")
 }
-if s.RequiresRBAC("forms", auth.ActionRead) {
+if auth.RequiresRBAC(ctx) {
     // restrict records to those reachable by s.ACLRoles()
+}
+if s.RequiresRBAC("parents", auth.ActionRead) {
+    // the same for a parent object, whose class is named explicitly
 }
 ```
 
 Record-based access control (rbac) is not applied here; that is the handler's
-job through `Session.RequiresRBAC` and `Session.ACLRoles`.
+job. `auth.RequiresRBAC(ctx)` answers for the class and action of the current
+method, which `Authorize` puts in the context next to the session, so no class
+string is repeated. Without a session and a rule in the context (a service that
+only uses `Client.Authenticate`, or a call outside the interceptor) it returns
+`true`: restrict, never skip silently. For parent objects use
+`Session.RequiresRBAC(class, action)`; then `Session.ACLRoles` gives the roles.
 In tests build the handler context with `auth.ContextWithSession`.
 
 A stream is authorized once, when it opens. A token that is revoked or expires

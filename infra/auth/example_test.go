@@ -18,7 +18,7 @@ func (exampleClient) UserInfo(context.Context, *authpb.UserinfoRequest, ...grpc.
 		License: []*authpb.LicenseUser{
 			{Prod: "AUDIT", ExpiresAt: time.Now().Add(time.Hour).UnixMilli()},
 		},
-		Scope: []*authpb.Objclass{{Class: "forms", Access: "r", Obac: true}},
+		Scope: []*authpb.Objclass{{Class: "forms", Access: "r", Obac: true, Rbac: true}},
 	}, nil
 }
 
@@ -70,14 +70,21 @@ func ExampleClient_Authenticate() {
 	// user 7 may read forms: true
 }
 
-// A handler reads the caller from the context.
-func ExampleSessionFromContext() {
-	ctx := ContextWithSession(context.Background(), &Session{UserID: 7, Scopes: map[string]Scope{"forms": {Class: "forms", OBAC: true, RBAC: true, Access: "r"}}})
-	s, ok := SessionFromContext(ctx)
-	if !ok {
-		return
+// A handler reads the caller from the context. RequiresRBAC(ctx) covers the class
+// of the method; s.RequiresRBAC(parentClass, action) is for parent objects.
+func ExampleRequiresRBAC() {
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TokenHeader, "token"))
+	ctx = grpc.NewContextWithServerTransportStream(ctx, fakeMethodStream{"/webitel.audit.Forms/Search"})
+	authorizer, err := NewAuthorizer(New(exampleClient{}), testAPI)
+	if err != nil {
+		panic(err)
 	}
-	if s.CanAccess("forms", ActionRead) && s.RequiresRBAC("forms", ActionRead) {
+	ctx, err = authorizer.Authorize(ctx)
+	if err != nil {
+		panic(err)
+	}
+	s, _ := SessionFromContext(ctx)
+	if RequiresRBAC(ctx) {
 		fmt.Println("restrict records to the roles of", s.ACLRoles())
 	}
 
