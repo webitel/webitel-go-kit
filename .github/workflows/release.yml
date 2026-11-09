@@ -37,7 +37,6 @@ on:
         type: choice
         options:
           - appconfig
-          - infra/auth
           - infra/discovery
           - infra/discovery/fx
           - infra/errors
@@ -55,6 +54,7 @@ on:
           - infra/ratelimit/mux
           - infra/sqldb
           - infra/transport
+          - infra/webitel/auth
           - pkg/cache
           - pkg/errors
           - pkg/etag
