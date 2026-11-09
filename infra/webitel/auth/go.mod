@@ -1,4 +1,4 @@
-module github.com/webitel/webitel-go-kit/infra/auth
+module github.com/webitel/webitel-go-kit/infra/webitel/auth
 
 go 1.25.5
 
