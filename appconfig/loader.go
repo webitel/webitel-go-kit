@@ -3,27 +3,77 @@ package appconfig
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"github.com/webitel/webitel-go-kit/appconfig/secret"
 )
 
 // Loader wires pflag → viper → struct unmarshalling for a specific set of
 // config sections. Each CLI command constructs its own Loader so that only
 // the flags relevant to that command are registered.
 type Loader struct {
-	v        *viper.Viper
-	sections Sections
+	v           *viper.Viper
+	sections    Sections
+	secrets     []string
+	secretPaths []string
 }
 
-// NewLoader creates a Loader for the given sections.
+// NewLoader creates a Loader for the given sections. The secret keys of the
+// enabled sections (postgres.dsn, redis.password, pubsub.url) are marked
+// automatically; see MarkSecret.
 func NewLoader(s Sections) *Loader {
 	v := viper.New()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
-	return &Loader{v: v, sections: s}
+
+	l := &Loader{v: v, sections: s}
+	if s.Postgres {
+		l.MarkSecret("postgres.dsn")
+	}
+	if s.Redis {
+		l.MarkSecret("redis.password")
+	}
+	if s.Pubsub {
+		l.MarkSecret("pubsub.url")
+	}
+	return l
+}
+
+// MarkSecret declares config keys whose values are secrets. On Load, besides
+// a literal, each of them accepts:
+//
+//	cred:<name>                     systemd credential $CREDENTIALS_DIRECTORY/<name>
+//	file:<path>                     contents of a file
+//	<ENV>_FILE=<path>               e.g. SERVICE_SECRET_KEY_FILE (when the key is unset)
+//	credential named <key>          e.g. service.secret_key (when the key is unset)
+//
+// A flag or SetDefault default counts as unset, so a default never conflicts
+// with a credential. Keys are case-insensitive, as in viper; the conventional
+// credential name is the lower-case key. See package secret for the exact
+// rules. Call before Load.
+func (l *Loader) MarkSecret(keys ...string) *Loader {
+	l.secrets = appendKeys(l.secrets, keys)
+	return l
+}
+
+// MarkSecretPath declares config keys that hold the path of a secret file,
+// such as a TLS private key. They accept the same sources as MarkSecret, but
+// resolve to the file's path instead of its contents, so cred:service.key
+// becomes $CREDENTIALS_DIRECTORY/service.key. Call before Load.
+func (l *Loader) MarkSecretPath(keys ...string) *Loader {
+	l.secretPaths = appendKeys(l.secretPaths, keys)
+	return l
+}
+
+func appendKeys(dst, keys []string) []string {
+	for _, key := range keys {
+		dst = append(dst, strings.ToLower(key))
+	}
+	return dst
 }
 
 // RegisterFlags registers a --config_file flag plus the flags for every
@@ -93,11 +143,57 @@ func (l *Loader) Load(fs *pflag.FlagSet, target any) error {
 		}
 	}
 
+	if err := l.resolveSecrets(fs, secret.FromEnv()); err != nil {
+		return err
+	}
+
 	if err := l.v.Unmarshal(target); err != nil {
 		return fmt.Errorf("appconfig: unmarshal: %w", err)
 	}
 
 	return nil
+}
+
+// resolveSecrets replaces every secret key's reference with its resolved
+// value. The result is stored as a viper override, so it survives config
+// file reloads: secrets are resolved once per process, as systemd
+// credentials are fixed for the lifetime of the unit anyway.
+func (l *Loader) resolveSecrets(fs *pflag.FlagSet, r *secret.Resolver) error {
+	resolve := func(keys []string, fn func(key, v string) (string, error)) error {
+		for _, key := range keys {
+			v := l.v.GetString(key)
+			in := v
+			if !secret.IsRef(v) && !l.isExplicit(fs, key) {
+				// A default literal is a fallback, not a value to
+				// conflict with: let a credential or _FILE replace it.
+				in = ""
+			}
+			out, err := fn(key, in)
+			if err != nil {
+				return fmt.Errorf("appconfig: %w", err)
+			}
+			if out != "" && out != v {
+				l.v.Set(key, out)
+			}
+		}
+		return nil
+	}
+	if err := resolve(l.secrets, r.Value); err != nil {
+		return err
+	}
+	return resolve(l.secretPaths, r.PathValue)
+}
+
+// isExplicit reports whether key was set by a flag, an env var or the config
+// file, as opposed to coming from a default.
+func (l *Loader) isExplicit(fs *pflag.FlagSet, key string) bool {
+	if f := fs.Lookup(key); f != nil && f.Changed {
+		return true
+	}
+	if env := os.Getenv(secret.EnvName(key)); env != "" {
+		return true
+	}
+	return l.v.InConfig(key)
 }
 
 // Watch registers fn to be called whenever the config file changes, then
