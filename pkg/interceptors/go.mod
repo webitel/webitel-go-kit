@@ -6,6 +6,7 @@ require (
 	github.com/webitel/webitel-go-kit/pkg/errors v0.2.0
 	go.opentelemetry.io/otel/trace v1.39.0
 	google.golang.org/grpc v1.80.0
+	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.3
 )
 
 require (

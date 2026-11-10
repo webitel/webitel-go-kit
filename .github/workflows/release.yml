@@ -54,6 +54,7 @@ on:
           - infra/ratelimit/mux
           - infra/sqldb
           - infra/transport
+          - infra/webitel/auth
           - pkg/cache
           - pkg/errors
           - pkg/etag
