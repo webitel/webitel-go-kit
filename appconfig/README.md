@@ -54,6 +54,7 @@ Marked automatically for the enabled sections — bumping this module is enough:
 | Section | Key | Credential name | `_FILE` env |
 |---|---|---|---|
 | `Postgres` | `postgres.dsn` | `postgres.dsn` | `POSTGRES_DSN_FILE` |
+| `Postgres` | `postgres.standby_dsn` | `postgres.standby_dsn` | `POSTGRES_STANDBY_DSN_FILE` |
 | `Redis` | `redis.password` | `redis.password` | `REDIS_PASSWORD_FILE` |
 | `Pubsub` | `pubsub.url` | `pubsub.url` | `PUBSUB_URL_FILE` |
 

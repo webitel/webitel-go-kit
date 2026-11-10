@@ -23,8 +23,8 @@ type Loader struct {
 }
 
 // NewLoader creates a Loader for the given sections. The secret keys of the
-// enabled sections (postgres.dsn, redis.password, pubsub.url) are marked
-// automatically; see MarkSecret.
+// enabled sections (postgres.dsn, postgres.standby_dsn, redis.password,
+// pubsub.url) are marked automatically; see MarkSecret.
 func NewLoader(s Sections) *Loader {
 	v := viper.New()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
@@ -32,7 +32,7 @@ func NewLoader(s Sections) *Loader {
 
 	l := &Loader{v: v, sections: s}
 	if s.Postgres {
-		l.MarkSecret("postgres.dsn")
+		l.MarkSecret("postgres.dsn", "postgres.standby_dsn")
 	}
 	if s.Redis {
 		l.MarkSecret("redis.password")
@@ -161,29 +161,94 @@ func (l *Loader) Load(fs *pflag.FlagSet, target any) error {
 // file reloads: secrets are resolved once per process, as systemd
 // credentials are fixed for the lifetime of the unit anyway.
 func (l *Loader) resolveSecrets(fs *pflag.FlagSet, r *secret.Resolver) error {
-	resolve := func(keys []string, fn func(key, v string) (string, error)) error {
-		for _, key := range keys {
-			v := l.v.GetString(key)
-			in := v
-			if !secret.IsRef(v) && !l.isExplicit(fs, key) {
-				// A default literal is a fallback, not a value to
-				// conflict with: let a credential or _FILE replace it.
-				in = ""
+	for _, key := range l.secrets {
+		if isStringSliceKey(fs, key) {
+			if err := l.resolveSecretSlice(fs, r, key); err != nil {
+				return err
 			}
-			out, err := fn(key, in)
-			if err != nil {
-				return fmt.Errorf("appconfig: %w", err)
-			}
-			if out != "" && out != v {
-				l.v.Set(key, out)
-			}
+			continue
+		}
+		if err := l.resolveSecretScalar(fs, r.Value, key); err != nil {
+			return err
+		}
+	}
+	for _, key := range l.secretPaths {
+		if err := l.resolveSecretScalar(fs, r.PathValue, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *Loader) resolveSecretScalar(fs *pflag.FlagSet, fn func(key, v string) (string, error), key string) error {
+	v := l.v.GetString(key)
+	in := v
+	if !secret.IsRef(v) && !l.isExplicit(fs, key) {
+		// A default literal is a fallback, not a value to
+		// conflict with: let a credential or _FILE replace it.
+		in = ""
+	}
+	out, err := fn(key, in)
+	if err != nil {
+		return fmt.Errorf("appconfig: %w", err)
+	}
+	if out != "" && out != v {
+		l.v.Set(key, out)
+	}
+	return nil
+}
+
+func (l *Loader) resolveSecretSlice(fs *pflag.FlagSet, r *secret.Resolver, key string) error {
+	vals := l.v.GetStringSlice(key)
+	explicit := l.isExplicit(fs, key)
+
+	if len(vals) == 0 || !explicit {
+		out, err := r.Value(key, "")
+		if err != nil {
+			return fmt.Errorf("appconfig: %w", err)
+		}
+		if out != "" {
+			l.v.Set(key, []string{out})
 		}
 		return nil
 	}
-	if err := resolve(l.secrets, r.Value); err != nil {
-		return err
+
+	resolved := make([]string, 0, len(vals))
+	changed := false
+	for _, elem := range vals {
+		elem = strings.TrimSpace(elem)
+		if elem == "" {
+			changed = true
+			continue
+		}
+		out, err := r.Value(key, elem)
+		if err != nil {
+			return fmt.Errorf("appconfig: %w", err)
+		}
+		if out != elem {
+			changed = true
+		}
+		if out == "" {
+			continue
+		}
+		resolved = append(resolved, out)
 	}
-	return resolve(l.secretPaths, r.PathValue)
+	if changed {
+		l.v.Set(key, resolved)
+	}
+	return nil
+}
+
+func isStringSliceKey(fs *pflag.FlagSet, key string) bool {
+	f := fs.Lookup(key)
+	if f == nil {
+		return false
+	}
+	switch f.Value.Type() {
+	case "stringSlice", "stringArray":
+		return true
+	}
+	return false
 }
 
 // isExplicit reports whether key was set by a flag, an env var or the config
@@ -223,10 +288,6 @@ func IsConfigError(err error) bool {
 	return errors.As(err, &e)
 }
 
-// flagDefault returns a viper default for f.
-// Empty StringSlice/StringArray DefValue is the string "[]"; using GetSlice
-// avoids unmarshalling that into []string{"[]"}. The slice is copied so viper
-// does not share the flag's backing array.
 func flagDefault(f *pflag.Flag) any {
 	switch f.Value.Type() {
 	case "stringSlice", "stringArray":
