@@ -66,3 +66,11 @@ func RegisterGRPCConnFlags(fs *pflag.FlagSet, prefix string, verifyDefault bool)
 	fs.String(prefix+".client.cert", "", "Client certificate path")
 	fs.String(prefix+".client.key", "", "Client certificate key path")
 }
+
+// GRPCConnSecretPaths returns the private-key keys registered by
+// RegisterGRPCConnFlags under prefix, for Loader.MarkSecretPath:
+//
+//	loader.MarkSecretPath(appconfig.GRPCConnSecretPaths("service.conn")...)
+func GRPCConnSecretPaths(prefix string) []string {
+	return []string{prefix + ".key", prefix + ".client.key"}
+}
