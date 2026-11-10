@@ -91,6 +91,7 @@ func (l *Loader) RegisterFlags(fs *pflag.FlagSet) {
 
 	if l.sections.Postgres {
 		fs.String("postgres.dsn", "", "PostgreSQL DSN (required)")
+		fs.StringSlice("postgres.standby_dsn", nil, "Optional PostgreSQL read-replica DSNs")
 		fs.Int("postgres.max_open_conns", 0, "Max open connections to the database (0 = unlimited)")
 		fs.Int("postgres.max_idle_conns", 0, "Max idle connections in the pool (0 = driver default)")
 		fs.Duration("postgres.conn_max_idle_time", 0, "Max time a connection may be idle (0 = no limit)")
@@ -127,9 +128,10 @@ func (l *Loader) Load(fs *pflag.FlagSet, target any) error {
 	// set. Viper only reads pflag values when the flag is Changed; for unchanged
 	// flags it falls through to env → config file → viper default.
 	fs.VisitAll(func(f *pflag.Flag) {
-		if !f.Changed {
-			l.v.SetDefault(f.Name, f.DefValue)
+		if f.Changed {
+			return
 		}
+		l.v.SetDefault(f.Name, flagDefault(f))
 	})
 
 	if err := l.v.BindPFlags(fs); err != nil {
@@ -219,4 +221,26 @@ func configError(msg string) error { return configErr(msg) }
 func IsConfigError(err error) bool {
 	var e configErr
 	return errors.As(err, &e)
+}
+
+// flagDefault returns a viper default for f.
+// Empty StringSlice/StringArray DefValue is the string "[]"; using GetSlice
+// avoids unmarshalling that into []string{"[]"}. The slice is copied so viper
+// does not share the flag's backing array.
+func flagDefault(f *pflag.Flag) any {
+	switch f.Value.Type() {
+	case "stringSlice", "stringArray":
+		sv, ok := f.Value.(pflag.SliceValue)
+		if !ok {
+			return f.DefValue
+		}
+		src := sv.GetSlice()
+		if src == nil {
+			return []string(nil)
+		}
+		out := make([]string, len(src))
+		copy(out, src)
+		return out
+	}
+	return f.DefValue
 }

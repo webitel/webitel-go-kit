@@ -12,6 +12,7 @@ Dots and hyphens in flag names are replaced with underscores for the env var equ
 |---|---|
 | `log.level` | `LOG_LEVEL` |
 | `postgres.dsn` | `POSTGRES_DSN` |
+| `postgres.standby_dsn` | `POSTGRES_STANDBY_DSN` (comma-separated) |
 | `postgres.max_open_conns` | `POSTGRES_MAX_OPEN_CONNS` |
 | `postgres.max_idle_conns` | `POSTGRES_MAX_IDLE_CONNS` |
 | `postgres.conn_max_idle_time` | `POSTGRES_CONN_MAX_IDLE_TIME` |
@@ -246,6 +247,8 @@ log:
 
 postgres:
   dsn: postgres://user:pass@localhost:5432/webitel?sslmode=disable
+  standby_dsn:
+    - postgres://replica1:5432/webitel?sslmode=disable
   max_open_conns: 25
   max_idle_conns: 5
   conn_max_idle_time: 10m
