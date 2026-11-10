@@ -2,7 +2,6 @@ package appconfig
 
 import (
 	"database/sql"
-	"strings"
 	"time"
 )
 
@@ -19,26 +18,6 @@ type Postgres struct {
 	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
 	ConnMaxIdleTime time.Duration `mapstructure:"conn_max_idle_time"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
-}
-
-// StandbyDSNs returns trimmed non-empty standby DSNs.
-func (p Postgres) StandbyDSNs() []string {
-	if len(p.StandbyDSN) == 0 {
-		return nil
-	}
-
-	out := make([]string, 0, len(p.StandbyDSN))
-	for _, dsn := range p.StandbyDSN {
-		s := strings.TrimSpace(dsn)
-		if s == "" {
-			continue
-		}
-		out = append(out, s)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 // ApplyToSQLDB applies non-zero pool settings to a *sql.DB.

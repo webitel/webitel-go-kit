@@ -194,6 +194,7 @@ postgres:
   standby_dsn:
     - postgres://y1/db
     - "  postgres://y2/db  "
+    - "   "
   max_open_conns: 5
   max_idle_conns: 2
   conn_max_idle_time: 10m
@@ -239,13 +240,9 @@ profiler:
 	if cfg.Postgres.DSN != "postgres://yaml:pass@localhost/db" {
 		t.Errorf("postgres.dsn: got %q", cfg.Postgres.DSN)
 	}
-	wantStandby := []string{"postgres://y1/db", "  postgres://y2/db  "}
+	wantStandby := []string{"postgres://y1/db", "postgres://y2/db"}
 	if !slices.Equal(cfg.Postgres.StandbyDSN, wantStandby) {
 		t.Errorf("postgres.standby_dsn: got %#v, want %#v", cfg.Postgres.StandbyDSN, wantStandby)
-	}
-	wantTrimmed := []string{"postgres://y1/db", "postgres://y2/db"}
-	if got := cfg.Postgres.StandbyDSNs(); !slices.Equal(got, wantTrimmed) {
-		t.Errorf("StandbyDSNs() = %#v, want %#v", got, wantTrimmed)
 	}
 	if cfg.Postgres.MaxOpenConns != 5 {
 		t.Errorf("postgres.max_open_conns: want 5, got %d", cfg.Postgres.MaxOpenConns)
@@ -394,33 +391,7 @@ func TestSectionsIsolation(t *testing.T) {
 	}
 }
 
-// ── StandbyDSN / StringSlice defaults ─────────────────────────────────────────
-
-func TestStandbyDSNs(t *testing.T) {
-	tests := []struct {
-		name string
-		in   []string
-		want []string
-	}{
-		{name: "nil"},
-		{name: "empty slice", in: []string{}},
-		{name: "blank only", in: []string{"", "  "}},
-		{
-			name: "trims and drops blanks",
-			in:   []string{" postgres://r1/db ", "", "postgres://r2/db"},
-			want: []string{"postgres://r1/db", "postgres://r2/db"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := appconfig.Postgres{StandbyDSN: tt.in}.StandbyDSNs()
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("StandbyDSNs() = %#v, want %#v", got, tt.want)
-			}
-		})
-	}
-}
+// ── StringSlice defaults ─────────────────────────────────────────────────────
 
 func TestStringSliceDefaultIsEmpty(t *testing.T) {
 	_ = os.Unsetenv("POSTGRES_STANDBY_DSN")
@@ -439,9 +410,6 @@ func TestStringSliceDefaultIsEmpty(t *testing.T) {
 
 	if got := cfg.Postgres.StandbyDSN; len(got) != 0 {
 		t.Errorf("postgres.standby_dsn unset = %#v, want empty/nil", got)
-	}
-	if got := cfg.Postgres.StandbyDSNs(); got != nil {
-		t.Errorf("StandbyDSNs() = %#v, want nil", got)
 	}
 }
 

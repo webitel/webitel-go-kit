@@ -200,6 +200,9 @@ func (l *Loader) resolveSecretScalar(fs *pflag.FlagSet, fn func(key, v string) (
 
 func (l *Loader) resolveSecretSlice(fs *pflag.FlagSet, r *secret.Resolver, key string) error {
 	vals := l.v.GetStringSlice(key)
+	if s, ok := l.v.Get(key).(string); ok {
+		vals = splitComma(s)
+	}
 	explicit := l.isExplicit(fs, key)
 
 	if len(vals) == 0 || !explicit {
@@ -215,8 +218,8 @@ func (l *Loader) resolveSecretSlice(fs *pflag.FlagSet, r *secret.Resolver, key s
 
 	resolved := make([]string, 0, len(vals))
 	changed := false
-	for _, elem := range vals {
-		elem = strings.TrimSpace(elem)
+	for _, raw := range vals {
+		elem := strings.TrimSpace(raw)
 		if elem == "" {
 			changed = true
 			continue
@@ -225,11 +228,12 @@ func (l *Loader) resolveSecretSlice(fs *pflag.FlagSet, r *secret.Resolver, key s
 		if err != nil {
 			return fmt.Errorf("appconfig: %w", err)
 		}
-		if out != elem {
-			changed = true
-		}
 		if out == "" {
+			changed = true
 			continue
+		}
+		if out != raw {
+			changed = true
 		}
 		resolved = append(resolved, out)
 	}
@@ -239,16 +243,20 @@ func (l *Loader) resolveSecretSlice(fs *pflag.FlagSet, r *secret.Resolver, key s
 	return nil
 }
 
+func splitComma(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, ",")
+}
+
 func isStringSliceKey(fs *pflag.FlagSet, key string) bool {
 	f := fs.Lookup(key)
 	if f == nil {
 		return false
 	}
-	switch f.Value.Type() {
-	case "stringSlice", "stringArray":
-		return true
-	}
-	return false
+	_, ok := f.Value.(pflag.SliceValue)
+	return ok
 }
 
 // isExplicit reports whether key was set by a flag, an env var or the config
@@ -289,19 +297,9 @@ func IsConfigError(err error) bool {
 }
 
 func flagDefault(f *pflag.Flag) any {
-	switch f.Value.Type() {
-	case "stringSlice", "stringArray":
-		sv, ok := f.Value.(pflag.SliceValue)
-		if !ok {
-			return f.DefValue
-		}
-		src := sv.GetSlice()
-		if src == nil {
-			return []string(nil)
-		}
-		out := make([]string, len(src))
-		copy(out, src)
-		return out
+	sv, ok := f.Value.(pflag.SliceValue)
+	if !ok {
+		return f.DefValue
 	}
-	return f.DefValue
+	return sv.GetSlice()
 }

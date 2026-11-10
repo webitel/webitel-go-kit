@@ -329,6 +329,70 @@ func TestStandbyDSNSecretFromCredential(t *testing.T) {
 	}
 }
 
+func TestStandbyDSNSecretReferencesInEnv(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+	}{
+		{name: "comma", env: "cred:r1.dsn,cred:r2.dsn"},
+		{name: "comma and space", env: "cred:r1.dsn, cred:r2.dsn"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearSecretEnv(t)
+			credentialsDir(t, map[string]string{
+				"r1.dsn": "postgres://r1.example.com/test",
+				"r2.dsn": "postgres://r2.example.com/test",
+			})
+			t.Setenv("POSTGRES_STANDBY_DSN", tt.env)
+
+			_, cfg, err := loadSecrets(t)
+			if err != nil {
+				t.Fatalf("Load(%q) error = %v", tt.env, err)
+			}
+
+			want := []string{"postgres://r1.example.com/test", "postgres://r2.example.com/test"}
+			if !slices.Equal(cfg.Postgres.StandbyDSN, want) {
+				t.Errorf("Load(%q) = %#v, want %#v", tt.env, cfg.Postgres.StandbyDSN, want)
+			}
+		})
+	}
+}
+
+func TestCleanStandbyDSNReloadsFromFile(t *testing.T) {
+	clearSecretEnv(t)
+	cfgFile := filepath.Join(t.TempDir(), "config.yml")
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(cfgFile, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("postgres:\n  standby_dsn:\n    - postgres://r1.example.com/test\n")
+
+	loader, cfg, err := loadSecrets(t, "--config_file="+cfgFile)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	wantFirst := []string{"postgres://r1.example.com/test"}
+	if !slices.Equal(cfg.Postgres.StandbyDSN, wantFirst) {
+		t.Fatalf("Load = %#v, want %#v", cfg.Postgres.StandbyDSN, wantFirst)
+	}
+
+	write("postgres:\n  standby_dsn:\n    - postgres://r2.example.com/test\n")
+	if err := loader.Viper().ReadInConfig(); err != nil {
+		t.Fatalf("ReadInConfig: %v", err)
+	}
+	var reloaded secretsConfig
+	if err := loader.Viper().Unmarshal(&reloaded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	wantReload := []string{"postgres://r2.example.com/test"}
+	if !slices.Equal(reloaded.Postgres.StandbyDSN, wantReload) {
+		t.Errorf("reload = %#v, want %#v", reloaded.Postgres.StandbyDSN, wantReload)
+	}
+}
+
 func TestStandbyDSNSecretReferencesInConfigFile(t *testing.T) {
 	clearSecretEnv(t)
 	credentialsDir(t, map[string]string{
