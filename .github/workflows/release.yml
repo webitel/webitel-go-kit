@@ -59,6 +59,7 @@ on:
           - pkg/errors
           - pkg/etag
           - pkg/filters
+          - pkg/hostaddr
           - pkg/interceptors
           - pkg/logging
           - pkg/safemap
