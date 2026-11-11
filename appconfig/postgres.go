@@ -7,10 +7,11 @@ import (
 
 // Postgres holds PostgreSQL connection and connection-pool configuration.
 //
-// Env vars: POSTGRES_DSN, POSTGRES_MAX_OPEN_CONNS, POSTGRES_MAX_IDLE_CONNS,
-// POSTGRES_CONN_MAX_IDLE_TIME, POSTGRES_CONN_MAX_LIFETIME.
+// Env vars: POSTGRES_DSN, POSTGRES_STANDBY_DSN, POSTGRES_MAX_OPEN_CONNS,
+// POSTGRES_MAX_IDLE_CONNS, POSTGRES_CONN_MAX_IDLE_TIME, POSTGRES_CONN_MAX_LIFETIME.
 type Postgres struct {
-	DSN string `mapstructure:"dsn"`
+	DSN        string   `mapstructure:"dsn"`
+	StandbyDSN []string `mapstructure:"standby_dsn"`
 
 	// Connection pool — zero values mean "use driver default".
 	MaxOpenConns    int           `mapstructure:"max_open_conns"`

@@ -2,6 +2,7 @@ package appconfig_test
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,9 @@ func TestDefaults(t *testing.T) {
 	// nested "consul.addr" key.
 	for _, env := range []string{
 		"LOG_LEVEL", "LOG_JSON", "LOG_OTEL", "LOG_FILE", "LOG_CONSOLE",
+		"POSTGRES_DSN", "POSTGRES_STANDBY_DSN",
+		"POSTGRES_MAX_OPEN_CONNS", "POSTGRES_MAX_IDLE_CONNS",
+		"POSTGRES_CONN_MAX_IDLE_TIME", "POSTGRES_CONN_MAX_LIFETIME",
 		"REDIS_ADDR", "REDIS_PASSWORD", "REDIS_DB",
 		"CONSUL", "CONSUL_ADDR",
 		"PUBSUB_URL", "PUBSUB_DRIVER",
@@ -73,6 +77,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.Profiler.MutexFraction != 1 {
 		t.Errorf("profiler.mutex_fraction: want 1, got %d", cfg.Profiler.MutexFraction)
 	}
+	if cfg.Postgres.StandbyDSN != nil {
+		t.Errorf("postgres.standby_dsn: want nil default, got %#v", cfg.Postgres.StandbyDSN)
+	}
 }
 
 // ── Flags ─────────────────────────────────────────────────────────────────────
@@ -87,6 +94,8 @@ func TestFlagOverride(t *testing.T) {
 		"--log.level=debug",
 		"--log.json=true",
 		"--postgres.dsn=postgres://user:pass@localhost/db",
+		"--postgres.standby_dsn=postgres://r1/db",
+		"--postgres.standby_dsn=postgres://r2/db",
 		"--postgres.max_open_conns=10",
 		"--postgres.conn_max_lifetime=1h",
 		"--redis.addr=redis:6380",
@@ -107,6 +116,10 @@ func TestFlagOverride(t *testing.T) {
 	if cfg.Postgres.DSN != "postgres://user:pass@localhost/db" {
 		t.Errorf("postgres.dsn: got %q", cfg.Postgres.DSN)
 	}
+	wantStandby := []string{"postgres://r1/db", "postgres://r2/db"}
+	if !slices.Equal(cfg.Postgres.StandbyDSN, wantStandby) {
+		t.Errorf("postgres.standby_dsn: got %#v, want %#v", cfg.Postgres.StandbyDSN, wantStandby)
+	}
 	if cfg.Postgres.MaxOpenConns != 10 {
 		t.Errorf("postgres.max_open_conns: want 10, got %d", cfg.Postgres.MaxOpenConns)
 	}
@@ -126,6 +139,7 @@ func TestFlagOverride(t *testing.T) {
 func TestEnvOverride(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "warn")
 	t.Setenv("POSTGRES_DSN", "postgres://env:secret@host/db")
+	t.Setenv("POSTGRES_STANDBY_DSN", "postgres://e1/db,postgres://e2/db")
 	t.Setenv("POSTGRES_MAX_OPEN_CONNS", "25")
 	t.Setenv("REDIS_ADDR", "envredis:6379")
 	t.Setenv("CONSUL_ADDR", "envconsul:8500")
@@ -150,6 +164,10 @@ func TestEnvOverride(t *testing.T) {
 	if cfg.Postgres.DSN != "postgres://env:secret@host/db" {
 		t.Errorf("POSTGRES_DSN: got %q", cfg.Postgres.DSN)
 	}
+	wantStandby := []string{"postgres://e1/db", "postgres://e2/db"}
+	if !slices.Equal(cfg.Postgres.StandbyDSN, wantStandby) {
+		t.Errorf("POSTGRES_STANDBY_DSN: got %#v, want %#v", cfg.Postgres.StandbyDSN, wantStandby)
+	}
 	if cfg.Postgres.MaxOpenConns != 25 {
 		t.Errorf("POSTGRES_MAX_OPEN_CONNS: want 25, got %d", cfg.Postgres.MaxOpenConns)
 	}
@@ -173,6 +191,10 @@ log:
   json: true
 postgres:
   dsn: postgres://yaml:pass@localhost/db
+  standby_dsn:
+    - postgres://y1/db
+    - "  postgres://y2/db  "
+    - "   "
   max_open_conns: 5
   max_idle_conns: 2
   conn_max_idle_time: 10m
@@ -217,6 +239,10 @@ profiler:
 	}
 	if cfg.Postgres.DSN != "postgres://yaml:pass@localhost/db" {
 		t.Errorf("postgres.dsn: got %q", cfg.Postgres.DSN)
+	}
+	wantStandby := []string{"postgres://y1/db", "postgres://y2/db"}
+	if !slices.Equal(cfg.Postgres.StandbyDSN, wantStandby) {
+		t.Errorf("postgres.standby_dsn: got %#v, want %#v", cfg.Postgres.StandbyDSN, wantStandby)
 	}
 	if cfg.Postgres.MaxOpenConns != 5 {
 		t.Errorf("postgres.max_open_conns: want 5, got %d", cfg.Postgres.MaxOpenConns)
@@ -355,12 +381,56 @@ func TestSectionsIsolation(t *testing.T) {
 	fs := newFlagSet()
 	loader.RegisterFlags(fs)
 
-	for _, name := range []string{"pubsub.url", "redis.addr", "postgres.dsn", "consul.addr"} {
+	for _, name := range []string{"pubsub.url", "redis.addr", "postgres.dsn", "postgres.standby_dsn", "consul.addr"} {
 		if fs.Lookup(name) != nil {
 			t.Errorf("flag %q should not be registered for Sections{Log:true}", name)
 		}
 	}
 	if fs.Lookup("log.level") == nil {
 		t.Error("flag log.level should be registered")
+	}
+}
+
+// ── StringSlice defaults ─────────────────────────────────────────────────────
+
+func TestStringSliceDefaultIsEmpty(t *testing.T) {
+	_ = os.Unsetenv("POSTGRES_STANDBY_DSN")
+
+	loader := appconfig.NewLoader(appconfig.Sections{Postgres: true})
+	fs := newFlagSet()
+	loader.RegisterFlags(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	var cfg testConfig
+	if err := loader.Load(fs, &cfg); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := cfg.Postgres.StandbyDSN; len(got) != 0 {
+		t.Errorf("postgres.standby_dsn unset = %#v, want empty/nil", got)
+	}
+}
+
+func TestCustomStringSliceDefaultIsEmpty(t *testing.T) {
+	type cfgWithSlice struct {
+		Tags []string `mapstructure:"tags"`
+	}
+
+	loader := appconfig.NewLoader(appconfig.Sections{})
+	fs := newFlagSet()
+	loader.RegisterFlags(fs)
+	fs.StringSlice("tags", nil, "tags")
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	var cfg cfgWithSlice
+	if err := loader.Load(fs, &cfg); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Tags) != 0 {
+		t.Errorf("tags unset = %#v, want empty/nil", cfg.Tags)
 	}
 }

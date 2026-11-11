@@ -12,6 +12,7 @@ Dots and hyphens in flag names are replaced with underscores for the env var equ
 |---|---|
 | `log.level` | `LOG_LEVEL` |
 | `postgres.dsn` | `POSTGRES_DSN` |
+| `postgres.standby_dsn` | `POSTGRES_STANDBY_DSN` (comma-separated) |
 | `postgres.max_open_conns` | `POSTGRES_MAX_OPEN_CONNS` |
 | `postgres.max_idle_conns` | `POSTGRES_MAX_IDLE_CONNS` |
 | `postgres.conn_max_idle_time` | `POSTGRES_CONN_MAX_IDLE_TIME` |
@@ -53,6 +54,7 @@ Marked automatically for the enabled sections — bumping this module is enough:
 | Section | Key | Credential name | `_FILE` env |
 |---|---|---|---|
 | `Postgres` | `postgres.dsn` | `postgres.dsn` | `POSTGRES_DSN_FILE` |
+| `Postgres` | `postgres.standby_dsn` | `postgres.standby_dsn` | `POSTGRES_STANDBY_DSN_FILE` |
 | `Redis` | `redis.password` | `redis.password` | `REDIS_PASSWORD_FILE` |
 | `Pubsub` | `pubsub.url` | `pubsub.url` | `PUBSUB_URL_FILE` |
 
@@ -246,6 +248,8 @@ log:
 
 postgres:
   dsn: postgres://user:pass@localhost:5432/webitel?sslmode=disable
+  standby_dsn:
+    - postgres://replica1:5432/webitel?sslmode=disable
   max_open_conns: 25
   max_idle_conns: 5
   conn_max_idle_time: 10m

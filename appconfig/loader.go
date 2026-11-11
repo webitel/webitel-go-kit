@@ -23,8 +23,8 @@ type Loader struct {
 }
 
 // NewLoader creates a Loader for the given sections. The secret keys of the
-// enabled sections (postgres.dsn, redis.password, pubsub.url) are marked
-// automatically; see MarkSecret.
+// enabled sections (postgres.dsn, postgres.standby_dsn, redis.password,
+// pubsub.url) are marked automatically; see MarkSecret.
 func NewLoader(s Sections) *Loader {
 	v := viper.New()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
@@ -32,7 +32,7 @@ func NewLoader(s Sections) *Loader {
 
 	l := &Loader{v: v, sections: s}
 	if s.Postgres {
-		l.MarkSecret("postgres.dsn")
+		l.MarkSecret("postgres.dsn", "postgres.standby_dsn")
 	}
 	if s.Redis {
 		l.MarkSecret("redis.password")
@@ -91,6 +91,7 @@ func (l *Loader) RegisterFlags(fs *pflag.FlagSet) {
 
 	if l.sections.Postgres {
 		fs.String("postgres.dsn", "", "PostgreSQL DSN (required)")
+		fs.StringSlice("postgres.standby_dsn", nil, "Optional PostgreSQL read-replica DSNs")
 		fs.Int("postgres.max_open_conns", 0, "Max open connections to the database (0 = unlimited)")
 		fs.Int("postgres.max_idle_conns", 0, "Max idle connections in the pool (0 = driver default)")
 		fs.Duration("postgres.conn_max_idle_time", 0, "Max time a connection may be idle (0 = no limit)")
@@ -127,9 +128,10 @@ func (l *Loader) Load(fs *pflag.FlagSet, target any) error {
 	// set. Viper only reads pflag values when the flag is Changed; for unchanged
 	// flags it falls through to env → config file → viper default.
 	fs.VisitAll(func(f *pflag.Flag) {
-		if !f.Changed {
-			l.v.SetDefault(f.Name, f.DefValue)
+		if f.Changed {
+			return
 		}
+		l.v.SetDefault(f.Name, flagDefault(f))
 	})
 
 	if err := l.v.BindPFlags(fs); err != nil {
@@ -159,29 +161,102 @@ func (l *Loader) Load(fs *pflag.FlagSet, target any) error {
 // file reloads: secrets are resolved once per process, as systemd
 // credentials are fixed for the lifetime of the unit anyway.
 func (l *Loader) resolveSecrets(fs *pflag.FlagSet, r *secret.Resolver) error {
-	resolve := func(keys []string, fn func(key, v string) (string, error)) error {
-		for _, key := range keys {
-			v := l.v.GetString(key)
-			in := v
-			if !secret.IsRef(v) && !l.isExplicit(fs, key) {
-				// A default literal is a fallback, not a value to
-				// conflict with: let a credential or _FILE replace it.
-				in = ""
+	for _, key := range l.secrets {
+		if isStringSliceKey(fs, key) {
+			if err := l.resolveSecretSlice(fs, r, key); err != nil {
+				return err
 			}
-			out, err := fn(key, in)
-			if err != nil {
-				return fmt.Errorf("appconfig: %w", err)
-			}
-			if out != "" && out != v {
-				l.v.Set(key, out)
-			}
+			continue
+		}
+		if err := l.resolveSecretScalar(fs, r.Value, key); err != nil {
+			return err
+		}
+	}
+	for _, key := range l.secretPaths {
+		if err := l.resolveSecretScalar(fs, r.PathValue, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *Loader) resolveSecretScalar(fs *pflag.FlagSet, fn func(key, v string) (string, error), key string) error {
+	v := l.v.GetString(key)
+	in := v
+	if !secret.IsRef(v) && !l.isExplicit(fs, key) {
+		// A default literal is a fallback, not a value to
+		// conflict with: let a credential or _FILE replace it.
+		in = ""
+	}
+	out, err := fn(key, in)
+	if err != nil {
+		return fmt.Errorf("appconfig: %w", err)
+	}
+	if out != "" && out != v {
+		l.v.Set(key, out)
+	}
+	return nil
+}
+
+func (l *Loader) resolveSecretSlice(fs *pflag.FlagSet, r *secret.Resolver, key string) error {
+	vals := l.v.GetStringSlice(key)
+	if s, ok := l.v.Get(key).(string); ok {
+		vals = splitComma(s)
+	}
+	explicit := l.isExplicit(fs, key)
+
+	if len(vals) == 0 || !explicit {
+		out, err := r.Value(key, "")
+		if err != nil {
+			return fmt.Errorf("appconfig: %w", err)
+		}
+		if out != "" {
+			l.v.Set(key, []string{out})
 		}
 		return nil
 	}
-	if err := resolve(l.secrets, r.Value); err != nil {
-		return err
+
+	resolved := make([]string, 0, len(vals))
+	changed := false
+	for _, raw := range vals {
+		elem := strings.TrimSpace(raw)
+		if elem == "" {
+			changed = true
+			continue
+		}
+		out, err := r.Value(key, elem)
+		if err != nil {
+			return fmt.Errorf("appconfig: %w", err)
+		}
+		if out == "" {
+			changed = true
+			continue
+		}
+		if out != raw {
+			changed = true
+		}
+		resolved = append(resolved, out)
 	}
-	return resolve(l.secretPaths, r.PathValue)
+	if changed {
+		l.v.Set(key, resolved)
+	}
+	return nil
+}
+
+func splitComma(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, ",")
+}
+
+func isStringSliceKey(fs *pflag.FlagSet, key string) bool {
+	f := fs.Lookup(key)
+	if f == nil {
+		return false
+	}
+	_, ok := f.Value.(pflag.SliceValue)
+	return ok
 }
 
 // isExplicit reports whether key was set by a flag, an env var or the config
@@ -219,4 +294,12 @@ func configError(msg string) error { return configErr(msg) }
 func IsConfigError(err error) bool {
 	var e configErr
 	return errors.As(err, &e)
+}
+
+func flagDefault(f *pflag.Flag) any {
+	sv, ok := f.Value.(pflag.SliceValue)
+	if !ok {
+		return f.DefValue
+	}
+	return sv.GetSlice()
 }

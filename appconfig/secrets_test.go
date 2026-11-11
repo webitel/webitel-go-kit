@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,6 +29,7 @@ func clearSecretEnv(t *testing.T) {
 	for _, env := range []string{
 		secret.CredentialsDirEnv,
 		"POSTGRES_DSN", "POSTGRES_DSN_FILE",
+		"POSTGRES_STANDBY_DSN", "POSTGRES_STANDBY_DSN_FILE",
 		"REDIS_PASSWORD", "REDIS_PASSWORD_FILE",
 		"PUBSUB_URL", "PUBSUB_URL_FILE",
 		"SERVICE_SECRET_KEY", "SERVICE_SECRET_KEY_FILE",
@@ -305,5 +307,163 @@ func TestGRPCConnSecretPaths(t *testing.T) {
 	want := []string{"service.conn.key", "service.conn.client.key"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("want %v, got %v", want, got)
+	}
+}
+
+// ── postgres.standby_dsn (string slice secrets) ──────────────────────────────
+
+func TestStandbyDSNSecretFromCredential(t *testing.T) {
+	clearSecretEnv(t)
+	credentialsDir(t, map[string]string{
+		"postgres.standby_dsn": "postgres://replica.example.com/test",
+	})
+
+	_, cfg, err := loadSecrets(t)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	want := []string{"postgres://replica.example.com/test"}
+	if !slices.Equal(cfg.Postgres.StandbyDSN, want) {
+		t.Errorf("postgres.standby_dsn = %#v, want %#v", cfg.Postgres.StandbyDSN, want)
+	}
+}
+
+func TestStandbyDSNSecretReferencesInEnv(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+	}{
+		{name: "comma", env: "cred:r1.dsn,cred:r2.dsn"},
+		{name: "comma and space", env: "cred:r1.dsn, cred:r2.dsn"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearSecretEnv(t)
+			credentialsDir(t, map[string]string{
+				"r1.dsn": "postgres://r1.example.com/test",
+				"r2.dsn": "postgres://r2.example.com/test",
+			})
+			t.Setenv("POSTGRES_STANDBY_DSN", tt.env)
+
+			_, cfg, err := loadSecrets(t)
+			if err != nil {
+				t.Fatalf("Load(%q) error = %v", tt.env, err)
+			}
+
+			want := []string{"postgres://r1.example.com/test", "postgres://r2.example.com/test"}
+			if !slices.Equal(cfg.Postgres.StandbyDSN, want) {
+				t.Errorf("Load(%q) = %#v, want %#v", tt.env, cfg.Postgres.StandbyDSN, want)
+			}
+		})
+	}
+}
+
+func TestCleanStandbyDSNReloadsFromFile(t *testing.T) {
+	clearSecretEnv(t)
+	cfgFile := filepath.Join(t.TempDir(), "config.yml")
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(cfgFile, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("postgres:\n  standby_dsn:\n    - postgres://r1.example.com/test\n")
+
+	loader, cfg, err := loadSecrets(t, "--config_file="+cfgFile)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	wantFirst := []string{"postgres://r1.example.com/test"}
+	if !slices.Equal(cfg.Postgres.StandbyDSN, wantFirst) {
+		t.Fatalf("Load = %#v, want %#v", cfg.Postgres.StandbyDSN, wantFirst)
+	}
+
+	write("postgres:\n  standby_dsn:\n    - postgres://r2.example.com/test\n")
+	if err := loader.Viper().ReadInConfig(); err != nil {
+		t.Fatalf("ReadInConfig: %v", err)
+	}
+	var reloaded secretsConfig
+	if err := loader.Viper().Unmarshal(&reloaded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	wantReload := []string{"postgres://r2.example.com/test"}
+	if !slices.Equal(reloaded.Postgres.StandbyDSN, wantReload) {
+		t.Errorf("reload = %#v, want %#v", reloaded.Postgres.StandbyDSN, wantReload)
+	}
+}
+
+func TestStandbyDSNSecretReferencesInConfigFile(t *testing.T) {
+	clearSecretEnv(t)
+	credentialsDir(t, map[string]string{
+		"replica1.dsn": "postgres://r1.example.com/test",
+		"replica2.dsn": "postgres://r2.example.com/test",
+	})
+
+	yaml := "postgres:\n  standby_dsn:\n    - cred:replica1.dsn\n    - cred:replica2.dsn\n"
+	cfgFile := filepath.Join(t.TempDir(), "config.yml")
+	if err := os.WriteFile(cfgFile, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, cfg, err := loadSecrets(t, "--config_file="+cfgFile)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	want := []string{"postgres://r1.example.com/test", "postgres://r2.example.com/test"}
+	if !slices.Equal(cfg.Postgres.StandbyDSN, want) {
+		t.Errorf("postgres.standby_dsn = %#v, want %#v", cfg.Postgres.StandbyDSN, want)
+	}
+}
+
+func TestStandbyDSNPlainLiteralsStillWork(t *testing.T) {
+	clearSecretEnv(t)
+
+	_, cfg, err := loadSecrets(t,
+		"--postgres.standby_dsn=postgres://r1.example.com/test",
+		"--postgres.standby_dsn=postgres://r2.example.com/test",
+	)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	want := []string{"postgres://r1.example.com/test", "postgres://r2.example.com/test"}
+	if !slices.Equal(cfg.Postgres.StandbyDSN, want) {
+		t.Errorf("postgres.standby_dsn = %#v, want %#v", cfg.Postgres.StandbyDSN, want)
+	}
+}
+
+func TestStandbyDSNPlainShadowingCredentialFails(t *testing.T) {
+	clearSecretEnv(t)
+	credentialsDir(t, map[string]string{
+		"postgres.standby_dsn": "postgres://replica.example.com/new",
+	})
+
+	_, _, err := loadSecrets(t, "--postgres.standby_dsn=postgres://replica.example.com/old")
+	if !errors.Is(err, secret.ErrConflict) {
+		t.Fatalf("want ErrConflict, got %v", err)
+	}
+	if strings.Contains(err.Error(), "replica.example.com") {
+		t.Errorf("error leaks the secret: %v", err)
+	}
+}
+
+func TestStandbyDSNSecretFromEnvFile(t *testing.T) {
+	clearSecretEnv(t)
+	p := filepath.Join(t.TempDir(), "standby_dsn")
+	if err := os.WriteFile(p, []byte("postgres://replica.example.com/test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("POSTGRES_STANDBY_DSN_FILE", p)
+
+	_, cfg, err := loadSecrets(t)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	want := []string{"postgres://replica.example.com/test"}
+	if !slices.Equal(cfg.Postgres.StandbyDSN, want) {
+		t.Errorf("postgres.standby_dsn = %#v, want %#v", cfg.Postgres.StandbyDSN, want)
 	}
 }
