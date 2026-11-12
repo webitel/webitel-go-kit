@@ -5,7 +5,7 @@ go 1.25.3
 require (
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.11.1
-	github.com/webitel/webitel-go-kit/appconfig v0.1.0
+	github.com/webitel/webitel-go-kit/appconfig v0.2.0
 	github.com/webitel/webitel-go-kit/infra/discovery v0.0.0-20251224105820-8d9bcb902593
 	google.golang.org/grpc v1.78.0
 )
