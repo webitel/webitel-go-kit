@@ -62,6 +62,7 @@ on:
           - pkg/hostaddr
           - pkg/interceptors
           - pkg/logging
+          - pkg/presign
           - pkg/safemap
           - pkg/watcher
 
