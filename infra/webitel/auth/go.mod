@@ -7,7 +7,7 @@ require (
 	buf.build/gen/go/webitel/webitel-go/protocolbuffers/go v1.36.12-20260528093848-00aedb783a79.1
 	github.com/stretchr/testify v1.11.1
 	github.com/webitel/webitel-go-kit/infra/discovery v0.0.0-20261023102238-4cb4c8025f0d
-	github.com/webitel/webitel-go-kit/infra/transport v0.1.0
+	github.com/webitel/webitel-go-kit/infra/transport v0.1.1
 	github.com/webitel/webitel-go-kit/pkg/cache v0.0.0-20261106130513-5e2a34b11df1
 	github.com/webitel/webitel-go-kit/pkg/errors v0.1.0
 	google.golang.org/grpc v1.81.0

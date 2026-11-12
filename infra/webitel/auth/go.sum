@@ -38,8 +38,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/webitel/webitel-go-kit/infra/discovery v0.0.0-20261023102238-4cb4c8025f0d h1:BvPP/v+FZxuoRLk9Pgh0kTeLf6UZM3AejaOc0bwJr7k=
 github.com/webitel/webitel-go-kit/infra/discovery v0.0.0-20261023102238-4cb4c8025f0d/go.mod h1:IhUZHd7EYD1pCoX9dNNlkpF+/c3Q6ODgBcluGDMbJrU=
-github.com/webitel/webitel-go-kit/infra/transport v0.1.0 h1:D1NDqrBYSH07STCoF4fZDt46Dh65JYB6t4T/+GpzzBQ=
-github.com/webitel/webitel-go-kit/infra/transport v0.1.0/go.mod h1:ZmjHHOnxe2vVSUHW3yVx/9++EeTd9Wui5mSd7xngfvc=
+github.com/webitel/webitel-go-kit/infra/transport v0.1.1 h1:aVI/V5jmEe8TBvMRxuiVbOM9fQmgr/+gJd8N5fkPIMA=
+github.com/webitel/webitel-go-kit/infra/transport v0.1.1/go.mod h1:kjN/sG2otvopUiUpde6Dq8zVU5MvOFBEE5ZbYLXKvSo=
 github.com/webitel/webitel-go-kit/pkg/cache v0.0.0-20261106130513-5e2a34b11df1 h1:DgXqRxYYL9le4Awifnr8/uWd0tUJxUl2vzmfKoTiUW0=
 github.com/webitel/webitel-go-kit/pkg/cache v0.0.0-20261106130513-5e2a34b11df1/go.mod h1:vQAMlrQDmfwc0mZWutQ5yaxcnhgHwaHF2SgdwMrcJuY=
 github.com/webitel/webitel-go-kit/pkg/errors v0.1.0 h1:0fQuPpEHO/Xll7R7CzarjkRbLv06g32Ltu/XY3SQRCI=
