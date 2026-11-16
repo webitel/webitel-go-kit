@@ -52,6 +52,7 @@ func newRistretto[K comparable, V any](cfg RistrettoConfig, keyFn KeyFunc[K]) (*
 		NumCounters: cfg.NumCounters,
 		MaxCost:     cfg.MaxCost,
 		BufferItems: cfg.BufferItems,
+		IgnoreInternalCost: true,
 	})
 	if err != nil {
 		return nil, err
