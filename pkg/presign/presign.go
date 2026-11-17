@@ -2,11 +2,13 @@ package presign
 
 import "crypto"
 
+// Signer signs data and verifies signatures.
 type Signer interface {
 	Generate(data []byte) (string, error)
 	Valid(plaintext, signature string) bool
 }
 
+// Encryptor encrypts and decrypts identifiers and byte slices.
 type Encryptor interface {
 	DecryptId(key string) (int64, error)
 	DecryptBytes(v []byte) ([]byte, error)
@@ -14,6 +16,7 @@ type Encryptor interface {
 	EncryptBytes(v []byte) ([]byte, error)
 }
 
+// PreSign combines [Signer] and [Encryptor].
 type PreSign interface {
 	Signer
 	Encryptor

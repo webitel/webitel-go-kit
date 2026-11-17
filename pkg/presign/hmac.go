@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"math"
-	"reflect"
 	"sync"
 
 	"github.com/webitel/crypto/cryptobox"
@@ -21,21 +20,21 @@ const (
 	macSigSize = binary.MaxVarintLen16 + sha256.Size
 )
 
+// ErrNoKeyring is returned when a nil keyring is given.
 var ErrNoKeyring = errors.New("presign: keyring is required")
 
+// MAC is a deterministic HMAC-SHA256 [Signer] keyed from a cryptobox keyring.
 type MAC struct {
-	keys  *cryptobox.Keyring
-	cache sync.Map
-}
-
-type macSecret struct {
-	src    cryptobox.Key
-	secret []byte
+	keys    *cryptobox.Keyring
+	mu      sync.RWMutex
+	version uint64
+	secrets map[cryptobox.KID][]byte
 }
 
 var _ Signer = (*MAC)(nil)
 
-func NewMAC() (Signer, error) {
+// NewMAC returns a MAC keyed from the default cryptobox keyring.
+func NewMAC() (*MAC, error) {
 	keys, err := cryptobox.DefaultKeys()
 	if err != nil {
 		return nil, err
@@ -43,20 +42,22 @@ func NewMAC() (Signer, error) {
 	return NewMACKeyring(keys)
 }
 
-func NewMACKeyring(keys *cryptobox.Keyring) (Signer, error) {
+// NewMACKeyring returns a MAC keyed from keys.
+func NewMACKeyring(keys *cryptobox.Keyring) (*MAC, error) {
 	if keys == nil {
 		return nil, ErrNoKeyring
 	}
 	m := &MAC{keys: keys}
-	if _, err := m.secret(context.Background(), keys.Primary()); err != nil {
+	if _, err := m.secret(context.Background(), keys.Version(), keys.Primary()); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
+// Generate returns the hex-encoded signature of data under the primary key.
 func (m *MAC) Generate(data []byte) (string, error) {
 	key := m.keys.Primary()
-	secret, err := m.secret(context.Background(), key)
+	secret, err := m.secret(context.Background(), m.keys.Version(), key)
 	if err != nil {
 		return "", err
 	}
@@ -66,6 +67,7 @@ func (m *MAC) Generate(data []byte) (string, error) {
 	return hex.EncodeToString(sig), nil
 }
 
+// Valid reports whether signature matches plaintext under the key it names.
 func (m *MAC) Valid(plaintext, signature string) bool {
 	sig, err := hex.DecodeString(signature)
 	if err != nil {
@@ -79,19 +81,26 @@ func (m *MAC) Valid(plaintext, signature string) bool {
 	if err != nil {
 		return false
 	}
-	secret, err := m.secret(context.Background(), key)
+	secret, err := m.secret(context.Background(), m.keys.Version(), key)
 	if err != nil {
 		return false
 	}
 	return hmac.Equal(sig[n:], macSum(nil, secret, []byte(plaintext)))
 }
 
-func (m *MAC) secret(ctx context.Context, key cryptobox.Key) ([]byte, error) {
-	if v, ok := m.cache.Load(key.Kid()); ok {
-		if cached := v.(macSecret); sameKey(cached.src, key) {
-			return cached.secret, nil
+// secret returns the derived secret for key. The cache is dropped whenever the
+// keyring version differs from the one the cache was filled under. version must
+// be read before key was fetched from the keyring.
+func (m *MAC) secret(ctx context.Context, version uint64, key cryptobox.Key) ([]byte, error) {
+	m.mu.RLock()
+	if m.version == version {
+		if secret, ok := m.secrets[key.Kid()]; ok {
+			m.mu.RUnlock()
+			return secret, nil
 		}
 	}
+	m.mu.RUnlock()
+
 	material, err := key.KeyMaterial(ctx)
 	if err != nil {
 		return nil, err
@@ -100,12 +109,16 @@ func (m *MAC) secret(ctx context.Context, key cryptobox.Key) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	m.cache.Store(key.Kid(), macSecret{src: key, secret: secret})
-	return secret, nil
-}
 
-func sameKey(a, b cryptobox.Key) bool {
-	return reflect.ValueOf(a).Comparable() && reflect.ValueOf(b).Comparable() && a == b
+	m.mu.Lock()
+	if m.version != version || m.secrets == nil {
+		m.version = version
+		m.secrets = make(map[cryptobox.KID][]byte)
+	}
+	m.secrets[key.Kid()] = secret
+	m.mu.Unlock()
+
+	return secret, nil
 }
 
 func macSum(dst, secret, data []byte) []byte {

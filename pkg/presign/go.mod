@@ -2,7 +2,7 @@ module github.com/webitel/webitel-go-kit/pkg/presign
 
 go 1.25.0
 
-require github.com/webitel/crypto/cryptobox v0.3.0
+require github.com/webitel/crypto/cryptobox v0.3.1
 
 require (
 	github.com/webitel/crypto/env v0.2.0 // indirect
