@@ -16,37 +16,37 @@ func TestParseField(t *testing.T) {
 		{
 			name:      "Standard ascending field without prefix",
 			input:     "created_at",
-			wantField: CreateField("created_at", Asc),
+			wantField: Field{Name: "created_at", Dir: Asc},
 			wantErr:   nil,
 		},
 		{
 			name:      "Ascending field with plus prefix",
 			input:     "+name",
-			wantField: CreateField("name", Asc),
+			wantField: Field{Name: "name", Dir: Asc},
 			wantErr:   nil,
 		},
 		{
 			name:      "Descending field with minus prefix",
 			input:     "-id",
-			wantField: CreateField("id", Desc),
+			wantField: Field{Name: "id", Dir: Desc},
 			wantErr:   nil,
 		},
 		{
 			name:      "Descending field with exclamation prefix",
 			input:     "!status",
-			wantField: CreateField("status", Desc),
+			wantField: Field{Name: "status", Dir: Desc},
 			wantErr:   nil,
 		},
 		{
 			name:      "Field with leading and trailing spaces",
 			input:     "  email  ",
-			wantField: CreateField("email", Asc),
+			wantField: Field{Name: "email", Dir: Asc},
 			wantErr:   nil,
 		},
 		{
 			name:      "Field with prefix and surrounding spaces",
 			input:     " -price ",
-			wantField: CreateField("price", Desc),
+			wantField: Field{Name: "price", Dir: Desc},
 			wantErr:   nil,
 		},
 		{
@@ -105,7 +105,7 @@ func TestParseField(t *testing.T) {
 				var sortErr *Error
 				if errors.As(err, &sortErr) {
 					if sortErr.Field != tt.wantRawField {
-						t.Errorf("InvalidSortError.Field = %q, want %q", sortErr.Field, tt.wantRawField)
+						t.Errorf("Error.Field = %q, want %q", sortErr.Field, tt.wantRawField)
 					}
 				} else {
 					t.Errorf("expected error to be of type *InvalidSortError, got %T", err)

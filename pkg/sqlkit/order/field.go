@@ -7,10 +7,6 @@ type Field struct {
 	Dir  Direction
 }
 
-func CreateField(name string, direction Direction) Field {
-	return Field{Name: name, Dir: normalize(direction)}
-}
-
 func ParseField(raw string) (Field, error) {
 	s := strings.TrimSpace(raw)
 	dir := Asc

@@ -11,7 +11,7 @@ func (o Clause) SQL() string { return o.Expr + " " + string(o.Dir) }
 
 type Clauses []Clause
 
-func (o Clauses) Clauses() []string {
+func (o Clauses) Strings() []string {
 	out := make([]string, len(o))
 
 	for i := range o {
@@ -21,4 +21,4 @@ func (o Clauses) Clauses() []string {
 	return out
 }
 
-func (o Clauses) SQL() string { return strings.Join(o.Clauses(), ", ") }
+func (o Clauses) SQL() string { return strings.Join(o.Strings(), ", ") }

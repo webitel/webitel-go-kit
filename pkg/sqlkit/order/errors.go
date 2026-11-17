@@ -21,8 +21,8 @@ func (e *Error) Unwrap() error { return e.Err }
 
 func (e *Error) Error() string {
 	if e.Field == "" {
-		return fmt.Sprintf("order: %s", e.Err.Error())
+		return fmt.Sprintf("order: %v", e.Err)
 	}
 
-	return fmt.Sprintf("order: %q %s", e.Field, e.Err.Error())
+	return fmt.Sprintf("order: %q %v", e.Field, e.Err)
 }

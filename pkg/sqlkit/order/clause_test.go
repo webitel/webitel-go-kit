@@ -57,7 +57,7 @@ func TestClause_SQL(t *testing.T) {
 	}
 }
 
-func TestClauses_Clauses(t *testing.T) {
+func TestClauses_Strings(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -91,9 +91,9 @@ func TestClauses_Clauses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tt.input.Clauses()
+			got := tt.input.Strings()
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Clauses.Clauses() got: %v, want: %v", got, tt.want)
+				t.Errorf("Clauses.Strings() got: %v, want: %v", got, tt.want)
 			}
 		})
 	}

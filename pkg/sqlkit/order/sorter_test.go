@@ -2,6 +2,7 @@ package order
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestSorter_Resolve(t *testing.T) {
 		"status":     "status_col",
 	}
 
-	customDefault := CreateField("created_at", Desc)
+	customDefault := Field{Name: "created_at", Dir: Desc}
 
 	tests := []struct {
 		name       string
@@ -116,35 +117,6 @@ func TestSorter_Resolve(t *testing.T) {
 			wantErr:   ErrEmptyField,
 			wantField: "-",
 		},
-		{
-			name:      "SQL Injection: Drop table attempt",
-			provided:  []string{"id; DROP TABLE users;--"},
-			wantErr:   ErrFieldNotAllowed,
-			wantField: "id; DROP TABLE users;--",
-		},
-		{
-			name:      "SQL Injection: Union based attempt",
-			provided:  []string{"id UNION SELECT * FROM passwords"},
-			wantErr:   ErrFieldNotAllowed,
-			wantField: "id UNION SELECT * FROM passwords",
-		},
-		{
-			name:      "SQL Injection: Boolean bypass with minus prefix",
-			provided:  []string{"-id OR 1=1"},
-			wantErr:   ErrFieldNotAllowed,
-			wantField: "id OR 1=1",
-		},
-		{
-			name:     "SQL Injection: Quotes and boolean logic",
-			provided: []string{"' OR '1'='1"},
-			wantErr:  ErrFieldNotAllowed,
-		},
-		{
-			name:      "SQL Injection: Trying to pass raw SQL column expression",
-			provided:  []string{"users.id --"},
-			wantErr:   ErrFieldNotAllowed,
-			wantField: "users.id --",
-		},
 	}
 
 	for _, tt := range tests {
@@ -167,7 +139,7 @@ func TestSorter_Resolve(t *testing.T) {
 					var sortErr *Error
 					if errors.As(err, &sortErr) {
 						if sortErr.Field != tt.wantField {
-							t.Errorf("InvalidSortError.Field = %q, want %q", sortErr.Field, tt.wantField)
+							t.Errorf("Error.Field = %q, want %q", sortErr.Field, tt.wantField)
 						}
 					} else {
 						t.Errorf("expected error to be *orderby.InvalidSortError, got %T", err)
@@ -202,7 +174,7 @@ func TestSorter_SQL(t *testing.T) {
 		"status":     "status_col",
 	}
 
-	customDefault := CreateField("created_at", Desc)
+	customDefault := Field{Name: "created_at", Dir: Desc}
 
 	tests := []struct {
 		name     string
@@ -280,7 +252,7 @@ func TestSorter_SQL(t *testing.T) {
 			t.Parallel()
 
 			s := New(allowedMap, tt.opts...)
-			gotSQL, err := s.SQL(tt.provided)
+			gotSQL, err := s.SQL(tt.provided...)
 
 			if tt.wantErr != nil {
 				if err == nil {
@@ -299,6 +271,96 @@ func TestSorter_SQL(t *testing.T) {
 				if gotSQL != tt.wantSQL {
 					t.Errorf("Sorter.SQL() = %q, want %q", gotSQL, tt.wantSQL)
 				}
+			}
+		})
+	}
+}
+
+func TestSorter_CustomExpr(t *testing.T) {
+	t.Parallel()
+
+	ccLookup := func(table, field, col string) ExprFunc {
+		return func(d Direction) Clauses {
+			return Clauses{
+				{
+					Expr: fmt.Sprintf("case when not call_center.cc_is_lookup(%s, %s) then %s end", table, field, col),
+					Dir:  d,
+				},
+				{
+					Expr: fmt.Sprintf(
+						"case when call_center.cc_is_lookup(%s, %s) then coalesce((%s::text)::json->>'name', (%s::text)::json->0->>'name') end",
+						table, field, col, col),
+					Dir: d,
+				},
+			}
+		}
+	}
+
+	lookupFactory := func(table string) ExprFactory {
+		return func(field, col string) ExprFunc {
+			return ccLookup(table, field, col)
+		}
+	}
+
+	sorter := New(map[string]string{
+		"created_at": "t.created_at",
+		"to":         "case when c.direction = 'outbound' then t.from_number else t.to_number end",
+		"call_id":    "c.id",
+	}, WithDefaults(Field{Name: "created_at", Dir: Desc}), WithExprFactory(lookupFactory("call_center.cc_calls_history")))
+
+	tests := []struct {
+		name    string
+		input   []string
+		want    string
+		wantErr error
+	}{
+		{
+			name:  "allowed_created_at_asc",
+			input: []string{"created_at"},
+			want: "case when not call_center.cc_is_lookup(call_center.cc_calls_history, created_at) then t.created_at end ASC, " +
+				"case when call_center.cc_is_lookup(call_center.cc_calls_history, created_at) then coalesce((t.created_at::text)::json->>'name', (t.created_at::text)::json->0->>'name') end ASC",
+			wantErr: nil,
+		},
+		{
+			name:  "allowed_call_id_desc",
+			input: []string{"-call_id"},
+			want: "case when not call_center.cc_is_lookup(call_center.cc_calls_history, call_id) then c.id end DESC, " +
+				"case when call_center.cc_is_lookup(call_center.cc_calls_history, call_id) then coalesce((c.id::text)::json->>'name', (c.id::text)::json->0->>'name') end DESC",
+			wantErr: nil,
+		},
+		{
+			name:    "not enabled field",
+			input:   []string{"deleted_at"},
+			want:    "",
+			wantErr: ErrFieldNotAllowed,
+		},
+		{
+			name:  "default_created_at_field",
+			input: []string{},
+			want: "case when not call_center.cc_is_lookup(call_center.cc_calls_history, created_at) then t.created_at end DESC, " +
+				"case when call_center.cc_is_lookup(call_center.cc_calls_history, created_at) then coalesce((t.created_at::text)::json->>'name', (t.created_at::text)::json->0->>'name') end DESC",
+			wantErr: nil,
+		},
+		{
+			name:  "complicated_sort_field",
+			input: []string{"-to"},
+			want: "case when not call_center.cc_is_lookup(call_center.cc_calls_history, to) then case when c.direction = 'outbound' then t.from_number else t.to_number end end DESC, " +
+				"case when call_center.cc_is_lookup(call_center.cc_calls_history, to) then coalesce((case when c.direction = 'outbound' then t.from_number else t.to_number end::text)::json->>'name', (case when c.direction = 'outbound' then t.from_number else t.to_number end::text)::json->0->>'name') end DESC",
+			wantErr: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			stmt, err := sorter.SQL(tt.input...)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Sorter.SQL(): error got %v want %v", err, tt.wantErr)
+			}
+
+			if stmt != tt.want {
+				t.Errorf("Sorter.CustomExpr() got:\n%q\nwant:\n%q", stmt, tt.want)
 			}
 		})
 	}

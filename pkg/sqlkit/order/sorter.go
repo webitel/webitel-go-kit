@@ -1,26 +1,36 @@
 package order
 
 import (
-	"maps"
 	"slices"
 	"strings"
 )
 
 type Option func(*Sorter)
 
-func WithDefaults(f ...Field) Option { return func(s *Sorter) { s.defaults = slices.Clone(f) } }
-func WithMaxFields(n int) Option     { return func(s *Sorter) { s.maxFields = n } }
+func WithDefaults(f ...Field) Option       { return func(s *Sorter) { s.defaults = slices.Clone(f) } }
+func WithMaxFields(n int) Option           { return func(s *Sorter) { s.maxFields = n } }
+func WithExprFactory(f ExprFactory) Option { return func(s *Sorter) { s.exprFactory = f } }
 
 type Sorter struct {
-	allowed   map[string]string
-	defaults  []Field
-	maxFields int
+	allowed     map[string]ExprFunc
+	defaults    []Field
+	maxFields   int
+	exprFactory ExprFactory
 }
 
 func New(allowed map[string]string, opts ...Option) *Sorter {
-	s := &Sorter{allowed: maps.Clone(allowed), maxFields: 3}
+	s := &Sorter{
+		allowed:     make(map[string]ExprFunc, len(allowed)),
+		maxFields:   3,
+		exprFactory: func(_, expr string) ExprFunc { return Expr(expr) },
+	}
+
 	for _, o := range opts {
 		o(s)
+	}
+
+	for f, expr := range allowed {
+		s.allowed[f] = s.exprFactory(f, expr)
 	}
 
 	return s
@@ -57,24 +67,21 @@ func (s *Sorter) Resolve(provided []string) (Clauses, error) {
 		fields = s.defaults
 	}
 
-	orders := make([]Clause, 0, len(fields)+1)
+	clauses := make(Clauses, 0, len(fields))
 
 	for _, f := range fields {
-		expr, ok := s.allowed[f.Name]
+		expand, ok := s.allowed[f.Name]
 		if !ok {
 			return nil, &Error{Field: f.Name, Err: ErrFieldNotAllowed}
 		}
 
-		orders = append(orders, Clause{
-			Expr: expr,
-			Dir:  f.Dir,
-		})
+		clauses = append(clauses, expand(f.Dir)...)
 	}
 
-	return orders, nil
+	return clauses, nil
 }
 
-func (s *Sorter) SQL(provided []string) (string, error) {
+func (s *Sorter) SQL(provided ...string) (string, error) {
 	orders, err := s.Resolve(provided)
 	if err != nil {
 		return "", err

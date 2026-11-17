@@ -3,7 +3,6 @@ package order_test
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/webitel/webitel-go-kit/pkg/sqlkit/order"
 )
@@ -15,7 +14,7 @@ func newSorter() *order.Sorter {
 			"id":      "o.id",
 			"total":   "o.total_amount",
 		},
-		order.WithDefaults(order.CreateField("created", order.Desc)),
+		order.WithDefaults(order.Field{Name: "created", Dir: order.Desc}),
 		order.WithMaxFields(2),
 	)
 }
@@ -106,7 +105,7 @@ func ExampleSorter_Resolve_errors() {
 }
 
 func ExampleSorter_SQL() {
-	clause, err := newSorter().SQL([]string{"-total", "id"})
+	clause, err := newSorter().SQL("-total", "id")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -118,41 +117,31 @@ func ExampleSorter_SQL() {
 	// SELECT * FROM orders o ORDER BY o.total_amount DESC, o.id ASC
 }
 
-// query is a minimal stand-in for a query builder.
-type query struct{ orderBy []string }
-
-func ExampleApply() {
-	// An ApplyFunc adapts the resolved clauses to any builder type.
-	orderBy := func(q *query, cs order.Clauses) *query {
-		q.orderBy = append(q.orderBy, cs.Clauses()...)
-
-		return q
+func ExampleSorter_exprFactory() {
+	multiClauseFactory := func(field, col string) order.ExprFunc {
+		return func(d order.Direction) order.Clauses {
+			return order.Clauses{
+				{Expr: col + " IS NULL", Dir: order.Asc},
+				{Expr: col, Dir: d},
+			}
+		}
 	}
 
-	q, err := order.Apply(newSorter(), &query{}, []string{"!total", "+id"}, orderBy)
+	s := order.New(
+		map[string]string{
+			"status": "o.status",
+		},
+		order.WithExprFactory(multiClauseFactory),
+	)
+
+	clause, err := s.SQL("status")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	fmt.Println(strings.Join(q.orderBy, " | "))
+	fmt.Println(clause)
 
 	// Output:
-	// o.total_amount DESC | o.id ASC
-}
-
-func ExampleApply_invalid() {
-	orderBy := func(q *query, cs order.Clauses) *query { return q }
-
-	q := &query{}
-
-	// On error the original query is returned unchanged.
-	got, err := order.Apply(newSorter(), q, []string{"unknown"}, orderBy)
-
-	fmt.Println(err)
-	fmt.Println(got == q)
-
-	// Output:
-	// order: "unknown" field not allowed
-	// true
+	// o.status IS NULL ASC, o.status ASC
 }
