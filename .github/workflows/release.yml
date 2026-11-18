@@ -65,6 +65,7 @@ on:
           - pkg/presign
           - pkg/safemap
           - pkg/watcher
+          - pkg/sqlkit
 
       bump:
         description: 'How to bump the version'
