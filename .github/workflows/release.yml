@@ -55,6 +55,7 @@ on:
           - infra/sqldb
           - infra/transport
           - infra/webitel/auth
+          - infra/webitel/auth/fx
           - pkg/cache
           - pkg/errors
           - pkg/etag
