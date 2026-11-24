@@ -24,7 +24,7 @@ type testLogger struct {
 func (l *testLogger) Info(msg string, args ...any) { l.t.Logf("[INFO] "+msg, args...) }
 func (l *testLogger) Warn(msg string, args ...any) { l.t.Logf("[WARN] "+msg, args...) }
 func (l *testLogger) Error(msg string, args ...any) {
-	l.t.Logf("[ERROR]:", "err", msg)
+	l.t.Logf("[ERROR] "+msg, args...)
 }
 
 // TestConsulE2E tests the Consul discovery provider in an end-to-end scenario.
