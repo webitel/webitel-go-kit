@@ -135,6 +135,39 @@ if kv, ok := provider.(discovery.KVProvider); ok {
 }
 ```
 
+### 4. Consul cluster: CAS, sessions, node-meta (Consul only)
+
+`consul.Cluster` is a handle to one Consul cluster reachable through several servers.
+
+Failover:
+* A call that fails on one server (network error, 5xx) moves on to the next; the server that answered becomes current.
+* A 4xx is an answer and is returned as is. So is a lock call with a session that is gone, which Consul answers with 500 `invalid session`: it returns `ErrSessionNotFound`.
+* A write that is not safe to repeat (`KVCAS`, `KVDeleteCAS`, `Release`) is not sent to another server once its request has been written: the first server may have applied it and lost the response, and the retry would report a lost race. The error matches `ErrOutcomeUnknown`; re-read and decide. Reads, `Acquire`, and the calls on sessions fail over.
+* A call that fails everywhere returns the `*EndpointError` of every attempt, joined, so the caller can classify each.
+
+Like the rest of the package, `NewCluster` uses `api.DefaultConfig`, so `CONSUL_HTTP_TOKEN(_FILE)`, `CONSUL_NAMESPACE` and `CONSUL_PARTITION` apply.
+
+```go
+cluster, _ := consul.NewCluster([]string{"10.0.0.1:8500", "10.0.0.2:8500"},
+    consul.WithRequestTimeout(3*time.Second))
+
+// KV with ModifyIndex and compare-and-swap; index 0 means "create only".
+e, err := cluster.KVGet(ctx, "state")          // consul.ErrKeyNotFound when missing
+ok, err := cluster.KVCAS(ctx, "state", next, e.ModifyIndex)
+list, err := cluster.KVList(ctx, "journal/")
+ok, err = cluster.KVDeleteCAS(ctx, "journal/1", list[0].ModifyIndex)
+
+// Session without health checks (not even serfHealth); TTL is required.
+sid, _ := cluster.CreateSession(ctx, consul.SessionConfig{Name: "op", TTL: 15*time.Second, LockDelay: 15*time.Second})
+got, _ := cluster.Acquire(ctx, "lock", []byte("owner"), sid)
+_ = cluster.RenewSession(ctx, sid)             // consul.ErrSessionNotFound when expired
+_, _ = cluster.Release(ctx, "lock", []byte("owner"), sid)
+
+// Passing instances with a tag on nodes with given node_meta, and a prepared query.
+nodes, _ := cluster.ServiceNodes(ctx, "api", consul.ServiceQuery{PassingOnly: true, Tag: "http", NodeMeta: map[string]string{"dc": "b"}})
+nodes, _ = cluster.ExecuteQuery(ctx, "webitel-api")
+```
+
 ---
 
 ## 🧪 Testing
