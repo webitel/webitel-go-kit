@@ -7,30 +7,38 @@ import (
 
 type Option func(*Sorter)
 
-func WithDefaults(f ...Field) Option       { return func(s *Sorter) { s.defaults = slices.Clone(f) } }
-func WithMaxFields(n int) Option           { return func(s *Sorter) { s.maxFields = n } }
-func WithExprFactory(f ExprFactory) Option { return func(s *Sorter) { s.exprFactory = f } }
+func WithDefaults(f ...Field) Option { return func(s *Sorter) { s.defaults = slices.Clone(f) } }
 
-type Sorter struct {
-	allowed     map[string]ExprFunc
-	defaults    []Field
-	maxFields   int
-	exprFactory ExprFactory
+func WithMaxFields(n int) Option { return func(s *Sorter) { s.maxFields = n } }
+
+func Columns(raw map[string]string) map[string]ExprFunc {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	result := make(map[string]ExprFunc, len(raw))
+
+	for k, v := range raw {
+		result[k] = Expr(v)
+	}
+
+	return result
 }
 
-func New(allowed map[string]string, opts ...Option) *Sorter {
+type Sorter struct {
+	allowed   map[string]ExprFunc
+	defaults  []Field
+	maxFields int
+}
+
+func New(allowed map[string]ExprFunc, opts ...Option) *Sorter {
 	s := &Sorter{
-		allowed:     make(map[string]ExprFunc, len(allowed)),
-		maxFields:   3,
-		exprFactory: func(_, expr string) ExprFunc { return Expr(expr) },
+		allowed:   allowed,
+		maxFields: 3,
 	}
 
 	for _, o := range opts {
 		o(s)
-	}
-
-	for f, expr := range allowed {
-		s.allowed[f] = s.exprFactory(f, expr)
 	}
 
 	return s

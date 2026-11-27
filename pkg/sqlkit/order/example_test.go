@@ -8,12 +8,12 @@ import (
 )
 
 func newSorter() *order.Sorter {
-	return order.New(
-		map[string]string{
-			"created": "o.created_at",
-			"id":      "o.id",
-			"total":   "o.total_amount",
-		},
+	return order.New(order.Columns(map[string]string{
+		"created": "o.created_at",
+		"id":      "o.id",
+		"total":   "o.total_amount",
+	}),
+
 		order.WithDefaults(order.Field{Name: "created", Dir: order.Desc}),
 		order.WithMaxFields(2),
 	)
@@ -117,31 +117,35 @@ func ExampleSorter_SQL() {
 	// SELECT * FROM orders o ORDER BY o.total_amount DESC, o.id ASC
 }
 
-func ExampleSorter_exprFactory() {
-	multiClauseFactory := func(field, col string) order.ExprFunc {
-		return func(d order.Direction) order.Clauses {
-			return order.Clauses{
-				{Expr: col + " IS NULL", Dir: order.Asc},
-				{Expr: col, Dir: d},
-			}
+func ExampleSorter_customExpr() {
+	allowed := order.Columns(map[string]string{
+		"created": "o.created_at",
+		"id":      "o.id",
+	})
+
+	allowed["total"] = func(d order.Direction) order.Clauses {
+		return order.Clauses{
+			{
+				Expr: "CASE WHEN o.total_amount IS NULL THEN 1 ELSE 0 END",
+				Dir:  order.Asc,
+			},
+			{
+				Expr: "o.total_amount",
+				Dir:  d,
+			},
 		}
 	}
 
-	s := order.New(
-		map[string]string{
-			"status": "o.status",
-		},
-		order.WithExprFactory(multiClauseFactory),
-	)
+	s := order.New(allowed)
 
-	clause, err := s.SQL([]string{"status"})
+	sqlClause, err := s.SQL([]string{"-total", "id"})
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	fmt.Println(clause)
+	fmt.Println("SELECT * FROM orders o ORDER BY " + sqlClause)
 
 	// Output:
-	// o.status IS NULL ASC, o.status ASC
+	// SELECT * FROM orders o ORDER BY CASE WHEN o.total_amount IS NULL THEN 1 ELSE 0 END ASC, o.total_amount DESC, o.id ASC
 }

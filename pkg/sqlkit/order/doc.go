@@ -21,13 +21,13 @@
 // # Field names and expressions
 //
 // Names supplied by the client are never placed into SQL directly. A [Sorter]
-// is created with an allow-list that maps public field names to trusted SQL
-// expressions:
+// is created with an allow-list that maps public field names to [ExprFunc]
+// builders producing trusted SQL expressions:
 //
-//	sorter := order.New(map[string]string{
+//	sorter := order.New(order.Columns(map[string]string{
 //	    "created": "o.created_at",
 //	    "id":      "o.id",
-//	})
+//	}))
 //
 // A name that is not in the list is rejected with [ErrFieldNotAllowed].
 // Directions are normalized to [Asc] or [Desc], so nothing else can end up in
@@ -40,8 +40,9 @@
 // the configured maximum ([ErrTooManyFields], see [WithMaxFields]).
 // If the input contains no fields, the defaults from [WithDefaults] are used.
 //
-// Custom or multi-expression SQL mappings per field can be achieved using
-// [ExprFactory] configured via [WithExprFactory].
+// Custom or multi-expression SQL mappings per field can be defined directly in
+// the allow-list map using [ExprFunc] (either alongside [Columns] or via a
+// custom helper).
 //
 // All validation failures are reported as *[Error], which supports
 // errors.Is against the Err* sentinels and errors.As for access to the
