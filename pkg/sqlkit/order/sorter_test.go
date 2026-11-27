@@ -3,6 +3,7 @@ package order
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -123,7 +124,7 @@ func TestSorter_Resolve(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			s := New(allowedMap, tt.opts...)
+			s := New(Columns(allowedMap), tt.opts...)
 			orders, err := s.Resolve(tt.provided)
 
 			if tt.wantErr != nil {
@@ -251,7 +252,7 @@ func TestSorter_SQL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			s := New(allowedMap, tt.opts...)
+			s := New(Columns(allowedMap), tt.opts...)
 			gotSQL, err := s.SQL(tt.provided)
 
 			if tt.wantErr != nil {
@@ -296,17 +297,16 @@ func TestSorter_CustomExpr(t *testing.T) {
 		}
 	}
 
-	lookupFactory := func(table string) ExprFactory {
-		return func(field, col string) ExprFunc {
-			return ccLookup(table, field, col)
-		}
-	}
+	const table = "call_center.cc_calls_history"
 
-	sorter := New(map[string]string{
-		"created_at": "t.created_at",
-		"to":         "case when c.direction = 'outbound' then t.from_number else t.to_number end",
-		"call_id":    "c.id",
-	}, WithDefaults(Field{Name: "created_at", Dir: Desc}), WithExprFactory(lookupFactory("call_center.cc_calls_history")))
+	sorter := New(
+		map[string]ExprFunc{
+			"created_at": ccLookup(table, "created_at", "t.created_at"),
+			"to":         ccLookup(table, "to", "case when c.direction = 'outbound' then t.from_number else t.to_number end"),
+			"call_id":    ccLookup(table, "call_id", "c.id"),
+		},
+		WithDefaults(Field{Name: "created_at", Dir: Desc}),
+	)
 
 	tests := []struct {
 		name    string
@@ -361,6 +361,79 @@ func TestSorter_CustomExpr(t *testing.T) {
 
 			if stmt != tt.want {
 				t.Errorf("Sorter.CustomExpr() got:\n%q\nwant:\n%q", stmt, tt.want)
+			}
+		})
+	}
+}
+
+func TestColumns(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input map[string]string
+		dir   Direction
+		want  map[string]Clauses
+	}{
+		{
+			name:  "empty_columns",
+			input: map[string]string{},
+			dir:   Asc,
+			want:  nil,
+		},
+		{
+			name:  "nil_columns",
+			input: nil,
+			dir:   Asc,
+			want:  nil,
+		},
+		{
+			name: "with_columns",
+			input: map[string]string{
+				"created_at": "created_at",
+				"updated_at": "updated_at",
+				"from":       `from->>'name'`,
+			},
+			dir: Asc,
+			want: map[string]Clauses{
+				"created_at": {{Expr: "created_at", Dir: Asc}},
+				"updated_at": {{Expr: "updated_at", Dir: Asc}},
+				"from":       {{Expr: `from->>'name'`, Dir: Asc}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := Columns(tt.input)
+
+			if tt.want == nil {
+				if got != nil {
+					t.Fatalf("Columns(%#v) = %#v, want nil", tt.input, got)
+				}
+				return
+			}
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("len(Columns(%#v)) = %d, want %d", tt.input, len(got), len(tt.want))
+			}
+
+			for key, wantClauses := range tt.want {
+				fn, ok := got[key]
+				if !ok {
+					t.Errorf("Columns(%#v) missing key %q", tt.input, key)
+					continue
+				}
+				if fn == nil {
+					t.Errorf("Columns(%#v)[%q] is nil", tt.input, key)
+					continue
+				}
+
+				if gotClauses := fn(tt.dir); !reflect.DeepEqual(gotClauses, wantClauses) {
+					t.Errorf("Columns(%#v)[%q](%v) = %#v, want %#v", tt.input, key, tt.dir, gotClauses, wantClauses)
+				}
 			}
 		})
 	}
